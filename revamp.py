@@ -35,7 +35,7 @@ SAMPLE_MIN_INTERVAL_SEC = 0.1
 CSV_FLUSH_EVERY_ROWS = 25
 MAX_SAMPLE_QUEUE = 4000
 
-BATCH_SIZE = 10 
+BATCH_SIZE = 20 
 TELEMETRY_BATCH =[]
 
 http = requests.Session()
@@ -333,6 +333,11 @@ def post_telemetry_sample(header, pkt):
         "drs": drs,
         "playerCarIndex": player_idx,
     }
+
+    safe_enqueue(("/telemetry/latest", {
+    "sessionId": SESSION_ID,
+    "latestTelemetry": sample_body
+    }, 0))  # no retries, it's real-time
 
     # Add to batch
     TELEMETRY_BATCH.append(sample_body)
