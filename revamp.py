@@ -43,6 +43,21 @@ PARTICIPANTS_PACKET_ID = 4
 PLAYER_NAME = os.getenv("PLAYER_NAME", getpass.getuser())
 PLAYER_NAME_DETECTED = False
 
+TRACK_NAME = None
+TRACK_ID = None
+SESSION_TYPE = None
+
+def extract_track_info_from_session_packet(pkt):
+    track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
+    track_name = None
+
+    for field in ("track", "track_name", "m_track", "m_trackName", "circuit", "circuit_name"):
+        raw = get_attr(pkt, field, default=None)
+        track_name = decode_text(raw)
+        if track_name:
+            break
+
+    return track_id, track_name
 
 def decode_text(value):
     if value is None:
@@ -362,7 +377,10 @@ def create_player_and_session():
                 f"{API_BASE}/sessions",
                 json={
                     "playerId": PLAYER_ID,
-                    "playerName": PLAYER_NAME
+                    "playerName": PLAYER_NAME,
+                    "trackName": TRACK_NAME,
+                    "trackId": TRACK_ID,
+                    "sessionType": SESSION_TYPE,
                 },
                 timeout=REQUEST_TIMEOUT,
             )
@@ -390,11 +408,21 @@ def get_lap_array(pkt):
 
 
 def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
+    global TRACK_ID, TRACK_NAME, SESSION_TYPE
+
     if pid != SESSION_PACKET_ID or pkt_cls is None:
         return race_active, race_started_at
 
     sess_pkt = pkt_cls.from_buffer_copy(data)
     session_type = int(get_attr(sess_pkt, "session_type", "m_sessionType", default=0) or 0)
+    SESSION_TYPE = session_type
+
+    track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
+    if track_id is not None:
+        TRACK_ID = track_id
+    if track_name:
+        TRACK_NAME = track_name
+
     is_race_session = session_type in RACE_SESSION_TYPES
 
     if is_race_session and not race_active:
@@ -456,6 +484,8 @@ def update_lap_state_from_packet(header, pkt):
                     {
                         "lapNumber": CURRENT_LAP_NUM,
                         "lapTimeMs": last_lap_time,
+                        "trackName": TRACK_NAME,
+                        "trackId": TRACK_ID,
                     },
                     3,
                 ))
