@@ -35,6 +35,19 @@ export default function LiveTelemetry() {
   const [speedPoints, setSpeedPoints] = useState([]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const handleUnhandledRejection = (event) => {
+    if (
+      event.reason?.name === "AbortError" ||
+      event.reason?.message?.includes("signal is aborted") ||
+      event.reason?.message?.includes("user aborted")
+    ) {
+      event.preventDefault();
+    }
+  };
+  window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
     const q = query(
       collection(db, "sessions"),
       orderBy("startedAt", "desc"),
@@ -44,6 +57,7 @@ export default function LiveTelemetry() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
+        if (!isMounted) return;
         if (snapshot.empty) {
           setError("No sessions found.");
           setTelemetry(null);
@@ -80,12 +94,18 @@ export default function LiveTelemetry() {
         });
       },
       (err) => {
+        if (!isMounted) return;
+        if (err.name === "AbortError" || err.code === "cancelled") return;
         console.error("Firestore listener error:", err);
         setError(err.message);
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+      unsubscribe();
+    };
   }, []);
 
   const chartData = useMemo(() => {
