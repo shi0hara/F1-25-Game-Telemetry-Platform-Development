@@ -39,7 +39,92 @@ CSV_FLUSH_EVERY_ROWS = 25
 BATCH_SIZE = 20
 TELEMETRY_BATCH = []
 
+PARTICIPANTS_PACKET_ID = 4
 PLAYER_NAME = os.getenv("PLAYER_NAME", getpass.getuser())
+PLAYER_NAME_DETECTED = False
+
+
+def decode_text(value):
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="ignore").strip("\x00 ").strip() or None
+    if isinstance(value, str):
+        s = value.strip("\x00 ").strip()
+        return s or None
+    try:
+        return bytes(value).decode("utf-8", errors="ignore").strip("\x00 ").strip() or None
+    except Exception:
+        s = str(value).strip("\x00 ").strip()
+        return s or None
+
+
+def extract_player_name_from_participants(header, pkt):
+    arr = get_attr(pkt, "participants", "m_participants")
+    if arr is None or len(arr) == 0:
+        return None
+
+    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    if not (0 <= player_idx < len(arr)):
+        player_idx = 0
+
+    participant = arr[player_idx]
+
+    for field in ("name", "m_name", "driver_name", "m_driverName"):
+        raw = get_attr(participant, field, default=None)
+        name = decode_text(raw)
+        if name:
+            return name
+
+    return None
+
+
+def sniff_player_name(sock, timeout_sec=10.0):
+    global PLAYER_NAME_DETECTED
+
+    end_at = time.time() + timeout_sec
+    old_timeout = sock.gettimeout()
+    sock.settimeout(0.5)
+
+    try:
+        while time.time() < end_at and not PLAYER_NAME_DETECTED:
+            try:
+                data, _ = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+
+            header_size = ctypes.sizeof(PacketHeader)
+            if len(data) < header_size:
+                continue
+
+            try:
+                header = PacketHeader.from_buffer_copy(data[:header_size])
+            except Exception:
+                continue
+
+            pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
+            if pid != PARTICIPANTS_PACKET_ID:
+                continue
+
+            pkt_cls = pick_packet_class(header)
+            if pkt_cls is None:
+                continue
+
+            try:
+                pkt = pkt_cls.from_buffer_copy(data)
+            except Exception:
+                continue
+
+            name = extract_player_name_from_participants(header, pkt)
+            if name:
+                PLAYER_NAME_DETECTED = True
+                return name
+    finally:
+        sock.settimeout(old_timeout)
+
+    return None
 
 http = requests.Session()
 retries = Retry(
@@ -254,7 +339,7 @@ def queue_worker(qobj, label):
 
 
 def create_player_and_session():
-    global PLAYER_ID, SESSION_ID
+    global PLAYER_ID, SESSION_ID, PLAYER_NAME
 
     while not STOP_EVENT.is_set():
         try:
@@ -281,7 +366,6 @@ def create_player_and_session():
         except Exception as e:
             print(f"API not ready, retrying in 5s... ({e})")
             time.sleep(5)
-
 
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
@@ -482,6 +566,19 @@ def post_telemetry_sample(header, pkt):
 
 
 def main():
+    global PLAYER_NAME
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((UDP_IP, UDP_PORT))
+    sock.settimeout(SOCKET_TIMEOUT_SEC)
+
+    detected_name = sniff_player_name(sock, timeout_sec=10.0)
+    if detected_name:
+        PLAYER_NAME = detected_name
+        print("Detected in-game player name:", PLAYER_NAME)
+    else:
+        print("Using fallback player name:", PLAYER_NAME)
+
     live_thread = threading.Thread(target=queue_worker, args=(LATEST_QUEUE, "latest"), daemon=True)
     batch_thread = threading.Thread(target=queue_worker, args=(BATCH_QUEUE, "batch"), daemon=True)
     lap_thread = threading.Thread(target=queue_worker, args=(LAP_QUEUE, "lap"), daemon=True)
@@ -491,10 +588,6 @@ def main():
     lap_thread.start()
 
     create_player_and_session()
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_IP, UDP_PORT))
-    sock.settimeout(SOCKET_TIMEOUT_SEC)
 
     race_active = False
     race_started_at = None
