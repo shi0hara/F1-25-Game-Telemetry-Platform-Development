@@ -170,6 +170,10 @@ def detect_key_shape(mapping):
 
 KEY_TYPE, KEY_LEN = detect_key_shape(HEADER_FIELD_TO_PACKET_TYPE)
 
+def is_fake_name(name):
+    if not name:
+        return True
+    return name.startswith("Room-") or name.startswith("User-")
 
 def get_attr(obj, *names, default=None):
     for n in names:
@@ -351,11 +355,15 @@ def create_player_and_session():
                 timeout=REQUEST_TIMEOUT,
             )
             player_res.raise_for_status()
-            PLAYER_ID = player_res.json().get("id") or PLAYER_NAME
+            player_data = player_res.json()
+            PLAYER_ID = player_data["id"]
 
             session_res = http.post(
                 f"{API_BASE}/sessions",
-                json={"playerId": PLAYER_ID},
+                json={
+                    "playerId": PLAYER_ID,
+                    "playerName": PLAYER_NAME
+                },
                 timeout=REQUEST_TIMEOUT,
             )
             session_res.raise_for_status()
@@ -573,7 +581,7 @@ def main():
     sock.settimeout(SOCKET_TIMEOUT_SEC)
 
     detected_name = sniff_player_name(sock, timeout_sec=10.0)
-    if detected_name:
+    if detected_name and not is_fake_name(detected_name):
         PLAYER_NAME = detected_name
         print("Detected in-game player name:", PLAYER_NAME)
     else:
