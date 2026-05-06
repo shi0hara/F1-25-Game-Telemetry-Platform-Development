@@ -4,6 +4,8 @@ import time
 import ctypes
 import queue
 import threading
+import os
+import getpass
 from datetime import datetime, timezone
 
 import requests
@@ -33,10 +35,11 @@ REQUEST_TIMEOUT = (5.0, 10.0)
 SOCKET_TIMEOUT_SEC = 1.0
 SAMPLE_MIN_INTERVAL_SEC = 0.1
 CSV_FLUSH_EVERY_ROWS = 25
-MAX_SAMPLE_QUEUE = 4000
 
 BATCH_SIZE = 20
 TELEMETRY_BATCH = []
+
+PLAYER_NAME = os.getenv("PLAYER_NAME", getpass.getuser())
 
 http = requests.Session()
 retries = Retry(
@@ -56,7 +59,10 @@ SESSION_ID = None
 PLAYER_ID = None
 
 STOP_EVENT = threading.Event()
-SAMPLE_QUEUE = queue.Queue(maxsize=MAX_SAMPLE_QUEUE)
+
+LATEST_QUEUE = queue.Queue(maxsize=200)
+BATCH_QUEUE = queue.Queue(maxsize=2000)
+LAP_QUEUE = queue.Queue(maxsize=200)
 
 LAST_SAMPLE_SENT_AT = 0.0
 CURRENT_LAP_NUM = None
@@ -141,9 +147,17 @@ def pick_packet_class(header):
 
 
 def extract_event_code(event_pkt):
-    raw = get_attr(event_pkt, "event_string_code", "m_eventStringCode", "event_code", "m_eventCode", default=None)
+    raw = get_attr(
+        event_pkt,
+        "event_string_code",
+        "m_eventStringCode",
+        "event_code",
+        "m_eventCode",
+        default=None,
+    )
     if raw is None:
         return ""
+
     if isinstance(raw, (bytes, bytearray)):
         return raw.decode("ascii", errors="ignore").strip("\x00 ")
     if isinstance(raw, str):
@@ -190,12 +204,26 @@ def get_frame_identifier(header, pkt=None):
     return None
 
 
-def safe_enqueue(item):
+def safe_enqueue(qobj, item):
     try:
-        SAMPLE_QUEUE.put_nowait(item)
+        qobj.put_nowait(item)
         return True
     except queue.Full:
         return False
+
+
+def enqueue_latest(item):
+    try:
+        LATEST_QUEUE.put_nowait(item)
+    except queue.Full:
+        try:
+            LATEST_QUEUE.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            LATEST_QUEUE.put_nowait(item)
+        except queue.Full:
+            pass
 
 
 def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
@@ -205,10 +233,10 @@ def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
     return res
 
 
-def sender_worker():
-    while not STOP_EVENT.is_set() or not SAMPLE_QUEUE.empty():
+def queue_worker(qobj, label):
+    while not STOP_EVENT.is_set() or not qobj.empty():
         try:
-            endpoint, body, retries_left = SAMPLE_QUEUE.get(timeout=0.1)
+            endpoint, body, retries_left = qobj.get(timeout=0.1)
         except queue.Empty:
             continue
 
@@ -219,7 +247,7 @@ def sender_worker():
                 break
             except Exception as e:
                 if attempt >= retries_left:
-                    print(f"API error on {endpoint} after {retries_left} retries: {e}")
+                    print(f"API error on {label} {endpoint} after {retries_left} retries: {e}")
                 else:
                     time.sleep(delay)
                     delay = min(delay * 2.0, 5.0)
@@ -230,16 +258,25 @@ def create_player_and_session():
 
     while not STOP_EVENT.is_set():
         try:
-            print(f"Connecting to backend at {API_BASE} ...")
-            player_res = http.post(f"{API_BASE}/players", json={"name": "python_player"}, timeout=REQUEST_TIMEOUT)
-            player_res.raise_for_status()
-            PLAYER_ID = player_res.json().get("id") or "python_player"
+            print(f"Connecting to backend at {API_BASE} as '{PLAYER_NAME}' ...")
 
-            session_res = http.post(f"{API_BASE}/sessions", json={"playerId": PLAYER_ID}, timeout=REQUEST_TIMEOUT)
+            player_res = http.post(
+                f"{API_BASE}/players",
+                json={"name": PLAYER_NAME},
+                timeout=REQUEST_TIMEOUT,
+            )
+            player_res.raise_for_status()
+            PLAYER_ID = player_res.json().get("id") or PLAYER_NAME
+
+            session_res = http.post(
+                f"{API_BASE}/sessions",
+                json={"playerId": PLAYER_ID},
+                timeout=REQUEST_TIMEOUT,
+            )
             session_res.raise_for_status()
             SESSION_ID = session_res.json()["id"]
 
-            print("SUCCESS! PLAYER ID:", PLAYER_ID, "| SESSION ID:", SESSION_ID)
+            print("SUCCESS! PLAYER NAME:", PLAYER_NAME, "| PLAYER ID:", PLAYER_ID, "| SESSION ID:", SESSION_ID)
             break
         except Exception as e:
             print(f"API not ready, retrying in 5s... ({e})")
@@ -258,6 +295,48 @@ def end_session_once(session_closed):
 
 def get_lap_array(pkt):
     return get_attr(pkt, "lap_data", "m_lapData")
+
+
+def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
+    if pid != SESSION_PACKET_ID or pkt_cls is None:
+        return race_active, race_started_at
+
+    sess_pkt = pkt_cls.from_buffer_copy(data)
+    session_type = int(get_attr(sess_pkt, "session_type", "m_sessionType", default=0) or 0)
+    is_race_session = session_type in RACE_SESSION_TYPES
+
+    if is_race_session and not race_active:
+        print("Grand Prix session started.")
+        return True, time.time()
+
+    if not is_race_session and race_active:
+        print("Grand Prix session ended.")
+        return False, None
+
+    return race_active, race_started_at
+
+
+def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
+    if pid != EVENT_PACKET_ID or pkt_cls is None:
+        return race_active, race_started_at
+
+    event_pkt = pkt_cls.from_buffer_copy(data)
+    code = extract_event_code(event_pkt)
+
+    if code == "SEND" and race_active:
+        if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
+            return race_active, race_started_at
+        print("Grand Prix session ended.")
+        return False, None
+
+    return race_active, race_started_at
+
+
+def handle_final_class_packet(pid, race_active, race_started_at):
+    if pid == FINAL_CLASS_PACKET_ID and race_active:
+        print("Grand Prix session ended.")
+        return False, None
+    return race_active, race_started_at
 
 
 def update_lap_state_from_packet(header, pkt):
@@ -279,11 +358,15 @@ def update_lap_state_from_packet(header, pkt):
     if current_lap is not None:
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
             print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
-            if SESSION_ID:
-                safe_enqueue((f"/sessions/{SESSION_ID}/laps", {
-                    "lapNumber": CURRENT_LAP_NUM,
-                    "lapTimeMs": last_lap_time
-                }, 3))
+            if SESSION_ID and last_lap_time is not None:
+                safe_enqueue(LAP_QUEUE, (
+                    f"/sessions/{SESSION_ID}/laps",
+                    {
+                        "lapNumber": CURRENT_LAP_NUM,
+                        "lapTimeMs": last_lap_time,
+                    },
+                    3,
+                ))
         CURRENT_LAP_NUM = current_lap
 
     current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "m_currentLapTimeInMS", default=None), None)
@@ -304,13 +387,14 @@ def update_lap_state_from_packet(header, pkt):
 def post_latest_telemetry(sample_body):
     if not SESSION_ID:
         return
-    safe_enqueue((
+
+    enqueue_latest((
         "/telemetry/latest",
         {
             "sessionId": SESSION_ID,
-            "latestTelemetry": sample_body
+            "latestTelemetry": sample_body,
         },
-        0
+        0,
     ))
 
 
@@ -367,6 +451,7 @@ def post_telemetry_sample(header, pkt):
     sample_body = {
         "timestamp": iso_now(),
         "sampleIndex": get_frame_identifier(header, pkt),
+        "gameTimeMs": get_attr(header, "session_time", "m_sessionTime", default=None),
         "lapNumber": CURRENT_LAP_NUM,
         "speedKph": speed,
         "throttle": throttle,
@@ -385,20 +470,25 @@ def post_telemetry_sample(header, pkt):
 
     TELEMETRY_BATCH.append(sample_body)
     if len(TELEMETRY_BATCH) >= BATCH_SIZE:
-        safe_enqueue((
+        safe_enqueue(BATCH_QUEUE, (
             "/telemetry/batch",
             {
                 "sessionId": SESSION_ID,
-                "samples": list(TELEMETRY_BATCH)
+                "samples": list(TELEMETRY_BATCH),
             },
-            2
+            2,
         ))
         TELEMETRY_BATCH.clear()
 
 
 def main():
-    sender = threading.Thread(target=sender_worker, daemon=True)
-    sender.start()
+    live_thread = threading.Thread(target=queue_worker, args=(LATEST_QUEUE, "latest"), daemon=True)
+    batch_thread = threading.Thread(target=queue_worker, args=(BATCH_QUEUE, "batch"), daemon=True)
+    lap_thread = threading.Thread(target=queue_worker, args=(LAP_QUEUE, "lap"), daemon=True)
+
+    live_thread.start()
+    batch_thread.start()
+    lap_thread.start()
 
     create_player_and_session()
 
@@ -406,6 +496,8 @@ def main():
     sock.bind((UDP_IP, UDP_PORT))
     sock.settimeout(SOCKET_TIMEOUT_SEC)
 
+    race_active = False
+    race_started_at = None
     session_closed = False
     rows_buffer = []
 
@@ -454,6 +546,10 @@ def main():
                     except Exception:
                         pkt = None
 
+                race_active, race_started_at = handle_session_packet(pid, data, pkt_cls, race_active, race_started_at)
+                race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
+                race_active, race_started_at = handle_final_class_packet(pid, race_active, race_started_at)
+
                 if pid == LAP_DATA_PACKET_ID and pkt is not None:
                     update_lap_state_from_packet(header, pkt)
 
@@ -475,7 +571,7 @@ def main():
                         gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
                         drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
 
-                        row = [
+                        rows_buffer.append([
                             iso_now(),
                             CURRENT_LAP_NUM,
                             speed,
@@ -488,8 +584,7 @@ def main():
                             speed if abs(steering) >= 0.25 else None,
                             BRAKE_START_DISTANCE_M if brake > 0.05 else None,
                             drs,
-                        ]
-                        rows_buffer.append(row)
+                        ])
 
                         if len(rows_buffer) >= CSV_FLUSH_EVERY_ROWS:
                             w.writerows(rows_buffer)
@@ -501,14 +596,15 @@ def main():
 
     finally:
         if TELEMETRY_BATCH and SESSION_ID:
-            safe_enqueue((
+            safe_enqueue(BATCH_QUEUE, (
                 "/telemetry/batch",
                 {
                     "sessionId": SESSION_ID,
-                    "samples": list(TELEMETRY_BATCH)
+                    "samples": list(TELEMETRY_BATCH),
                 },
-                1
+                1,
             ))
+            TELEMETRY_BATCH.clear()
 
         if rows_buffer:
             try:
@@ -520,7 +616,9 @@ def main():
 
         STOP_EVENT.set()
         try:
-            sender.join(timeout=3)
+            live_thread.join(timeout=3)
+            batch_thread.join(timeout=3)
+            lap_thread.join(timeout=3)
         except Exception:
             pass
 
