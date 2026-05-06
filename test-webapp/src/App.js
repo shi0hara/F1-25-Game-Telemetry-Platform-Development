@@ -2,7 +2,7 @@ import  {BrowserRouter, Routes, Route} from "react-router-dom";
 import Live from "./pages/Live";
 
 export default function App() {
-  const sessionId = "RG5DI31WQXmaZkDVxhWD";
+  const sessionId = "F6iOgZiekNDJ47lSiWBX";
     return (
         <BrowserRouter>
             <Routes>
