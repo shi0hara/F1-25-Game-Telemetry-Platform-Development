@@ -77,22 +77,30 @@ TRACK_NAME = None
 TRACK_ID = None
 SESSION_TYPE = None
 
+CURRENT_LAP_DISTANCE_M = None
+CURRENT_TOTAL_DISTANCE_M = None
+
+CORNER_ACTIVE = False
+CORNER_START = None
+CORNER_COUNTER = 0
+
+CORNER_START_THRESHOLD = 0.25
+CORNER_END_THRESHOLD = 0.15
+
+CORNER_QUEUE = queue.Queue(maxsize=500)
+
+LAST_SESSION_META_SYNCED = {
+    "trackId": None,
+    "trackName": None,
+    "sessionType": None,
+}
+
+
 def get_track_name(track_id):
     if track_id is None:
         return None
     return TRACK_ID_TO_NAME.get(int(track_id))
 
-def extract_track_info_from_session_packet(pkt):
-    track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
-    track_name = None
-
-    for field in ("track", "track_name", "m_track", "m_trackName", "circuit", "circuit_name"):
-        raw = get_attr(pkt, field, default=None)
-        track_name = decode_text(raw)
-        if track_name:
-            break
-
-    return track_id, track_name
 
 def decode_text(value):
     if value is None:
@@ -107,6 +115,153 @@ def decode_text(value):
     except Exception:
         s = str(value).strip("\x00 ").strip()
         return s or None
+
+
+def get_attr(obj, *names, default=None):
+    for n in names:
+        if hasattr(obj, n):
+            return getattr(obj, n)
+    return default
+
+
+def parse_number(value, fallback=None):
+    if value is None:
+        return fallback
+    try:
+        return float(value)
+    except Exception:
+        return fallback
+
+
+def parse_int(value, fallback=None):
+    n = parse_number(value, None)
+    if n is None:
+        return fallback
+    try:
+        return int(n)
+    except Exception:
+        return fallback
+
+
+def safe_enqueue(qobj, item):
+    try:
+        qobj.put_nowait(item)
+        return True
+    except queue.Full:
+        return False
+
+
+def iso_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def extract_track_info_from_session_packet(pkt):
+    track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
+    return track_id, get_track_name(track_id)
+
+
+def post_corner(corner_body):
+    if not SESSION_ID:
+        return
+
+    safe_enqueue(CORNER_QUEUE, (
+        f"/sessions/{SESSION_ID}/corners",
+        corner_body,
+        2,
+    ))
+
+
+def flush_active_corner(end_sample=None, end_reason="shutdown"):
+    global CORNER_ACTIVE, CORNER_START
+
+    if not CORNER_ACTIVE or not CORNER_START:
+        return
+
+    end_sample = end_sample or {}
+    end_epoch = time.time()
+
+    payload = {
+        "cornerIndex": CORNER_START["cornerIndex"],
+        "trackId": CORNER_START.get("trackId"),
+        "trackName": CORNER_START.get("trackName"),
+        "startedAt": CORNER_START.get("startedAt"),
+        "endedAt": end_sample.get("timestamp", iso_now()),
+        "durationMs": int(max(0, (end_epoch - CORNER_START["startedAtEpoch"]) * 1000)),
+        "startLapNumber": CORNER_START.get("startLapNumber"),
+        "endLapNumber": end_sample.get("lapNumber", CURRENT_LAP_NUM),
+        "startLapDistanceM": CORNER_START.get("startLapDistanceM"),
+        "endLapDistanceM": end_sample.get("lapDistance", CURRENT_LAP_DISTANCE_M),
+        "startTotalDistanceM": CORNER_START.get("startTotalDistanceM"),
+        "endTotalDistanceM": end_sample.get("totalDistance", CURRENT_TOTAL_DISTANCE_M),
+        "startSpeedKph": CORNER_START.get("startSpeedKph"),
+        "endSpeedKph": end_sample.get("speedKph"),
+        "maxAbsSteering": CORNER_START.get("maxAbsSteering", 0.0),
+        "endReason": end_reason,
+    }
+
+    post_corner(payload)
+    CORNER_ACTIVE = False
+    CORNER_START = None
+
+
+def update_corner_state_from_sample(sample_body):
+    global CORNER_ACTIVE, CORNER_START, CORNER_COUNTER
+
+    lap_distance = sample_body.get("lapDistance")
+    lap_number = sample_body.get("lapNumber")
+    steering_abs = abs(sample_body.get("steering") or 0.0)
+
+    if lap_distance is None or lap_number is None:
+        return
+
+    if CORNER_ACTIVE and lap_number != CORNER_START.get("startLapNumber"):
+        flush_active_corner(sample_body, end_reason="lap_change")
+        return
+
+    if not CORNER_ACTIVE:
+        if steering_abs >= CORNER_START_THRESHOLD:
+            CORNER_COUNTER += 1
+            CORNER_ACTIVE = True
+            CORNER_START = {
+                "cornerIndex": CORNER_COUNTER,
+                "trackId": TRACK_ID,
+                "trackName": TRACK_NAME,
+                "startedAt": sample_body["timestamp"],
+                "startedAtEpoch": time.time(),
+                "startLapNumber": lap_number,
+                "startLapDistanceM": lap_distance,
+                "startTotalDistanceM": sample_body.get("totalDistance"),
+                "startSpeedKph": sample_body.get("speedKph"),
+                "maxAbsSteering": steering_abs,
+            }
+    else:
+        CORNER_START["maxAbsSteering"] = max(CORNER_START["maxAbsSteering"], steering_abs)
+
+        if steering_abs <= CORNER_END_THRESHOLD:
+            flush_active_corner(sample_body, end_reason="steering_released")
+
+
+def sync_session_metadata():
+    global LAST_SESSION_META_SYNCED
+
+    if not SESSION_ID:
+        return
+
+    payload = {
+        "trackId": TRACK_ID,
+        "trackName": TRACK_NAME,
+        "sessionType": SESSION_TYPE,
+    }
+
+    if payload == LAST_SESSION_META_SYNCED:
+        return
+
+    try:
+        res = http.patch(f"{API_BASE}/sessions/{SESSION_ID}", json=payload, timeout=REQUEST_TIMEOUT)
+        res.raise_for_status()
+        LAST_SESSION_META_SYNCED = dict(payload)
+    except Exception as e:
+        print("Session metadata sync error:", e)
 
 
 def extract_player_name_from_participants(header, pkt):
@@ -129,86 +284,6 @@ def extract_player_name_from_participants(header, pkt):
     return None
 
 
-def sniff_player_name(sock, timeout_sec=10.0):
-    global PLAYER_NAME_DETECTED
-
-    end_at = time.time() + timeout_sec
-    old_timeout = sock.gettimeout()
-    sock.settimeout(0.5)
-
-    try:
-        while time.time() < end_at and not PLAYER_NAME_DETECTED:
-            try:
-                data, _ = sock.recvfrom(4096)
-            except socket.timeout:
-                continue
-            except Exception:
-                continue
-
-            header_size = ctypes.sizeof(PacketHeader)
-            if len(data) < header_size:
-                continue
-
-            try:
-                header = PacketHeader.from_buffer_copy(data[:header_size])
-            except Exception:
-                continue
-
-            pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
-            if pid != PARTICIPANTS_PACKET_ID:
-                continue
-
-            pkt_cls = pick_packet_class(header)
-            if pkt_cls is None:
-                continue
-
-            try:
-                pkt = pkt_cls.from_buffer_copy(data)
-            except Exception:
-                continue
-
-            name = extract_player_name_from_participants(header, pkt)
-            if name:
-                PLAYER_NAME_DETECTED = True
-                return name
-    finally:
-        sock.settimeout(old_timeout)
-
-    return None
-
-http = requests.Session()
-retries = Retry(
-    total=3,
-    connect=3,
-    read=3,
-    backoff_factor=0.25,
-    status_forcelist=(429, 500, 502, 503, 504),
-    allowed_methods=frozenset(["GET", "POST", "PUT", "PATCH", "DELETE"]),
-)
-adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
-http.mount("http://", adapter)
-http.mount("https://", adapter)
-http.headers.update({"Content-Type": "application/json"})
-
-SESSION_ID = None
-PLAYER_ID = None
-
-STOP_EVENT = threading.Event()
-
-LATEST_QUEUE = queue.Queue(maxsize=200)
-BATCH_QUEUE = queue.Queue(maxsize=2000)
-LAP_QUEUE = queue.Queue(maxsize=200)
-
-LAST_SAMPLE_SENT_AT = 0.0
-CURRENT_LAP_NUM = None
-BEST_LAP_TIME_MS = None
-LAST_DELTA_TO_PB_MS = None
-
-BRAKE_ACTIVE = False
-BRAKE_START_DISTANCE_M = 0.0
-LAST_BRAKE_SAMPLE_TIME = None
-
-
 def detect_key_shape(mapping):
     k = next(iter(mapping.keys()))
     if isinstance(k, int):
@@ -220,16 +295,11 @@ def detect_key_shape(mapping):
 
 KEY_TYPE, KEY_LEN = detect_key_shape(HEADER_FIELD_TO_PACKET_TYPE)
 
+
 def is_fake_name(name):
     if not name:
         return True
     return name.startswith("Room-") or name.startswith("User-")
-
-def get_attr(obj, *names, default=None):
-    for n in names:
-        if hasattr(obj, n):
-            return getattr(obj, n)
-    return default
 
 
 def pick_packet_class(header):
@@ -307,29 +377,6 @@ def extract_event_code(event_pkt):
         return str(raw).strip("\x00 ")
 
 
-def iso_now():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def parse_number(value, fallback=None):
-    if value is None:
-        return fallback
-    try:
-        return float(value)
-    except Exception:
-        return fallback
-
-
-def parse_int(value, fallback=None):
-    n = parse_number(value, None)
-    if n is None:
-        return fallback
-    try:
-        return int(n)
-    except Exception:
-        return fallback
-
-
 def get_frame_identifier(header, pkt=None):
     for obj in (header, pkt):
         if obj is None:
@@ -343,26 +390,86 @@ def get_frame_identifier(header, pkt=None):
     return None
 
 
-def safe_enqueue(qobj, item):
-    try:
-        qobj.put_nowait(item)
-        return True
-    except queue.Full:
-        return False
+http = requests.Session()
+retries = Retry(
+    total=3,
+    connect=3,
+    read=3,
+    backoff_factor=0.25,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+)
+adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+http.mount("http://", adapter)
+http.mount("https://", adapter)
+http.headers.update({"Content-Type": "application/json"})
+
+SESSION_ID = None
+PLAYER_ID = None
+
+STOP_EVENT = threading.Event()
+
+LATEST_QUEUE = queue.Queue(maxsize=200)
+BATCH_QUEUE = queue.Queue(maxsize=2000)
+LAP_QUEUE = queue.Queue(maxsize=200)
+CORNER_QUEUE = queue.Queue(maxsize=500)
+
+LAST_SAMPLE_SENT_AT = 0.0
+CURRENT_LAP_NUM = None
+BEST_LAP_TIME_MS = None
+LAST_DELTA_TO_PB_MS = None
+
+BRAKE_ACTIVE = False
+BRAKE_START_DISTANCE_M = 0.0
+LAST_BRAKE_SAMPLE_TIME = None
 
 
-def enqueue_latest(item):
+def sniff_player_name(sock, timeout_sec=10.0):
+    global PLAYER_NAME_DETECTED
+
+    end_at = time.time() + timeout_sec
+    old_timeout = sock.gettimeout()
+    sock.settimeout(0.5)
+
     try:
-        LATEST_QUEUE.put_nowait(item)
-    except queue.Full:
-        try:
-            LATEST_QUEUE.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            LATEST_QUEUE.put_nowait(item)
-        except queue.Full:
-            pass
+        while time.time() < end_at and not PLAYER_NAME_DETECTED:
+            try:
+                data, _ = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+
+            header_size = ctypes.sizeof(PacketHeader)
+            if len(data) < header_size:
+                continue
+
+            try:
+                header = PacketHeader.from_buffer_copy(data[:header_size])
+            except Exception:
+                continue
+
+            pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
+            if pid != PARTICIPANTS_PACKET_ID:
+                continue
+
+            pkt_cls = pick_packet_class(header)
+            if pkt_cls is None:
+                continue
+
+            try:
+                pkt = pkt_cls.from_buffer_copy(data)
+            except Exception:
+                continue
+
+            name = extract_player_name_from_participants(header, pkt)
+            if name:
+                PLAYER_NAME_DETECTED = True
+                return name
+    finally:
+        sock.settimeout(old_timeout)
+
+    return None
 
 
 def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
@@ -428,6 +535,7 @@ def create_player_and_session():
             print(f"API not ready, retrying in 5s... ({e})")
             time.sleep(5)
 
+
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
         return True
@@ -449,14 +557,14 @@ def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
         return race_active, race_started_at
 
     sess_pkt = pkt_cls.from_buffer_copy(data)
-    session_type = int(get_attr(sess_pkt, "session_type", "m_sessionType", default=0) or 0)
+    session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
     SESSION_TYPE = session_type
 
     track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
-    if track_id is not None:
-        TRACK_ID = track_id
-    if track_name:
-        TRACK_NAME = get_track_name(track_id)
+    TRACK_ID = track_id
+    TRACK_NAME = track_name
+
+    sync_session_metadata()
 
     is_race_session = session_type in RACE_SESSION_TYPES
 
@@ -496,19 +604,25 @@ def handle_final_class_packet(pid, race_active, race_started_at):
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
+    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M
 
     arr = get_lap_array(pkt)
     if arr is None or len(arr) == 0:
         return
 
-    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
     if not (0 <= player_idx < len(arr)):
         player_idx = 0
 
     lap = arr[player_idx]
 
-    current_lap = parse_int(get_attr(lap, "current_lap_num", "m_currentLapNum", default=None), None)
-    last_lap_time = parse_int(get_attr(lap, "last_lap_time_in_ms", "m_lastLapTimeInMS", default=None), None)
+    current_lap = parse_int(get_attr(lap, "current_lap_num", "mCurrentLapNum", "m_currentLapNum", default=None), None)
+    last_lap_time = parse_int(get_attr(lap, "last_lap_time_in_ms", "mLastLapTimeInMS", "m_lastLapTimeInMS", default=None), None)
+
+    lap_distance = parse_number(get_attr(lap, "lap_distance", "mLapDistance", "m_lapDistance", default=None), None)
+    total_distance = parse_number(get_attr(lap, "total_distance", "mTotalDistance", "m_totalDistance", default=None), None)
+    CURRENT_LAP_DISTANCE_M = lap_distance
+    CURRENT_TOTAL_DISTANCE_M = total_distance
 
     if current_lap is not None:
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
@@ -526,8 +640,8 @@ def update_lap_state_from_packet(header, pkt):
                 ))
         CURRENT_LAP_NUM = current_lap
 
-    current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "m_currentLapTimeInMS", default=None), None)
-    best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "m_bestLapTimeInMS", default=None), None)
+    current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "mCurrentLapTimeInMS", "m_currentLapTimeInMS", default=None), None)
+    best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "mBestLapTimeInMS", "m_bestLapTimeInMS", default=None), None)
 
     if best_lap_time_ms is not None and best_lap_time_ms > 0:
         if BEST_LAP_TIME_MS is None or best_lap_time_ms < BEST_LAP_TIME_MS:
@@ -555,6 +669,20 @@ def post_latest_telemetry(sample_body):
     ))
 
 
+def enqueue_latest(item):
+    try:
+        LATEST_QUEUE.put_nowait(item)
+    except queue.Full:
+        try:
+            LATEST_QUEUE.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            LATEST_QUEUE.put_nowait(item)
+        except queue.Full:
+            pass
+
+
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
@@ -566,11 +694,11 @@ def post_telemetry_sample(header, pkt):
     if now - LAST_SAMPLE_SENT_AT < SAMPLE_MIN_INTERVAL_SEC:
         return
 
-    arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData")
+    arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData", "m_carTelemetryData")
     if arr is None or len(arr) == 0:
         return
 
-    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
     if not (0 <= player_idx < len(arr)):
         player_idx = 0
 
@@ -608,8 +736,10 @@ def post_telemetry_sample(header, pkt):
     sample_body = {
         "timestamp": iso_now(),
         "sampleIndex": get_frame_identifier(header, pkt),
-        "gameTimeMs": get_attr(header, "session_time", "m_sessionTime", default=None),
+        "gameTimeMs": get_attr(header, "session_time", "mSessionTime", "m_sessionTime", default=None),
         "lapNumber": CURRENT_LAP_NUM,
+        "lapDistance": CURRENT_LAP_DISTANCE_M,
+        "totalDistance": CURRENT_TOTAL_DISTANCE_M,
         "speedKph": speed,
         "throttle": throttle,
         "brake": brake,
@@ -623,6 +753,7 @@ def post_telemetry_sample(header, pkt):
         "playerCarIndex": player_idx,
     }
 
+    update_corner_state_from_sample(sample_body)
     post_latest_telemetry(sample_body)
 
     TELEMETRY_BATCH.append(sample_body)
@@ -655,10 +786,12 @@ def main():
     live_thread = threading.Thread(target=queue_worker, args=(LATEST_QUEUE, "latest"), daemon=True)
     batch_thread = threading.Thread(target=queue_worker, args=(BATCH_QUEUE, "batch"), daemon=True)
     lap_thread = threading.Thread(target=queue_worker, args=(LAP_QUEUE, "lap"), daemon=True)
+    corner_thread = threading.Thread(target=queue_worker, args=(CORNER_QUEUE, "corner"), daemon=True)
 
     live_thread.start()
     batch_thread.start()
     lap_thread.start()
+    corner_thread.start()
 
     create_player_and_session()
 
@@ -673,6 +806,8 @@ def main():
             w.writerow([
                 "timestamp",
                 "lap_number",
+                "lap_distance",
+                "total_distance",
                 "speed_kph",
                 "throttle",
                 "brake",
@@ -702,7 +837,7 @@ def main():
                 except Exception:
                     continue
 
-                pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
+                pid = int(get_attr(header, "packet_id", "mPacketId", "m_packetId", default=0) or 0)
                 pkt_cls = pick_packet_class(header)
 
                 pkt = None
@@ -724,7 +859,7 @@ def main():
 
                     arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData")
                     if arr is not None and len(arr) > 0:
-                        idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+                        idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
                         if not (0 <= idx < len(arr)):
                             idx = 0
 
@@ -740,6 +875,8 @@ def main():
                         rows_buffer.append([
                             iso_now(),
                             CURRENT_LAP_NUM,
+                            CURRENT_LAP_DISTANCE_M,
+                            CURRENT_TOTAL_DISTANCE_M,
                             speed,
                             throttle,
                             brake,
@@ -772,6 +909,8 @@ def main():
             ))
             TELEMETRY_BATCH.clear()
 
+        flush_active_corner(end_reason="shutdown")
+
         if rows_buffer:
             try:
                 with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
@@ -785,6 +924,7 @@ def main():
             live_thread.join(timeout=3)
             batch_thread.join(timeout=3)
             lap_thread.join(timeout=3)
+            corner_thread.join(timeout=3)
         except Exception:
             pass
 
