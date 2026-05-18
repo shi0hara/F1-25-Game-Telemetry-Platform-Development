@@ -5,6 +5,8 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
+  getDocs,
 } from "firebase/firestore";
 import {
   Chart as ChartJS,
@@ -17,8 +19,6 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
-import useTelemetrySamples from "../hooks/useTelemetrySamples";
-import { getLiveDeltaToPB } from "../utils/timeTrialDelta";
 
 ChartJS.register(
   CategoryScale,
@@ -30,30 +30,54 @@ ChartJS.register(
 );
 
 export default function LiveTelemetry() {
+  const [usernameInput, setUsernameInput] = useState("");
+  const [resolvedUser, setResolvedUser] = useState(null);
   const [telemetry, setTelemetry] = useState(null);
   const [sessionId, setSessionId] = useState("");
   const [error, setError] = useState("");
   const [speedPoints, setSpeedPoints] = useState([]);
-  const [throttlePoints, setThrottlePoints] = useState([]);
-  const [brakePoints, setBrakePoints] = useState([]);
-  const samples = useTelemetrySamples(sessionId);
 
-  useEffect(() => {
-    let isMounted = true;
+  const resolveUser = async (e) => {
+    e.preventDefault();
+    setError("");
+    setResolvedUser(null);
+    setTelemetry(null);
+    setSessionId("");
+    setSpeedPoints([]);
 
-    const handleUnhandledRejection = (event) => {
-    if (
-      event.reason?.name === "AbortError" ||
-      event.reason?.message?.includes("signal is aborted") ||
-      event.reason?.message?.includes("user aborted")
-    ) {
-      event.preventDefault();
+    const username = usernameInput.trim().toLowerCase();
+    if (!username) {
+      setError("Enter a username.");
+      return;
+    }
+
+    try {
+      const q = query(
+        collection(db, "users"),
+        where("usernameLower", "==", username),
+        limit(1)
+      );
+
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        setError("No user found for that username.");
+        return;
+      }
+
+      const docSnap = snap.docs[0];
+      setResolvedUser({ id: docSnap.id, ...docSnap.data() });
+    } catch (err) {
+      console.error("User resolve error:", err);
+      setError(err.message);
     }
   };
-  window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+  useEffect(() => {
+    if (!resolvedUser?.id) return;
 
     const q = query(
       collection(db, "sessions"),
+      where("userId", "==", resolvedUser.id),
       orderBy("startedAt", "desc"),
       limit(1)
     );
@@ -61,14 +85,10 @@ export default function LiveTelemetry() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        if (!isMounted) return;
         if (snapshot.empty) {
-          setError("No sessions found.");
+          setError("User found, but no sessions yet.");
           setTelemetry(null);
           setSessionId("");
-          setSpeedPoints([]);
-          setThrottlePoints([]);
-          setBrakePoints([]);
           return;
         }
 
@@ -78,63 +98,33 @@ export default function LiveTelemetry() {
         setSessionId(sessionDoc.id);
 
         if (!data.latestTelemetry) {
-          setError("Session found, but latestTelemetry is missing.");
+          setError("Latest telemetry is missing for the newest session.");
           setTelemetry(null);
           return;
         }
 
-        const t = data.latestTelemetry;
-
         setError("");
-        setTelemetry(t);
+        setTelemetry(data.latestTelemetry);
 
         setSpeedPoints((prev) => {
           const next = [
             ...prev,
             {
               time: Date.now(),
-              speed: Number(t.speedKph ?? 0),
-            },
-          ];
-          return next.slice(-75);
-        });
-
-        setThrottlePoints((prev) => {
-          const next = [
-            ...prev,
-            {
-              time: Date.now(),
-              throttle: Number((t.throttle ?? 0) * 100),
-            },
-          ];
-          return next.slice(-75);
-        });
-
-        setBrakePoints((prev) => {
-          const next = [
-            ...prev,
-            {
-              time: Date.now(),
-              brake: Number((t.brake ?? 0) * 100),
+              speed: Number(data.latestTelemetry.speedKph ?? 0),
             },
           ];
           return next.slice(-75);
         });
       },
       (err) => {
-        if (!isMounted) return;
-        if (err.name === "AbortError" || err.code === "cancelled") return;
         console.error("Firestore listener error:", err);
         setError(err.message);
       }
     );
 
-    return () => {
-      isMounted = false;
-      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
-      unsubscribe();
-    };
-  }, []);
+    return unsubscribe;
+  }, [resolvedUser?.id]);
 
   const chartData = useMemo(() => {
     return {
@@ -150,40 +140,6 @@ export default function LiveTelemetry() {
       ],
     };
   }, [speedPoints]);
-
-  const throttleChartData = useMemo(() => {
-    return {
-      labels: throttlePoints.map(() => ""),
-      datasets: [
-        {
-          label: "Throttle (%)",
-          data: throttlePoints.map((p) => p.throttle),
-          borderColor: "#ff9800",
-          backgroundColor: "rgba(255, 152, 0, 0.1)",
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.25,
-        },
-      ],
-    };
-  }, [throttlePoints]);
-
-  const brakeChartData = useMemo(() => {
-    return {
-      labels: brakePoints.map(() => ""),
-      datasets: [
-        {
-          label: "Brake (%)",
-          data: brakePoints.map((p) => p.brake),
-          borderColor: "#f44336",
-          backgroundColor: "rgba(244, 67, 54, 0.1)",
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.25,
-        },
-      ],
-    };
-  }, [brakePoints]);
 
   const chartOptions = useMemo(() => {
     return {
@@ -202,88 +158,61 @@ export default function LiveTelemetry() {
     };
   }, []);
 
-  const deltaToPB = useMemo(() => {
-    return getLiveDeltaToPB(samples, telemetry);
-  }, [samples, telemetry]);
-
-  if (!telemetry) {
-    return (
-      <div style={{ padding: 16 }}>
-        <h2>Live Telemetry</h2>
-        {sessionId && <p>Session ID: {sessionId}</p>}
-        {error && <p style={{ color: "red" }}>Error: {error}</p>}
-        <p>Waiting for telemetry...</p>
-
-        <div style={{ height: 300, marginTop: 16 }}>
-          <Line data={chartData} options={chartOptions} />
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding: 16 }}>
       <h2>Live Telemetry</h2>
 
-      <p>Session ID: {sessionId}</p>
-      <p>Speed: {telemetry.speedKph ?? 0} km/h</p>
-      <p>Throttle: {((telemetry.throttle ?? 0) * 100).toFixed(0)}%</p>
-      <p>Brake: {((telemetry.brake ?? 0) * 100).toFixed(0)}%</p>
-      <p>Steering: {(telemetry.steering ?? 0).toFixed(2)}</p>
-      <p>Gear: {telemetry.gear ?? "-"}</p>
-      <p>RPM: {telemetry.rpm ?? 0}</p>
-      <p>DRS: {telemetry.drs ? "On" : "Off"}</p>
-      <p>Lap: {telemetry.lapNumber ?? "-"}</p>
-      <p>Delta to PB: {deltaToPB.formatted}</p>
-      <p style={{ color: "#666" }}>
-        Delta source: {deltaToPB.source === "packet-trace" ? "Packet 2 PB ghost trace" : "latest telemetry fallback"}
-      </p>
-      <p>
-        Cornering Speed:{" "}
-        {telemetry.corneringSpeed == null
-          ? "Not calculated yet"
-          : `${telemetry.corneringSpeed} km/h`}
-      </p>
-      <p>
-        Braking Distance:{" "}
-        {telemetry.brakingDistance == null
-          ? "Not calculated yet"
-          : `${telemetry.brakingDistance} m`}
-      </p>
-      <p>Last Updated: {telemetry.timestamp ?? "-"}</p>
+      <form onSubmit={resolveUser} style={{ marginBottom: 16 }}>
+        <input
+          value={usernameInput}
+          onChange={(e) => setUsernameInput(e.target.value)}
+          placeholder="Enter username"
+          style={{ padding: 8, width: 240, marginRight: 8 }}
+        />
+        <button type="submit">Load user</button>
+      </form>
 
+      {resolvedUser && (
+        <p>
+          Viewing: {resolvedUser.username}
+          {resolvedUser.email ? ` (${resolvedUser.email})` : ""}
+        </p>
+      )}
+
+      {sessionId && <p>Session ID: {sessionId}</p>}
       {error && <p style={{ color: "red" }}>Error: {error}</p>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 20, marginTop: 30 }}>
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: 18 }}>Speed (km/h)</h3>
-          <div style={{ height: 300 }}>
-            <Line data={chartData} options={chartOptions} />
-          </div>
-          <p style={{ marginTop: 12, fontSize: 14, color: "#666", margin: "12px 0 0 0" }}>
-            Current: <strong>{(telemetry.speedKph ?? 0).toFixed(1)}</strong> km/h
+      {!telemetry ? (
+        <p>Waiting for telemetry...</p>
+      ) : (
+        <>
+          <p>Speed: {telemetry.speedKph ?? 0} km/h</p>
+          <p>Throttle: {((telemetry.throttle ?? 0) * 100).toFixed(0)}%</p>
+          <p>Brake: {((telemetry.brake ?? 0) * 100).toFixed(0)}%</p>
+          <p>Steering: {(telemetry.steering ?? 0).toFixed(2)}</p>
+          <p>Gear: {telemetry.gear ?? "-"}</p>
+          <p>RPM: {telemetry.rpm ?? 0}</p>
+          <p>DRS: {telemetry.drs ? "On" : "Off"}</p>
+          <p>Lap: {telemetry.lapNumber ?? "-"}</p>
+          <p>Delta to PB: {telemetry.deltaToPB ?? "-"} ms</p>
+          <p>
+            Cornering Speed:{" "}
+            {telemetry.corneringSpeed == null
+              ? "Not calculated yet"
+              : `${telemetry.corneringSpeed} km/h`}
           </p>
-        </div>
+          <p>
+            Braking Distance:{" "}
+            {telemetry.brakingDistance == null
+              ? "Not calculated yet"
+              : `${telemetry.brakingDistance} m`}
+          </p>
+          <p>Last Updated: {telemetry.timestamp ?? "-"}</p>
+        </>
+      )}
 
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: 18, color: "#ff9800" }}>Throttle (%)</h3>
-          <div style={{ height: 300 }}>
-            <Line data={throttleChartData} options={chartOptions} />
-          </div>
-          <p style={{ marginTop: 12, fontSize: 14, color: "#666", margin: "12px 0 0 0" }}>
-            Current: <strong>{((telemetry.throttle ?? 0) * 100).toFixed(0)}</strong>%
-          </p>
-        </div>
-
-        <div style={{ border: "1px solid #ddd", borderRadius: 8, padding: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          <h3 style={{ margin: "0 0 16px 0", fontSize: 18, color: "#f44336" }}>Brake (%)</h3>
-          <div style={{ height: 300 }}>
-            <Line data={brakeChartData} options={chartOptions} />
-          </div>
-          <p style={{ marginTop: 12, fontSize: 14, color: "#666", margin: "12px 0 0 0" }}>
-            Current: <strong>{((telemetry.brake ?? 0) * 100).toFixed(0)}</strong>%
-          </p>
-        </div>
+      <div style={{ height: 320, marginTop: 16 }}>
+        <Line data={chartData} options={chartOptions} />
       </div>
     </div>
   );
