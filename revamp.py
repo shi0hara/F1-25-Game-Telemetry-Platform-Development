@@ -40,7 +40,10 @@ BATCH_SIZE = 20
 TELEMETRY_BATCH = []
 
 PARTICIPANTS_PACKET_ID = 4
-PLAYER_NAME = os.getenv("PLAYER_NAME", getpass.getuser())
+
+DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
+DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
+
 PLAYER_NAME_DETECTED = False
 
 TRACK_ID_TO_NAME = {
@@ -87,20 +90,16 @@ CORNER_COUNTER = 0
 CORNER_START_THRESHOLD = 0.25
 CORNER_END_THRESHOLD = 0.15
 
-CORNER_QUEUE = queue.Queue(maxsize=500)
-
 LAST_SESSION_META_SYNCED = {
     "trackId": None,
     "trackName": None,
     "sessionType": None,
 }
 
-
 def get_track_name(track_id):
     if track_id is None:
         return None
     return TRACK_ID_TO_NAME.get(int(track_id))
-
 
 def decode_text(value):
     if value is None:
@@ -116,13 +115,11 @@ def decode_text(value):
         s = str(value).strip("\x00 ").strip()
         return s or None
 
-
 def get_attr(obj, *names, default=None):
     for n in names:
         if hasattr(obj, n):
             return getattr(obj, n)
     return default
-
 
 def parse_number(value, fallback=None):
     if value is None:
@@ -131,7 +128,6 @@ def parse_number(value, fallback=None):
         return float(value)
     except Exception:
         return fallback
-
 
 def parse_int(value, fallback=None):
     n = parse_number(value, None)
@@ -142,7 +138,6 @@ def parse_int(value, fallback=None):
     except Exception:
         return fallback
 
-
 def safe_enqueue(qobj, item):
     try:
         qobj.put_nowait(item)
@@ -150,26 +145,21 @@ def safe_enqueue(qobj, item):
     except queue.Full:
         return False
 
-
 def iso_now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 
 def extract_track_info_from_session_packet(pkt):
     track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
     return track_id, get_track_name(track_id)
 
-
 def post_corner(corner_body):
     if not SESSION_ID:
         return
-
     safe_enqueue(CORNER_QUEUE, (
         f"/sessions/{SESSION_ID}/corners",
         corner_body,
         2,
     ))
-
 
 def flush_active_corner(end_sample=None, end_reason="shutdown"):
     global CORNER_ACTIVE, CORNER_START
@@ -202,7 +192,6 @@ def flush_active_corner(end_sample=None, end_reason="shutdown"):
     post_corner(payload)
     CORNER_ACTIVE = False
     CORNER_START = None
-
 
 def update_corner_state_from_sample(sample_body):
     global CORNER_ACTIVE, CORNER_START, CORNER_COUNTER
@@ -240,7 +229,6 @@ def update_corner_state_from_sample(sample_body):
         if steering_abs <= CORNER_END_THRESHOLD:
             flush_active_corner(sample_body, end_reason="steering_released")
 
-
 def sync_session_metadata():
     global LAST_SESSION_META_SYNCED
 
@@ -263,7 +251,6 @@ def sync_session_metadata():
     except Exception as e:
         print("Session metadata sync error:", e)
 
-
 def extract_player_name_from_participants(header, pkt):
     arr = get_attr(pkt, "participants", "m_participants")
     if arr is None or len(arr) == 0:
@@ -283,7 +270,6 @@ def extract_player_name_from_participants(header, pkt):
 
     return None
 
-
 def detect_key_shape(mapping):
     k = next(iter(mapping.keys()))
     if isinstance(k, int):
@@ -292,15 +278,12 @@ def detect_key_shape(mapping):
         return ("tuple", len(k))
     return (type(k).__name__, None)
 
-
 KEY_TYPE, KEY_LEN = detect_key_shape(HEADER_FIELD_TO_PACKET_TYPE)
-
 
 def is_fake_name(name):
     if not name:
         return True
     return name.startswith("Room-") or name.startswith("User-")
-
 
 def pick_packet_class(header):
     fmt = int(get_attr(header, "packet_format", "m_packetFormat", default=0) or 0)
@@ -354,7 +337,6 @@ def pick_packet_class(header):
 
     return None
 
-
 def extract_event_code(event_pkt):
     raw = get_attr(
         event_pkt,
@@ -376,7 +358,6 @@ def extract_event_code(event_pkt):
     except Exception:
         return str(raw).strip("\x00 ")
 
-
 def get_frame_identifier(header, pkt=None):
     for obj in (header, pkt):
         if obj is None:
@@ -388,7 +369,6 @@ def get_frame_identifier(header, pkt=None):
                 except Exception:
                     pass
     return None
-
 
 http = requests.Session()
 retries = Retry(
@@ -405,7 +385,7 @@ http.mount("https://", adapter)
 http.headers.update({"Content-Type": "application/json"})
 
 SESSION_ID = None
-PLAYER_ID = None
+USER_ID = None
 
 STOP_EVENT = threading.Event()
 
@@ -423,6 +403,16 @@ BRAKE_ACTIVE = False
 BRAKE_START_DISTANCE_M = 0.0
 LAST_BRAKE_SAMPLE_TIME = None
 
+def prompt_identity():
+    global DRIVER_USERNAME, DRIVER_EMAIL
+
+    if not DRIVER_USERNAME:
+        DRIVER_USERNAME = input("Username: ").strip()
+    if not DRIVER_EMAIL:
+        DRIVER_EMAIL = input("Email: ").strip()
+
+    if not DRIVER_USERNAME:
+        raise ValueError("Username is required")
 
 def sniff_player_name(sock, timeout_sec=10.0):
     global PLAYER_NAME_DETECTED
@@ -471,13 +461,11 @@ def sniff_player_name(sock, timeout_sec=10.0):
 
     return None
 
-
 def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
     url = f"{API_BASE}{endpoint}"
     res = http.post(url, json=body, timeout=timeout)
     res.raise_for_status()
     return res
-
 
 def queue_worker(qobj, label):
     while not STOP_EVENT.is_set() or not qobj.empty():
@@ -498,28 +486,29 @@ def queue_worker(qobj, label):
                     time.sleep(delay)
                     delay = min(delay * 2.0, 5.0)
 
-
-def create_player_and_session():
-    global PLAYER_ID, SESSION_ID, PLAYER_NAME
+def create_user_and_session():
+    global USER_ID, SESSION_ID
 
     while not STOP_EVENT.is_set():
         try:
-            print(f"Connecting to backend at {API_BASE} as '{PLAYER_NAME}' ...")
+            print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
 
-            player_res = http.post(
-                f"{API_BASE}/players",
-                json={"name": PLAYER_NAME},
+            user_res = http.post(
+                f"{API_BASE}/users/ensure",
+                json={
+                    "username": DRIVER_USERNAME,
+                    "email": DRIVER_EMAIL,
+                },
                 timeout=REQUEST_TIMEOUT,
             )
-            player_res.raise_for_status()
-            player_data = player_res.json()
-            PLAYER_ID = player_data["id"]
+            user_res.raise_for_status()
+            user_data = user_res.json()
+            USER_ID = user_data["id"]
 
             session_res = http.post(
                 f"{API_BASE}/sessions",
                 json={
-                    "playerId": PLAYER_ID,
-                    "playerName": PLAYER_NAME,
+                    "userId": USER_ID,
                     "trackName": TRACK_NAME,
                     "trackId": TRACK_ID,
                     "sessionType": SESSION_TYPE,
@@ -529,12 +518,11 @@ def create_player_and_session():
             session_res.raise_for_status()
             SESSION_ID = session_res.json()["id"]
 
-            print("SUCCESS! PLAYER NAME:", PLAYER_NAME, "| PLAYER ID:", PLAYER_ID, "| SESSION ID:", SESSION_ID)
+            print("SUCCESS! USERNAME:", DRIVER_USERNAME, "| USER ID:", USER_ID, "| SESSION ID:", SESSION_ID)
             break
         except Exception as e:
             print(f"API not ready, retrying in 5s... ({e})")
             time.sleep(5)
-
 
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
@@ -545,10 +533,8 @@ def end_session_once(session_closed):
         print("Session end API error:", e)
     return True
 
-
 def get_lap_array(pkt):
     return get_attr(pkt, "lap_data", "m_lapData")
-
 
 def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
     global TRACK_ID, TRACK_NAME, SESSION_TYPE
@@ -578,7 +564,6 @@ def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
 
     return race_active, race_started_at
 
-
 def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
     if pid != EVENT_PACKET_ID or pkt_cls is None:
         return race_active, race_started_at
@@ -594,13 +579,11 @@ def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
 
     return race_active, race_started_at
 
-
 def handle_final_class_packet(pid, race_active, race_started_at):
     if pid == FINAL_CLASS_PACKET_ID and race_active:
         print("Grand Prix session ended.")
         return False, None
     return race_active, race_started_at
-
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
@@ -654,21 +637,6 @@ def update_lap_state_from_packet(header, pkt):
     else:
         LAST_DELTA_TO_PB_MS = None
 
-
-def post_latest_telemetry(sample_body):
-    if not SESSION_ID:
-        return
-
-    enqueue_latest((
-        "/telemetry/latest",
-        {
-            "sessionId": SESSION_ID,
-            "latestTelemetry": sample_body,
-        },
-        0,
-    ))
-
-
 def enqueue_latest(item):
     try:
         LATEST_QUEUE.put_nowait(item)
@@ -682,6 +650,18 @@ def enqueue_latest(item):
         except queue.Full:
             pass
 
+def post_latest_telemetry(sample_body):
+    if not SESSION_ID:
+        return
+
+    enqueue_latest((
+        "/telemetry/latest",
+        {
+            "sessionId": SESSION_ID,
+            "latestTelemetry": sample_body,
+        },
+        0,
+    ))
 
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT
@@ -768,9 +748,10 @@ def post_telemetry_sample(header, pkt):
         ))
         TELEMETRY_BATCH.clear()
 
-
 def main():
-    global PLAYER_NAME
+    global DRIVER_USERNAME
+
+    prompt_identity()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
@@ -778,10 +759,9 @@ def main():
 
     detected_name = sniff_player_name(sock, timeout_sec=10.0)
     if detected_name and not is_fake_name(detected_name):
-        PLAYER_NAME = detected_name
-        print("Detected in-game player name:", PLAYER_NAME)
+        print("Detected in-game player name:", detected_name)
     else:
-        print("Using fallback player name:", PLAYER_NAME)
+        print("Using username:", DRIVER_USERNAME)
 
     live_thread = threading.Thread(target=queue_worker, args=(LATEST_QUEUE, "latest"), daemon=True)
     batch_thread = threading.Thread(target=queue_worker, args=(BATCH_QUEUE, "batch"), daemon=True)
@@ -793,7 +773,7 @@ def main():
     lap_thread.start()
     corner_thread.start()
 
-    create_player_and_session()
+    create_user_and_session()
 
     race_active = False
     race_started_at = None
@@ -930,7 +910,6 @@ def main():
 
         session_closed = end_session_once(session_closed)
         sock.close()
-
 
 if __name__ == "__main__":
     main()
