@@ -589,6 +589,9 @@ def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
     global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M
 
+    def is_plausible_lap_time_ms(ms):
+        return ms is not None and 10000 <= ms <= 600000  # 10s to 10min
+
     arr = get_lap_array(pkt)
     if arr is None or len(arr) == 0:
         return
@@ -610,7 +613,8 @@ def update_lap_state_from_packet(header, pkt):
     if current_lap is not None:
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
             print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
-            if SESSION_ID and last_lap_time is not None:
+
+            if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
                 safe_enqueue(LAP_QUEUE, (
                     f"/sessions/{SESSION_ID}/laps",
                     {
@@ -621,22 +625,24 @@ def update_lap_state_from_packet(header, pkt):
                     },
                     3,
                 ))
+            else:
+                print(f"Ignoring implausible lap time: {last_lap_time} ms")
+
         CURRENT_LAP_NUM = current_lap
 
     current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "mCurrentLapTimeInMS", "m_currentLapTimeInMS", default=None), None)
     best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "mBestLapTimeInMS", "m_bestLapTimeInMS", default=None), None)
 
-    if best_lap_time_ms is not None and best_lap_time_ms > 0:
+    if best_lap_time_ms is not None and is_plausible_lap_time_ms(best_lap_time_ms):
         if BEST_LAP_TIME_MS is None or best_lap_time_ms < BEST_LAP_TIME_MS:
             BEST_LAP_TIME_MS = best_lap_time_ms
-    elif current_lap_time_ms is not None and current_lap_time_ms > 0 and BEST_LAP_TIME_MS is None:
+    elif current_lap_time_ms is not None and is_plausible_lap_time_ms(current_lap_time_ms) and BEST_LAP_TIME_MS is None:
         BEST_LAP_TIME_MS = current_lap_time_ms
 
     if current_lap_time_ms is not None and BEST_LAP_TIME_MS is not None:
         LAST_DELTA_TO_PB_MS = current_lap_time_ms - BEST_LAP_TIME_MS
     else:
         LAST_DELTA_TO_PB_MS = None
-
 def enqueue_latest(item):
     try:
         LATEST_QUEUE.put_nowait(item)
