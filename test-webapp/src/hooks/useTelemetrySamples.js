@@ -19,7 +19,7 @@ export default function useTelemetrySamples(sessionId) {
     const q = query(
       samplesRef,
       orderBy("timestamp", "desc"),
-      limit(100)
+      limit(8000)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
