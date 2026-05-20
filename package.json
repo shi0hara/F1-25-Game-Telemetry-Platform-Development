@@ -1,4 +1,10 @@
 {
+  "private": true,
+  "scripts": {
+    "start": "npm --prefix test-webapp start",
+    "build": "npm --prefix test-webapp run build",
+    "test": "npm --prefix test-webapp test"
+  },
   "dependencies": {
     "chart.js": "^4.5.1",
     "react-chartjs-2": "^5.3.1"
