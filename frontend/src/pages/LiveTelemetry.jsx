@@ -6,6 +6,7 @@ import {
   LinearScale,
   LineElement,
   PointElement,
+  Filler,
   Tooltip,
   Legend,
 } from "chart.js";
@@ -18,6 +19,7 @@ ChartJS.register(
   LinearScale,
   LineElement,
   PointElement,
+  Filler,
   Tooltip,
   Legend
 );
@@ -25,6 +27,8 @@ ChartJS.register(
 export default function LiveTelemetry({ sessionId }) {
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
   const [speedPoints, setSpeedPoints] = useState([]);
+  const [throttlePoints, setThrottlePoints] = useState([]);
+  const [brakePoints, setBrakePoints] = useState([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -44,16 +48,37 @@ export default function LiveTelemetry({ sessionId }) {
         }
 
         const data = snapshot.data();
-        setSelectedTelemetry(data.latestTelemetry || null);
+        const telemetry = data.latestTelemetry || null;
+        setSelectedTelemetry(telemetry);
 
-        if (data.latestTelemetry?.speedKph != null) {
+        if (telemetry?.speedKph != null) {
           setSpeedPoints((prev) => {
             const next = [
               ...prev,
               {
                 time: Date.now(),
-                speed: Number(data.latestTelemetry.speedKph ?? 0),
+                speed: Number(telemetry.speedKph ?? 0),
               },
+            ];
+            return next.slice(-75);
+          });
+        }
+
+        if (telemetry?.throttle != null || telemetry?.brake != null) {
+          const now = Date.now();
+
+          setThrottlePoints((prev) => {
+            const next = [
+              ...prev,
+              { time: now, value: Number(telemetry.throttle ?? 0) * 100 },
+            ];
+            return next.slice(-75);
+          });
+
+          setBrakePoints((prev) => {
+            const next = [
+              ...prev,
+              { time: now, value: Number(telemetry.brake ?? 0) * 100 },
             ];
             return next.slice(-75);
           });
@@ -103,6 +128,65 @@ export default function LiveTelemetry({ sessionId }) {
     };
   }, []);
 
+  const throttleData = useMemo(() => {
+    return {
+      labels: throttlePoints.map(() => ""),
+      datasets: [
+        {
+          label: "Throttle (%)",
+          data: throttlePoints.map((p) => p.value),
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+          borderColor: "#22c55e",
+          backgroundColor: "rgba(34, 197, 94, 0.15)",
+          fill: true,
+        },
+      ],
+    };
+  }, [throttlePoints]);
+
+  const brakeData = useMemo(() => {
+    return {
+      labels: brakePoints.map(() => ""),
+      datasets: [
+        {
+          label: "Brake (%)",
+          data: brakePoints.map((p) => p.value),
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+          borderColor: "#ef4444",
+          backgroundColor: "rgba(239, 68, 68, 0.15)",
+          fill: true,
+        },
+      ],
+    };
+  }, [brakePoints]);
+
+  const percentOptions = useMemo(() => {
+    return {
+      responsive: true,
+      animation: false,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: {
+          beginAtZero: true,
+          max: 100,
+          ticks: { color: "#aaa", callback: (v) => `${v}%` },
+          grid: { color: "rgba(255,255,255,0.05)" },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: "#fff" },
+        },
+      },
+    };
+  }, []);
+
   return (
     <div className="page-container">
       <h1>Live <span className="text-blue">Telemetry</span></h1>
@@ -122,6 +206,7 @@ export default function LiveTelemetry({ sessionId }) {
               <p><strong>Steering:</strong> {(selectedTelemetry.steering ?? 0).toFixed(2)}</p>
               <p><strong>DRS:</strong> {selectedTelemetry.drs ? "On" : "Off"}</p>
               <p><strong>Lap:</strong> {selectedTelemetry.lapNumber ?? "-"}</p>
+              <p><strong>Sector:</strong> {selectedTelemetry.currentSector != null ? selectedTelemetry.currentSector + 1 : "-"}</p>
             </div>
           ) : (
             <p>Waiting for telemetry data or session ID...</p>
@@ -137,11 +222,23 @@ export default function LiveTelemetry({ sessionId }) {
       </div>
 
       <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Session History</h2>
-        <p>Review telemetry from the selected session.</p>
-        <div style={{ marginTop: '20px', maxHeight: '400px', overflowY: 'auto' }}>
-          <TelemetryChart sessionId={sessionId} />
+        <h2>Throttle Application</h2>
+        <div style={{ height: "300px", width: "100%", marginTop: "16px" }}>
+          <Line data={throttleData} options={percentOptions} />
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: '20px' }}>
+        <h2>Brake Application</h2>
+        <div style={{ height: "300px", width: "100%", marginTop: "16px" }}>
+          <Line data={brakeData} options={percentOptions} />
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: '20px' }}>
+        <h2>Lap Times</h2>
+        <p style={{ color: '#888', fontSize: '13px', marginBottom: '12px' }}>Sector and lap times update as you complete each lap.</p>
+        <TelemetryChart sessionId={sessionId} />
       </div>
     </div>
   );

@@ -27,6 +27,7 @@ LAP_DATA_PACKET_ID = 2
 EVENT_PACKET_ID = 3
 TELEMETRY_PACKET_ID = 6
 FINAL_CLASS_PACKET_ID = 8
+SESSION_HISTORY_PACKET_ID = 11
 
 RACE_SESSION_TYPES = {15, 16, 17}
 MIN_EVENT_END_AFTER_START_SEC = 10.0
@@ -82,6 +83,7 @@ SESSION_TYPE = None
 
 CURRENT_LAP_DISTANCE_M = None
 CURRENT_TOTAL_DISTANCE_M = None
+CURRENT_SECTOR = None
 
 CORNER_ACTIVE = False
 CORNER_START = None
@@ -587,7 +589,7 @@ def handle_final_class_packet(pid, race_active, race_started_at):
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
-    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M
+    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR
 
     def is_plausible_lap_time_ms(ms):
         return ms is not None and 10000 <= ms <= 600000  # 10s to 10min
@@ -610,22 +612,29 @@ def update_lap_state_from_packet(header, pkt):
     CURRENT_LAP_DISTANCE_M = lap_distance
     CURRENT_TOTAL_DISTANCE_M = total_distance
 
+    current_sector = parse_int(get_attr(lap, "sector", "m_sector", default=None), None)
+    if current_sector is not None:
+        CURRENT_SECTOR = current_sector
+
     if current_lap is not None:
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
             print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
 
-            if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
+            if SESSION_ID and is_plausible_lap_time_ms(last_lap_time) and CURRENT_LAP_NUM not in SENT_LAP_HISTORY_SET:
                 safe_enqueue(LAP_QUEUE, (
                     f"/sessions/{SESSION_ID}/laps",
                     {
                         "lapNumber": CURRENT_LAP_NUM,
                         "lapTimeMs": last_lap_time,
+                        "sector1Ms": None,
+                        "sector2Ms": None,
+                        "sector3Ms": None,
                         "trackName": TRACK_NAME,
                         "trackId": TRACK_ID,
                     },
                     3,
                 ))
-            else:
+            elif not is_plausible_lap_time_ms(last_lap_time):
                 print(f"Ignoring implausible lap time: {last_lap_time} ms")
 
         CURRENT_LAP_NUM = current_lap
@@ -643,6 +652,93 @@ def update_lap_state_from_packet(header, pkt):
         LAST_DELTA_TO_PB_MS = current_lap_time_ms - BEST_LAP_TIME_MS
     else:
         LAST_DELTA_TO_PB_MS = None
+
+LAST_HISTORY_NUM_LAPS = 0
+SENT_LAP_HISTORY_SET = set()
+
+def compute_sector_time_ms(ms_part, minutes_part):
+    """Convert the split sector time fields into a single millisecond value."""
+    ms_part = parse_int(ms_part, 0) or 0
+    minutes_part = parse_int(minutes_part, 0) or 0
+    total_ms = (minutes_part * 60000) + ms_part
+    return total_ms if total_ms > 0 else None
+
+def handle_session_history_packet(header, pkt):
+    """Extract per-lap sector times from PacketSessionHistoryData and send to API."""
+    global LAST_HISTORY_NUM_LAPS
+
+    if not SESSION_ID or pkt is None:
+        return
+
+    car_idx = parse_int(get_attr(pkt, "car_idx", "m_carIdx", default=None), None)
+    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+
+    # Only process the player's own history packet
+    if car_idx is not None and car_idx != player_idx:
+        return
+
+    num_laps = parse_int(get_attr(pkt, "num_laps", "m_numLaps", default=0), 0) or 0
+    if num_laps == 0:
+        return
+
+    lap_history = get_attr(pkt, "lap_history_data", "m_lapHistoryData")
+    if lap_history is None or len(lap_history) == 0:
+        return
+
+    # Only process newly completed laps
+    for lap_idx in range(min(num_laps, len(lap_history))):
+        lap_num = lap_idx + 1
+
+        if lap_num in SENT_LAP_HISTORY_SET:
+            continue
+
+        entry = lap_history[lap_idx]
+
+        lap_time_ms = parse_int(get_attr(entry, "lap_time_in_ms", "m_lapTimeInMS", default=0), 0) or 0
+        if lap_time_ms <= 0:
+            continue  # Lap not yet completed
+
+        s1_ms = compute_sector_time_ms(
+            get_attr(entry, "sector1_time_ms_part", "m_sector1TimeMSPart", default=0),
+            get_attr(entry, "sector1_time_minutes_part", "m_sector1TimeMinutesPart", default=0),
+        )
+        s2_ms = compute_sector_time_ms(
+            get_attr(entry, "sector2_time_ms_part", "m_sector2TimeMSPart", default=0),
+            get_attr(entry, "sector2_time_minutes_part", "m_sector2TimeMinutesPart", default=0),
+        )
+        s3_ms = compute_sector_time_ms(
+            get_attr(entry, "sector3_time_ms_part", "m_sector3TimeMSPart", default=0),
+            get_attr(entry, "sector3_time_minutes_part", "m_sector3TimeMinutesPart", default=0),
+        )
+
+        # Validate: plausible lap time (10s to 10min)
+        if not (10000 <= lap_time_ms <= 600000):
+            continue
+
+        lap_valid_flags = parse_int(get_attr(entry, "lap_valid_bit_flags", "m_lapValidBitFlags", default=0), 0)
+
+        payload = {
+            "lapNumber": lap_num,
+            "lapTimeMs": lap_time_ms,
+            "sector1Ms": s1_ms,
+            "sector2Ms": s2_ms,
+            "sector3Ms": s3_ms,
+            "valid": bool(lap_valid_flags & 0x01) if lap_valid_flags is not None else True,
+            "trackName": TRACK_NAME,
+            "trackId": TRACK_ID,
+        }
+
+        safe_enqueue(LAP_QUEUE, (
+            f"/sessions/{SESSION_ID}/laps",
+            payload,
+            3,
+        ))
+
+        SENT_LAP_HISTORY_SET.add(lap_num)
+        print(f"  Lap {lap_num}: {lap_time_ms}ms | S1: {s1_ms}ms | S2: {s2_ms}ms | S3: {s3_ms}ms")
+
+    LAST_HISTORY_NUM_LAPS = num_laps
+
 def enqueue_latest(item):
     try:
         LATEST_QUEUE.put_nowait(item)
@@ -737,6 +833,7 @@ def post_telemetry_sample(header, pkt):
         "brakingDistance": braking_distance,
         "drs": drs,
         "playerCarIndex": player_idx,
+        "currentSector": CURRENT_SECTOR,
     }
 
     update_corner_state_from_sample(sample_body)
@@ -839,6 +936,9 @@ def main():
 
                 if pid == LAP_DATA_PACKET_ID and pkt is not None:
                     update_lap_state_from_packet(header, pkt)
+
+                if pid == SESSION_HISTORY_PACKET_ID and pkt is not None:
+                    handle_session_history_packet(header, pkt)
 
                 if pid == TELEMETRY_PACKET_ID and pkt is not None:
                     post_telemetry_sample(header, pkt)

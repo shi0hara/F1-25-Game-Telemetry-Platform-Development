@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
@@ -10,6 +10,7 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
+import useActiveSession from "./hooks/useActiveSession";
 
 const ProtectedRoute = ({ user, children }) => {
   if (!user) {
@@ -19,14 +20,39 @@ const ProtectedRoute = ({ user, children }) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const sessionId = "F6iOgZiekNDJ47lSiWBX"; // Temporary hardcoded sessionId from requirements
+  const [user, setUser] = useState(() => {
+    return localStorage.getItem("f1_username") || null;
+  });
+  const { sessionId, loading: sessionLoading, error: sessionError } = useActiveSession(user);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem("f1_username", user);
+    } else {
+      localStorage.removeItem("f1_username");
+    }
+  }, [user]);
+
+  const handleLogout = () => {
+    setUser(null);
+  };
 
   return (
     <BrowserRouter>
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         <Navbar username={user} onLogin={setUser} onLogout={() => setUser(null)} />
         
+        {user && sessionLoading && (
+          <div style={{ textAlign: 'center', padding: '8px', background: '#1a1a2e', color: '#aaa' }}>
+            Loading session...
+          </div>
+        )}
+        {user && sessionError && (
+          <div style={{ textAlign: 'center', padding: '8px', background: '#2a1a1a', color: '#f87171' }}>
+            Session error: {sessionError}
+          </div>
+        )}
+
         <main style={{ flex: 1 }}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
