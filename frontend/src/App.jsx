@@ -20,6 +20,7 @@ const ProtectedRoute = ({ user, children }) => {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const sessionId = "F6iOgZiekNDJ47lSiWBX"; // Temporary hardcoded sessionId from requirements
 
   return (
     <BrowserRouter>
@@ -31,9 +32,9 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/login" element={!user ? <Login onLogin={setUser} /> : <Navigate to="/" />} />
             <Route path="/contact" element={<Contact />} />
-            <Route path="/live" element={<ProtectedRoute user={user}><LiveTelemetry /></ProtectedRoute>} />
+            <Route path="/live" element={<ProtectedRoute user={user}><LiveTelemetry sessionId={sessionId} /></ProtectedRoute>} />
             <Route path="/leaderboard" element={<ProtectedRoute user={user}><Leaderboard /></ProtectedRoute>} />
-            <Route path="/profile" element={<ProtectedRoute user={user}><Profile username={user} /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute user={user}><Profile username={user} sessionId={sessionId} /></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>

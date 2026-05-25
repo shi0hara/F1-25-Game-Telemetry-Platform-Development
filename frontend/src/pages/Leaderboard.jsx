@@ -1,13 +1,16 @@
+import { useState, useEffect } from "react";
+
 export default function Leaderboard() {
   const data = [
     { rank: 1, name: "MaxV_99", time: "1:20.100", delta: "-" },
     { rank: 2, name: "SpeedDemon", time: "1:20.450", delta: "+0.350" },
     { rank: 3, name: "RP_Racer", time: "1:21.010", delta: "+0.910" },
   ];
+
   return (
     <div className="page-container">
       <h1>Global <span className="text-primary">Leaderboards</span></h1>
-      <div className="card">
+      <div className="card" style={{ marginBottom: "20px" }}>
         <h2>Weekly Fastest (Monza)</h2>
         <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', marginTop: '10px' }}>
           <thead>
