@@ -29,71 +29,67 @@ function SteeringWheel({ steering = 0 }) {
   const angle = clamped * 180;
 
   return (
-    <div className="card" style={{ marginTop: "20px" }}>
-      <h2>Steering Wheel</h2>
+    <div
+      style={{
+        height: "320px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
       <p style={{ color: "#888", fontSize: "13px", marginBottom: "12px" }}>
         Steering range: -1 to 1 → -180° to 180°
       </p>
 
       <div
         style={{
-          height: "260px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          width: "180px",
+          height: "180px",
+          borderRadius: "50%",
+          border: "12px solid #d1d5db",
+          position: "relative",
+          boxShadow: "0 0 0 8px rgba(255,255,255,0.04) inset",
+          transform: `rotate(${angle}deg)`,
+          transition: "transform 80ms linear",
         }}
       >
         <div
           style={{
-            width: "180px",
-            height: "180px",
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            width: "12px",
+            height: "12px",
             borderRadius: "50%",
-            border: "12px solid #d1d5db",
-            position: "relative",
-            boxShadow: "0 0 0 8px rgba(255,255,255,0.04) inset",
-            transform: `rotate(${angle}deg)`,
-            transition: "transform 80ms linear",
+            background: "#fff",
+            transform: "translate(-50%, -50%)",
           }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              width: "12px",
-              height: "12px",
-              borderRadius: "50%",
-              background: "#fff",
-              transform: "translate(-50%, -50%)",
-            }}
-          />
-
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              width: "110px",
-              height: "6px",
-              background: "#d1d5db",
-              transform: "translate(-50%, -50%)",
-              borderRadius: "999px",
-            }}
-          />
-
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              width: "6px",
-              height: "110px",
-              background: "#d1d5db",
-              transform: "translate(-50%, -50%)",
-              borderRadius: "999px",
-            }}
-          />
-        </div>
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            width: "110px",
+            height: "6px",
+            background: "#d1d5db",
+            transform: "translate(-50%, -50%)",
+            borderRadius: "999px",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            width: "6px",
+            height: "110px",
+            background: "#d1d5db",
+            transform: "translate(-50%, -50%)",
+            borderRadius: "999px",
+          }}
+        />
       </div>
 
       <div style={{ textAlign: "center", marginTop: "8px", fontSize: "18px" }}>
@@ -273,11 +269,10 @@ export default function LiveTelemetry({ sessionId }) {
       {error && <p style={{ color: "red" }}>Error: {error}</p>}
       
       <div className="grid-2" style={{ marginBottom: "20px" }}>
-        <div className="card" style={{ borderLeftColor: 'var(--color-accent-blue)' }}>
-          <SteeringWheel steering={selectedTelemetry?.steering ?? 0} />
+        <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
           <h2>Current Stats</h2>
           {selectedTelemetry ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <p><strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0} km/h</p>
               <p><strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}</p>
               <p><strong>RPM:</strong> {selectedTelemetry.rpm ?? 0}</p>
@@ -291,6 +286,11 @@ export default function LiveTelemetry({ sessionId }) {
           ) : (
             <p>Waiting for telemetry data or session ID...</p>
           )}
+        </div>
+      
+        <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
+          <h2>Steering Wheel</h2>
+          <SteeringWheel steering={selectedTelemetry?.steering ?? 0} />
         </div>
       </div>
 
