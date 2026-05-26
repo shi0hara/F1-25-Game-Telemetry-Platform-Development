@@ -272,7 +272,7 @@ export default function LiveTelemetry({ sessionId }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
               <p><strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0} km/h</p>
               <p><strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}</p>
-              <p><strong>RPM:</strong> {selectedTelemetry.rpm ?? 0}</p>
+              <p><strong>RPM:</strong> {selectedTelemetry?.rpm ?? selectedTelemetry?.engineRPM ?? "-"}</p>
               <p><strong>Throttle:</strong> {((selectedTelemetry.throttle ?? 0) * 100).toFixed(0)}%</p>
               <p><strong>Brake:</strong> {((selectedTelemetry.brake ?? 0) * 100).toFixed(0)}%</p>
               <p><strong>Steering:</strong> {(selectedTelemetry.steering ?? 0).toFixed(2)}</p>
