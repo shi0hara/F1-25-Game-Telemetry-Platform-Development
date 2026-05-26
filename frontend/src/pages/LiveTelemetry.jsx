@@ -274,8 +274,7 @@ export default function LiveTelemetry({ sessionId }) {
       
       <div className="grid-2" style={{ marginBottom: "20px" }}>
         <div className="card" style={{ borderLeftColor: 'var(--color-accent-blue)' }}>
-          <div className="grid-2" style={{ marginBottom: "20px" }}>
-          <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
+          <SteeringWheel steering={selectedTelemetry?.steering ?? 0} />
           <h2>Current Stats</h2>
           {selectedTelemetry ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
