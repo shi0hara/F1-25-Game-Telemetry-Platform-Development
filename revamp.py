@@ -5,6 +5,7 @@ import ctypes
 import queue
 import threading
 import os
+import getpass
 from datetime import datetime, timezone
 
 import requests
@@ -24,10 +25,8 @@ HEADER_PRINT_EVERY_SEC = 0.5
 SESSION_PACKET_ID = 1
 LAP_DATA_PACKET_ID = 2
 EVENT_PACKET_ID = 3
-PARTICIPANTS_PACKET_ID = 4
 TELEMETRY_PACKET_ID = 6
 FINAL_CLASS_PACKET_ID = 8
-TIME_TRIAL_PACKET_ID = 14  # adjust only if your packet map uses a different ID
 
 RACE_SESSION_TYPES = {15, 16, 17}
 MIN_EVENT_END_AFTER_START_SEC = 10.0
@@ -39,6 +38,8 @@ CSV_FLUSH_EVERY_ROWS = 25
 
 BATCH_SIZE = 20
 TELEMETRY_BATCH = []
+
+PARTICIPANTS_PACKET_ID = 4
 
 DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
@@ -95,39 +96,24 @@ LAST_SESSION_META_SYNCED = {
     "sessionType": None,
 }
 
-LAST_LAP_SNAPSHOT = {
-    "lapNumber": None,
-    "sector1Ms": None,
-    "sector2Ms": None,
-    "sector3Ms": None,
-    "valid": None,
-}
+CURRENT_SECTOR = None
 
-LATEST_TIME_TRIAL_DATA = {
-    "playerSessionBest": None,
-    "personalBest": None,
-    "updatedAt": None,
-}
-
-SESSION_ID = None
-USER_ID = None
-
-STOP_EVENT = threading.Event()
-
-LATEST_QUEUE = queue.Queue(maxsize=200)
-BATCH_QUEUE = queue.Queue(maxsize=2000)
-LAP_QUEUE = queue.Queue(maxsize=200)
-CORNER_QUEUE = queue.Queue(maxsize=500)
-
-LAST_SAMPLE_SENT_AT = 0.0
-CURRENT_LAP_NUM = None
-BEST_LAP_TIME_MS = None
-LAST_DELTA_TO_PB_MS = None
-
-BRAKE_ACTIVE = False
-BRAKE_START_DISTANCE_M = 0.0
-LAST_BRAKE_SAMPLE_TIME = None
-
+def extract_current_sector(lap):
+    return parse_int(
+        get_attr(
+            lap,
+            "sector",
+            "Sector",
+            "mSector",
+            "m_sector",
+            "current_sector",
+            "currentSector",
+            "mCurrentSector",
+            "m_currentSector",
+            default=None,
+        ),
+        None,
+    )
 
 def parse_truthy(value):
     if isinstance(value, bool):
@@ -143,44 +129,57 @@ def parse_truthy(value):
         return False
     return bool(s)
 
+def extract_lap_validity(lap):
+    invalid_fields = (
+        "current_lap_invalid",
+        "mCurrentLapInvalid",
+        "m_currentLapInvalid",
+        "last_lap_invalid",
+        "mLastLapInvalid",
+        "m_lastLapInvalid",
+        "invalid",
+    )
+    valid_fields = (
+        "current_lap_valid",
+        "mCurrentLapValid",
+        "m_currentLapValid",
+        "last_lap_valid",
+        "mLastLapValid",
+        "m_lastLapValid",
+        "valid",
+    )
 
-def get_attr(obj, *names, default=None):
-    for n in names:
-        if hasattr(obj, n):
-            return getattr(obj, n)
-    return default
+    for field in invalid_fields:
+        raw = get_attr(lap, field, default=None)
+        if raw is not None:
+            return not parse_truthy(raw)
 
+    for field in valid_fields:
+        raw = get_attr(lap, field, default=None)
+        if raw is not None:
+            return parse_truthy(raw)
 
-def parse_number(value, fallback=None):
-    if value is None:
-        return fallback
-    try:
-        return float(value)
-    except Exception:
-        return fallback
+    return None
 
+def extract_lap_sector_times(lap):
+    sector1_ms = parse_int(
+        get_attr(lap, "sector1_time_in_ms", "sector1TimeInMS", "mSector1TimeInMS", "m_sector1TimeInMS", default=None),
+        None,
+    )
+    sector2_ms = parse_int(
+        get_attr(lap, "sector2_time_in_ms", "sector2TimeInMS", "mSector2TimeInMS", "m_sector2TimeInMS", default=None),
+        None,
+    )
+    sector3_ms = parse_int(
+        get_attr(lap, "sector3_time_in_ms", "sector3TimeInMS", "mSector3TimeInMS", "m_sector3TimeInMS", default=None),
+        None,
+    )
+    return sector1_ms, sector2_ms, sector3_ms
 
-def parse_int(value, fallback=None):
-    n = parse_number(value, None)
-    if n is None:
-        return fallback
-    try:
-        return int(n)
-    except Exception:
-        return fallback
-
-
-def safe_enqueue(qobj, item):
-    try:
-        qobj.put_nowait(item)
-        return True
-    except queue.Full:
-        return False
-
-
-def iso_now():
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
+def get_track_name(track_id):
+    if track_id is None:
+        return None
+    return TRACK_ID_TO_NAME.get(int(track_id))
 
 def decode_text(value):
     if value is None:
@@ -196,56 +195,160 @@ def decode_text(value):
         s = str(value).strip("\x00 ").strip()
         return s or None
 
+def get_attr(obj, *names, default=None):
+    for n in names:
+        if hasattr(obj, n):
+            return getattr(obj, n)
+    return default
 
-def get_track_name(track_id):
-    if track_id is None:
-        return None
-    return TRACK_ID_TO_NAME.get(int(track_id))
+def parse_number(value, fallback=None):
+    if value is None:
+        return fallback
+    try:
+        return float(value)
+    except Exception:
+        return fallback
 
+def parse_int(value, fallback=None):
+    n = parse_number(value, None)
+    if n is None:
+        return fallback
+    try:
+        return int(n)
+    except Exception:
+        return fallback
+
+def safe_enqueue(qobj, item):
+    try:
+        qobj.put_nowait(item)
+        return True
+    except queue.Full:
+        return False
+
+def iso_now():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 def extract_track_info_from_session_packet(pkt):
     track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
     return track_id, get_track_name(track_id)
 
+def post_corner(corner_body):
+    if not SESSION_ID:
+        return
+    safe_enqueue(CORNER_QUEUE, (
+        f"/sessions/{SESSION_ID}/corners",
+        corner_body,
+        2,
+    ))
 
-def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
-    url = f"{API_BASE}{endpoint}"
-    res = http.post(url, json=body, timeout=timeout)
-    res.raise_for_status()
-    return res
+def flush_active_corner(end_sample=None, end_reason="shutdown"):
+    global CORNER_ACTIVE, CORNER_START
 
+    if not CORNER_ACTIVE or not CORNER_START:
+        return
 
-def queue_worker(qobj, label):
-    while not STOP_EVENT.is_set() or not qobj.empty():
-        try:
-            endpoint, body, retries_left = qobj.get(timeout=0.1)
-        except queue.Empty:
-            continue
+    end_sample = end_sample or {}
+    end_epoch = time.time()
 
-        delay = 0.5
-        for attempt in range(retries_left + 1):
-            try:
-                post_json(endpoint, body)
-                break
-            except Exception as e:
-                if attempt >= retries_left:
-                    print(f"API error on {label} {endpoint} after {retries_left} retries: {e}")
-                else:
-                    time.sleep(delay)
-                    delay = min(delay * 2.0, 5.0)
+    payload = {
+        "cornerIndex": CORNER_START["cornerIndex"],
+        "trackId": CORNER_START.get("trackId"),
+        "trackName": CORNER_START.get("trackName"),
+        "startedAt": CORNER_START.get("startedAt"),
+        "endedAt": end_sample.get("timestamp", iso_now()),
+        "durationMs": int(max(0, (end_epoch - CORNER_START["startedAtEpoch"]) * 1000)),
+        "startLapNumber": CORNER_START.get("startLapNumber"),
+        "endLapNumber": end_sample.get("lapNumber", CURRENT_LAP_NUM),
+        "startLapDistanceM": CORNER_START.get("startLapDistanceM"),
+        "endLapDistanceM": end_sample.get("lapDistance", CURRENT_LAP_DISTANCE_M),
+        "startTotalDistanceM": CORNER_START.get("startTotalDistanceM"),
+        "endTotalDistanceM": end_sample.get("totalDistance", CURRENT_TOTAL_DISTANCE_M),
+        "startSpeedKph": CORNER_START.get("startSpeedKph"),
+        "endSpeedKph": end_sample.get("speedKph"),
+        "maxAbsSteering": CORNER_START.get("maxAbsSteering", 0.0),
+        "endReason": end_reason,
+    }
 
+    post_corner(payload)
+    CORNER_ACTIVE = False
+    CORNER_START = None
 
-def prompt_identity():
-    global DRIVER_USERNAME, DRIVER_EMAIL
+def update_corner_state_from_sample(sample_body):
+    global CORNER_ACTIVE, CORNER_START, CORNER_COUNTER
 
-    if not DRIVER_USERNAME:
-        DRIVER_USERNAME = input("Username: ").strip()
-    if not DRIVER_EMAIL:
-        DRIVER_EMAIL = input("Email: ").strip()
+    lap_distance = sample_body.get("lapDistance")
+    lap_number = sample_body.get("lapNumber")
+    steering_abs = abs(sample_body.get("steering") or 0.0)
 
-    if not DRIVER_USERNAME:
-        raise ValueError("Username is required")
+    if lap_distance is None or lap_number is None:
+        return
 
+    if CORNER_ACTIVE and lap_number != CORNER_START.get("startLapNumber"):
+        flush_active_corner(sample_body, end_reason="lap_change")
+        return
+
+    if not CORNER_ACTIVE:
+        if steering_abs >= CORNER_START_THRESHOLD:
+            CORNER_COUNTER += 1
+            CORNER_ACTIVE = True
+            CORNER_START = {
+                "cornerIndex": CORNER_COUNTER,
+                "trackId": TRACK_ID,
+                "trackName": TRACK_NAME,
+                "startedAt": sample_body["timestamp"],
+                "startedAtEpoch": time.time(),
+                "startLapNumber": lap_number,
+                "startLapDistanceM": lap_distance,
+                "startTotalDistanceM": sample_body.get("totalDistance"),
+                "startSpeedKph": sample_body.get("speedKph"),
+                "maxAbsSteering": steering_abs,
+            }
+    else:
+        CORNER_START["maxAbsSteering"] = max(CORNER_START["maxAbsSteering"], steering_abs)
+
+        if steering_abs <= CORNER_END_THRESHOLD:
+            flush_active_corner(sample_body, end_reason="steering_released")
+
+def sync_session_metadata():
+    global LAST_SESSION_META_SYNCED
+
+    if not SESSION_ID:
+        return
+
+    payload = {
+        "trackId": TRACK_ID,
+        "trackName": TRACK_NAME,
+        "sessionType": SESSION_TYPE,
+    }
+
+    if payload == LAST_SESSION_META_SYNCED:
+        return
+
+    try:
+        res = http.patch(f"{API_BASE}/sessions/{SESSION_ID}", json=payload, timeout=REQUEST_TIMEOUT)
+        res.raise_for_status()
+        LAST_SESSION_META_SYNCED = dict(payload)
+    except Exception as e:
+        print("Session metadata sync error:", e)
+
+def extract_player_name_from_participants(header, pkt):
+    arr = get_attr(pkt, "participants", "m_participants")
+    if arr is None or len(arr) == 0:
+        return None
+
+    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    if not (0 <= player_idx < len(arr)):
+        player_idx = 0
+
+    participant = arr[player_idx]
+
+    for field in ("name", "m_name", "driver_name", "m_driverName"):
+        raw = get_attr(participant, field, default=None)
+        name = decode_text(raw)
+        if name:
+            return name
+
+    return None
 
 def detect_key_shape(mapping):
     k = next(iter(mapping.keys()))
@@ -255,15 +358,12 @@ def detect_key_shape(mapping):
         return ("tuple", len(k))
     return (type(k).__name__, None)
 
-
 KEY_TYPE, KEY_LEN = detect_key_shape(HEADER_FIELD_TO_PACKET_TYPE)
-
 
 def is_fake_name(name):
     if not name:
         return True
     return name.startswith("Room-") or name.startswith("User-")
-
 
 def pick_packet_class(header):
     fmt = int(get_attr(header, "packet_format", "m_packetFormat", default=0) or 0)
@@ -317,6 +417,82 @@ def pick_packet_class(header):
 
     return None
 
+def extract_event_code(event_pkt):
+    raw = get_attr(
+        event_pkt,
+        "event_string_code",
+        "m_eventStringCode",
+        "event_code",
+        "m_eventCode",
+        default=None,
+    )
+    if raw is None:
+        return ""
+
+    if isinstance(raw, (bytes, bytearray)):
+        return raw.decode("ascii", errors="ignore").strip("\x00 ")
+    if isinstance(raw, str):
+        return raw.strip("\x00 ")
+    try:
+        return bytes(raw).decode("ascii", errors="ignore").strip("\x00 ")
+    except Exception:
+        return str(raw).strip("\x00 ")
+
+def get_frame_identifier(header, pkt=None):
+    for obj in (header, pkt):
+        if obj is None:
+            continue
+        for name in ("frame_identifier", "m_frameIdentifier"):
+            if hasattr(obj, name):
+                try:
+                    return int(getattr(obj, name))
+                except Exception:
+                    pass
+    return None
+
+http = requests.Session()
+retries = Retry(
+    total=3,
+    connect=3,
+    read=3,
+    backoff_factor=0.25,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+)
+adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
+http.mount("http://", adapter)
+http.mount("https://", adapter)
+http.headers.update({"Content-Type": "application/json"})
+
+SESSION_ID = None
+USER_ID = None
+
+STOP_EVENT = threading.Event()
+
+LATEST_QUEUE = queue.Queue(maxsize=200)
+BATCH_QUEUE = queue.Queue(maxsize=2000)
+LAP_QUEUE = queue.Queue(maxsize=200)
+CORNER_QUEUE = queue.Queue(maxsize=500)
+
+LAST_SAMPLE_SENT_AT = 0.0
+CURRENT_LAP_NUM = None
+BEST_LAP_TIME_MS = None
+LAST_DELTA_TO_PB_MS = None
+
+BRAKE_ACTIVE = False
+BRAKE_START_DISTANCE_M = 0.0
+LAST_BRAKE_SAMPLE_TIME = None
+
+def prompt_identity():
+    global DRIVER_USERNAME, DRIVER_EMAIL
+
+    if not DRIVER_USERNAME:
+        DRIVER_USERNAME = input("Username: ").strip()
+    if not DRIVER_EMAIL:
+        DRIVER_EMAIL = input("Email: ").strip()
+
+    if not DRIVER_USERNAME:
+        raise ValueError("Username is required")
 
 def sniff_player_name(sock, timeout_sec=10.0):
     global PLAYER_NAME_DETECTED
@@ -365,238 +541,137 @@ def sniff_player_name(sock, timeout_sec=10.0):
 
     return None
 
+def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
+    url = f"{API_BASE}{endpoint}"
+    res = http.post(url, json=body, timeout=timeout)
+    res.raise_for_status()
+    return res
 
-def extract_player_name_from_participants(header, pkt):
-    arr = get_attr(pkt, "participants", "m_participants")
-    if arr is None or len(arr) == 0:
-        return None
-
-    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
-    if not (0 <= player_idx < len(arr)):
-        player_idx = 0
-
-    participant = arr[player_idx]
-
-    for field in ("name", "m_name", "driver_name", "m_driverName"):
-        raw = get_attr(participant, field, default=None)
-        name = decode_text(raw)
-        if name:
-            return name
-
-    return None
-
-
-def extract_event_code(event_pkt):
-    raw = get_attr(
-        event_pkt,
-        "event_string_code",
-        "m_eventStringCode",
-        "event_code",
-        "m_eventCode",
-        default=None,
-    )
-    if raw is None:
-        return ""
-
-    if isinstance(raw, (bytes, bytearray)):
-        return raw.decode("ascii", errors="ignore").strip("\x00 ")
-    if isinstance(raw, str):
-        return raw.strip("\x00 ")
-    try:
-        return bytes(raw).decode("ascii", errors="ignore").strip("\x00 ")
-    except Exception:
-        return str(raw).strip("\x00 ")
-
-
-def get_frame_identifier(header, pkt=None):
-    for obj in (header, pkt):
-        if obj is None:
+def queue_worker(qobj, label):
+    while not STOP_EVENT.is_set() or not qobj.empty():
+        try:
+            endpoint, body, retries_left = qobj.get(timeout=0.1)
+        except queue.Empty:
             continue
-        for name in ("frame_identifier", "m_frameIdentifier"):
-            if hasattr(obj, name):
-                try:
-                    return int(getattr(obj, name))
-                except Exception:
-                    pass
-    return None
 
+        delay = 0.5
+        for attempt in range(retries_left + 1):
+            try:
+                post_json(endpoint, body)
+                break
+            except Exception as e:
+                if attempt >= retries_left:
+                    print(f"API error on {label} {endpoint} after {retries_left} retries: {e}")
+                else:
+                    time.sleep(delay)
+                    delay = min(delay * 2.0, 5.0)
 
-def post_corner(corner_body):
-    if not SESSION_ID:
-        return
-    safe_enqueue(CORNER_QUEUE, (
-        f"/sessions/{SESSION_ID}/corners",
-        corner_body,
-        2,
-    ))
+def create_user_and_session():
+    global USER_ID, SESSION_ID
 
+    while not STOP_EVENT.is_set():
+        try:
+            print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
 
-def flush_active_corner(end_sample=None, end_reason="shutdown"):
-    global CORNER_ACTIVE, CORNER_START
+            user_res = http.post(
+                f"{API_BASE}/users/ensure",
+                json={
+                    "username": DRIVER_USERNAME,
+                    "email": DRIVER_EMAIL,
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            user_res.raise_for_status()
+            user_data = user_res.json()
+            USER_ID = user_data["id"]
 
-    if not CORNER_ACTIVE or not CORNER_START:
-        return
+            session_res = http.post(
+                f"{API_BASE}/sessions",
+                json={
+                    "userId": USER_ID,
+                    "trackName": TRACK_NAME,
+                    "trackId": TRACK_ID,
+                    "sessionType": SESSION_TYPE,
+                },
+                timeout=REQUEST_TIMEOUT,
+            )
+            session_res.raise_for_status()
+            SESSION_ID = session_res.json()["id"]
 
-    end_sample = end_sample or {}
-    end_epoch = time.time()
+            print("SUCCESS! USERNAME:", DRIVER_USERNAME, "| USER ID:", USER_ID, "| SESSION ID:", SESSION_ID)
+            break
+        except Exception as e:
+            print(f"API not ready, retrying in 5s... ({e})")
+            time.sleep(5)
 
-    payload = {
-        "cornerIndex": CORNER_START["cornerIndex"],
-        "trackId": CORNER_START.get("trackId"),
-        "trackName": CORNER_START.get("trackName"),
-        "startedAt": CORNER_START.get("startedAt"),
-        "endedAt": end_sample.get("timestamp", iso_now()),
-        "durationMs": int(max(0, (end_epoch - CORNER_START["startedAtEpoch"]) * 1000)),
-        "startLapNumber": CORNER_START.get("startLapNumber"),
-        "endLapNumber": end_sample.get("lapNumber", CURRENT_LAP_NUM),
-        "startLapDistanceM": CORNER_START.get("startLapDistanceM"),
-        "endLapDistanceM": end_sample.get("lapDistance", CURRENT_LAP_DISTANCE_M),
-        "startTotalDistanceM": CORNER_START.get("startTotalDistanceM"),
-        "endTotalDistanceM": end_sample.get("totalDistance", CURRENT_TOTAL_DISTANCE_M),
-        "startSpeedKph": CORNER_START.get("startSpeedKph"),
-        "endSpeedKph": end_sample.get("speedKph"),
-        "maxAbsSteering": CORNER_START.get("maxAbsSteering", 0.0),
-        "endReason": end_reason,
-    }
-
-    post_corner(payload)
-    CORNER_ACTIVE = False
-    CORNER_START = None
-
-
-def update_corner_state_from_sample(sample_body):
-    global CORNER_ACTIVE, CORNER_START, CORNER_COUNTER
-
-    lap_distance = sample_body.get("lapDistance")
-    lap_number = sample_body.get("lapNumber")
-    steering_abs = abs(sample_body.get("steering") or 0.0)
-
-    if lap_distance is None or lap_number is None:
-        return
-
-    if CORNER_ACTIVE and lap_number != CORNER_START.get("startLapNumber"):
-        flush_active_corner(sample_body, end_reason="lap_change")
-        return
-
-    if not CORNER_ACTIVE:
-        if steering_abs >= CORNER_START_THRESHOLD:
-            CORNER_COUNTER += 1
-            CORNER_ACTIVE = True
-            CORNER_START = {
-                "cornerIndex": CORNER_COUNTER,
-                "trackId": TRACK_ID,
-                "trackName": TRACK_NAME,
-                "startedAt": sample_body["timestamp"],
-                "startedAtEpoch": time.time(),
-                "startLapNumber": lap_number,
-                "startLapDistanceM": lap_distance,
-                "startTotalDistanceM": sample_body.get("totalDistance"),
-                "startSpeedKph": sample_body.get("speedKph"),
-                "maxAbsSteering": steering_abs,
-            }
-    else:
-        CORNER_START["maxAbsSteering"] = max(CORNER_START["maxAbsSteering"], steering_abs)
-
-        if steering_abs <= CORNER_END_THRESHOLD:
-            flush_active_corner(sample_body, end_reason="steering_released")
-
-
-def sync_session_metadata():
-    global LAST_SESSION_META_SYNCED
-
-    if not SESSION_ID:
-        return
-
-    payload = {
-        "trackId": TRACK_ID,
-        "trackName": TRACK_NAME,
-        "sessionType": SESSION_TYPE,
-    }
-
-    if payload == LAST_SESSION_META_SYNCED:
-        return
-
+def end_session_once(session_closed):
+    if session_closed or not SESSION_ID:
+        return True
     try:
-        res = http.patch(f"{API_BASE}/sessions/{SESSION_ID}", json=payload, timeout=REQUEST_TIMEOUT)
-        res.raise_for_status()
-        LAST_SESSION_META_SYNCED = dict(payload)
+        http.post(f"{API_BASE}/sessions/{SESSION_ID}/end", timeout=REQUEST_TIMEOUT)
     except Exception as e:
-        print("Session metadata sync error:", e)
-
+        print("Session end API error:", e)
+    return True
 
 def get_lap_array(pkt):
     return get_attr(pkt, "lap_data", "m_lapData")
 
+def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
+    global TRACK_ID, TRACK_NAME, SESSION_TYPE
 
-def combine_sector_time(minutes_part, ms_part):
-    minutes = parse_int(minutes_part, 0) or 0
-    ms = parse_int(ms_part, None)
-    if ms is None:
-        return None
-    return (minutes * 60000) + ms
+    if pid != SESSION_PACKET_ID or pkt_cls is None:
+        return race_active, race_started_at
 
+    sess_pkt = pkt_cls.from_buffer_copy(data)
+    session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
+    SESSION_TYPE = session_type
 
-def extract_lap_validity(lap):
-    invalid_fields = (
-        "current_lap_invalid",
-        "mCurrentLapInvalid",
-        "m_currentLapInvalid",
-        "last_lap_invalid",
-        "mLastLapInvalid",
-        "m_lastLapInvalid",
-        "invalid",
-    )
-    valid_fields = (
-        "current_lap_valid",
-        "mCurrentLapValid",
-        "m_currentLapValid",
-        "last_lap_valid",
-        "mLastLapValid",
-        "m_lastLapValid",
-        "valid",
-    )
+    track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
+    TRACK_ID = track_id
+    TRACK_NAME = track_name
 
-    for field in invalid_fields:
-        raw = get_attr(lap, field, default=None)
-        if raw is not None:
-            return not parse_truthy(raw)
+    sync_session_metadata()
 
-    for field in valid_fields:
-        raw = get_attr(lap, field, default=None)
-        if raw is not None:
-            return parse_truthy(raw)
+    is_race_session = session_type in RACE_SESSION_TYPES
 
-    return None
+    if is_race_session and not race_active:
+        print("Grand Prix session started.")
+        return True, time.time()
 
+    if not is_race_session and race_active:
+        print("Grand Prix session ended.")
+        return False, None
 
-def extract_lap_sector_times(lap):
-    # F1 25 layout
-    sector1_ms = combine_sector_time(
-        get_attr(lap, "sector1_time_minutes_part", "m_sector1TimeMinutesPart", default=None),
-        get_attr(lap, "sector1_time_ms_part", "mSector1TimeMSPart", default=None),
-    )
-    sector2_ms = combine_sector_time(
-        get_attr(lap, "sector2_time_minutes_part", "m_sector2TimeMinutesPart", default=None),
-        get_attr(lap, "sector2_time_ms_part", "mSector2TimeMSPart", default=None),
-    )
+    return race_active, race_started_at
 
-    # Older / alternate layouts fallback
-    if sector1_ms is None:
-        sector1_ms = parse_int(
-            get_attr(lap, "sector1_time_in_ms", "sector1TimeInMS", "mSector1TimeInMS", "m_sector1TimeInMS", default=None),
-            None,
-        )
-    if sector2_ms is None:
-        sector2_ms = parse_int(
-            get_attr(lap, "sector2_time_in_ms", "sector2TimeInMS", "mSector2TimeInMS", "m_sector2TimeInMS", default=None),
-            None,
-        )
-    sector3_ms = parse_int(
-        get_attr(lap, "sector3_time_in_ms", "sector3TimeInMS", "mSector3TimeInMS", "m_sector3TimeInMS", default=None),
-        None,
-    )
-    return sector1_ms, sector2_ms, sector3_ms
+def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
+    if pid != EVENT_PACKET_ID or pkt_cls is None:
+        return race_active, race_started_at
 
+    event_pkt = pkt_cls.from_buffer_copy(data)
+    code = extract_event_code(event_pkt)
+
+    if code == "SEND" and race_active:
+        if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
+            return race_active, race_started_at
+        print("Grand Prix session ended.")
+        return False, None
+
+    return race_active, race_started_at
+
+def handle_final_class_packet(pid, race_active, race_started_at):
+    if pid == FINAL_CLASS_PACKET_ID and race_active:
+        print("Grand Prix session ended.")
+        return False, None
+    return race_active, race_started_at
+
+LAST_LAP_SNAPSHOT = {
+    "lapNumber": None,
+    "sector1Ms": None,
+    "sector2Ms": None,
+    "sector3Ms": None,
+    "valid": None,
+}
 
 def extract_lap_snapshot(lap):
     sector1_ms, sector2_ms, sector3_ms = extract_lap_sector_times(lap)
@@ -607,52 +682,6 @@ def extract_lap_snapshot(lap):
         "sector3Ms": sector3_ms,
         "valid": lap_valid,
     }
-
-
-def update_time_trial_state(pkt):
-    global LATEST_TIME_TRIAL_DATA
-
-    player_ds = get_attr(pkt, "player_session_best_data_set", "m_playerSessionBestDataSet", default=None)
-    personal_ds = get_attr(pkt, "personal_best_data_set", "m_personalBestDataSet", default=None)
-
-    def read_dataset(ds):
-        if ds is None:
-            return None
-        return {
-            "lapTimeMs": parse_int(get_attr(ds, "lap_time_in_ms", "m_lapTimeInMS", default=None), None),
-            "sector1Ms": parse_int(get_attr(ds, "sector1_time_in_ms", "m_sector1TimeInMS", default=None), None),
-            "sector2Ms": parse_int(get_attr(ds, "sector2_time_in_ms", "m_sector2TimeInMS", default=None), None),
-            "sector3Ms": parse_int(get_attr(ds, "sector3_time_in_ms", "m_sector3TimeInMS", default=None), None),
-            "valid": parse_truthy(get_attr(ds, "valid", "m_valid", default=False)),
-            "carIdx": parse_int(get_attr(ds, "car_idx", "m_carIdx", default=None), None),
-            "teamId": parse_int(get_attr(ds, "team_id", "m_teamId", default=None), None),
-        }
-
-    LATEST_TIME_TRIAL_DATA = {
-        "playerSessionBest": read_dataset(player_ds),
-        "personalBest": read_dataset(personal_ds),
-        "updatedAt": iso_now(),
-    }
-
-
-def get_time_trial_sectors_for_lap(lap_time_ms):
-    if lap_time_ms is None:
-        return None, None, None, None
-
-    for key in ("playerSessionBest", "personalBest"):
-        ds = LATEST_TIME_TRIAL_DATA.get(key)
-        if not ds:
-            continue
-        if ds.get("lapTimeMs") == lap_time_ms:
-            return (
-                ds.get("sector1Ms"),
-                ds.get("sector2Ms"),
-                ds.get("sector3Ms"),
-                ds.get("valid"),
-            )
-
-    return None, None, None, None
-
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
@@ -679,9 +708,14 @@ def update_lap_state_from_packet(header, pkt):
     CURRENT_LAP_DISTANCE_M = lap_distance
     CURRENT_TOTAL_DISTANCE_M = total_distance
 
+    # Snapshot the ACTIVE lap every packet
     current_snapshot = extract_lap_snapshot(lap)
     current_snapshot["lapNumber"] = current_lap
 
+    global CURRENT_SECTOR
+    CURRENT_SECTOR = extract_current_sector(lap)
+
+    # If lap number increased, the lap that just finished is the previous one
     if current_lap is not None and CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
         completed = dict(LAST_LAP_SNAPSHOT)
         completed["lapNumber"] = CURRENT_LAP_NUM
@@ -690,15 +724,6 @@ def update_lap_state_from_packet(header, pkt):
         sector2_ms = completed.get("sector2Ms")
         sector3_ms = completed.get("sector3Ms")
         lap_valid = completed.get("valid")
-
-        # Prefer exact Time Trial sectors when available
-        tt_sector1, tt_sector2, tt_sector3, tt_valid = get_time_trial_sectors_for_lap(last_lap_time)
-        if tt_sector1 is not None or tt_sector2 is not None or tt_sector3 is not None:
-            sector1_ms = tt_sector1 if tt_sector1 is not None else sector1_ms
-            sector2_ms = tt_sector2 if tt_sector2 is not None else sector2_ms
-            sector3_ms = tt_sector3 if tt_sector3 is not None else sector3_ms
-            if tt_valid is not None:
-                lap_valid = tt_valid
 
         if lap_valid is None:
             lap_valid = True
@@ -742,8 +767,6 @@ def update_lap_state_from_packet(header, pkt):
         LAST_DELTA_TO_PB_MS = current_lap_time_ms - BEST_LAP_TIME_MS
     else:
         LAST_DELTA_TO_PB_MS = None
-
-
 def enqueue_latest(item):
     try:
         LATEST_QUEUE.put_nowait(item)
@@ -756,7 +779,6 @@ def enqueue_latest(item):
             LATEST_QUEUE.put_nowait(item)
         except queue.Full:
             pass
-
 
 def post_latest_telemetry(sample_body):
     if not SESSION_ID:
@@ -771,7 +793,6 @@ def post_latest_telemetry(sample_body):
         0,
     ))
 
-
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
@@ -783,7 +804,7 @@ def post_telemetry_sample(header, pkt):
     if now - LAST_SAMPLE_SENT_AT < SAMPLE_MIN_INTERVAL_SEC:
         return
 
-    arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData")
+    arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData", "m_carTelemetryData")
     if arr is None or len(arr) == 0:
         return
 
@@ -797,7 +818,19 @@ def post_telemetry_sample(header, pkt):
     throttle = float(parse_number(get_attr(t, "throttle", "m_throttle", default=0.0), 0.0) or 0.0)
     brake = float(parse_number(get_attr(t, "brake", "m_brake", default=0.0), 0.0) or 0.0)
     steering = float(parse_number(get_attr(t, "steer", "m_steer", default=0.0), 0.0) or 0.0)
-    rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
+    rpm = int(parse_int(
+        get_attr(
+            t,
+            "engineRPM",
+            "EngineRPM",
+            "engine_rpm",
+            "m_engineRPM",
+            "m_engine_rpm",
+            "rpm",
+            default=0,
+        ),
+        0,
+    ) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
 
@@ -840,6 +873,7 @@ def post_telemetry_sample(header, pkt):
         "brakingDistance": braking_distance,
         "drs": drs,
         "playerCarIndex": player_idx,
+        "currentSector": CURRENT_SECTOR,
     }
 
     update_corner_state_from_sample(sample_body)
@@ -856,108 +890,6 @@ def post_telemetry_sample(header, pkt):
             2,
         ))
         TELEMETRY_BATCH.clear()
-
-
-def create_user_and_session():
-    global USER_ID, SESSION_ID
-
-    while not STOP_EVENT.is_set():
-        try:
-            print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
-
-            user_res = http.post(
-                f"{API_BASE}/users/ensure",
-                json={
-                    "username": DRIVER_USERNAME,
-                    "email": DRIVER_EMAIL,
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            user_res.raise_for_status()
-            user_data = user_res.json()
-            USER_ID = user_data["id"]
-
-            session_res = http.post(
-                f"{API_BASE}/sessions",
-                json={
-                    "userId": USER_ID,
-                    "trackName": TRACK_NAME,
-                    "trackId": TRACK_ID,
-                    "sessionType": SESSION_TYPE,
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            session_res.raise_for_status()
-            SESSION_ID = session_res.json()["id"]
-
-            print("SUCCESS! USERNAME:", DRIVER_USERNAME, "| USER ID:", USER_ID, "| SESSION ID:", SESSION_ID)
-            break
-        except Exception as e:
-            print(f"API not ready, retrying in 5s... ({e})")
-            time.sleep(5)
-
-
-def end_session_once(session_closed):
-    if session_closed or not SESSION_ID:
-        return True
-    try:
-        http.post(f"{API_BASE}/sessions/{SESSION_ID}/end", timeout=REQUEST_TIMEOUT)
-    except Exception as e:
-        print("Session end API error:", e)
-    return True
-
-
-def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
-    global TRACK_ID, TRACK_NAME, SESSION_TYPE
-
-    if pid != SESSION_PACKET_ID or pkt_cls is None:
-        return race_active, race_started_at
-
-    sess_pkt = pkt_cls.from_buffer_copy(data)
-    session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
-    SESSION_TYPE = session_type
-
-    track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
-    TRACK_ID = track_id
-    TRACK_NAME = track_name
-
-    sync_session_metadata()
-
-    is_race_session = session_type in RACE_SESSION_TYPES
-
-    if is_race_session and not race_active:
-        print("Grand Prix session started.")
-        return True, time.time()
-
-    if not is_race_session and race_active:
-        print("Grand Prix session ended.")
-        return False, None
-
-    return race_active, race_started_at
-
-
-def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
-    if pid != EVENT_PACKET_ID or pkt_cls is None:
-        return race_active, race_started_at
-
-    event_pkt = pkt_cls.from_buffer_copy(data)
-    code = extract_event_code(event_pkt)
-
-    if code == "SEND" and race_active:
-        if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
-            return race_active, race_started_at
-        print("Grand Prix session ended.")
-        return False, None
-
-    return race_active, race_started_at
-
-
-def handle_final_class_packet(pid, race_active, race_started_at):
-    if pid == FINAL_CLASS_PACKET_ID and race_active:
-        print("Grand Prix session ended.")
-        return False, None
-    return race_active, race_started_at
-
 
 def main():
     global DRIVER_USERNAME
@@ -1042,9 +974,6 @@ def main():
                 race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_final_class_packet(pid, race_active, race_started_at)
 
-                if pid == TIME_TRIAL_PACKET_ID and pkt is not None:
-                    update_time_trial_state(pkt)
-
                 if pid == LAP_DATA_PACKET_ID and pkt is not None:
                     update_lap_state_from_packet(header, pkt)
 
@@ -1124,21 +1053,6 @@ def main():
 
         session_closed = end_session_once(session_closed)
         sock.close()
-
-
-http = requests.Session()
-retries = Retry(
-    total=3,
-    connect=3,
-    read=3,
-    backoff_factor=0.25,
-    status_forcelist=(429, 500, 502, 503, 504),
-    allowed_methods=frozenset(["GET", "POST", "PUT", "PATCH", "DELETE"]),
-)
-adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
-http.mount("http://", adapter)
-http.mount("https://", adapter)
-http.headers.update({"Content-Type": "application/json"})
 
 if __name__ == "__main__":
     main()
