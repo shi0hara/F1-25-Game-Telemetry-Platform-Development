@@ -16,7 +16,7 @@ function formatTime(ms) {
 }
 
 function isLapValid(value) {
-  return value !== false && value !== 0 && value !== "false";
+  return value === true || value === 1 || value === "true";
 }
 
 export default function TelemetryChart({ sessionId }) {
