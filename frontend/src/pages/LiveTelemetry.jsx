@@ -38,9 +38,6 @@ function SteeringWheel({ steering = 0 }) {
         justifyContent: "center",
       }}
     >
-      <p style={{ color: "#888", fontSize: "13px", marginBottom: "12px" }}>
-        Steering range: -1 to 1 → -180° to 180°
-      </p>
 
       <div
         style={{
