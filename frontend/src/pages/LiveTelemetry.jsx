@@ -24,6 +24,85 @@ ChartJS.register(
   Legend
 );
 
+function SteeringWheel({ steering = 0 }) {
+  const clamped = Math.max(-1, Math.min(1, Number(steering) || 0));
+  const angle = clamped * 180;
+
+  return (
+    <div className="card" style={{ marginTop: "20px" }}>
+      <h2>Steering Wheel</h2>
+      <p style={{ color: "#888", fontSize: "13px", marginBottom: "12px" }}>
+        Steering range: -1 to 1 → -180° to 180°
+      </p>
+
+      <div
+        style={{
+          height: "260px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            width: "180px",
+            height: "180px",
+            borderRadius: "50%",
+            border: "12px solid #d1d5db",
+            position: "relative",
+            boxShadow: "0 0 0 8px rgba(255,255,255,0.04) inset",
+            transform: `rotate(${angle}deg)`,
+            transition: "transform 80ms linear",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              width: "12px",
+              height: "12px",
+              borderRadius: "50%",
+              background: "#fff",
+              transform: "translate(-50%, -50%)",
+            }}
+          />
+
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              width: "110px",
+              height: "6px",
+              background: "#d1d5db",
+              transform: "translate(-50%, -50%)",
+              borderRadius: "999px",
+            }}
+          />
+
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              width: "6px",
+              height: "110px",
+              background: "#d1d5db",
+              transform: "translate(-50%, -50%)",
+              borderRadius: "999px",
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={{ textAlign: "center", marginTop: "8px", fontSize: "18px" }}>
+        <strong>{angle.toFixed(0)}°</strong>
+      </div>
+    </div>
+  );
+}
+
 export default function LiveTelemetry({ sessionId }) {
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
   const [speedPoints, setSpeedPoints] = useState([]);
@@ -195,6 +274,8 @@ export default function LiveTelemetry({ sessionId }) {
       
       <div className="grid-2" style={{ marginBottom: "20px" }}>
         <div className="card" style={{ borderLeftColor: 'var(--color-accent-blue)' }}>
+          <div className="grid-2" style={{ marginBottom: "20px" }}>
+          <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
           <h2>Current Stats</h2>
           {selectedTelemetry ? (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
