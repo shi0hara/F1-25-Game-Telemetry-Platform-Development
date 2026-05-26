@@ -96,6 +96,67 @@ LAST_SESSION_META_SYNCED = {
     "sessionType": None,
 }
 
+def parse_truthy(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    s = str(value).strip().lower()
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off", ""}:
+        return False
+    return bool(s)
+
+def extract_lap_validity(lap):
+    invalid_fields = (
+        "current_lap_invalid",
+        "mCurrentLapInvalid",
+        "m_currentLapInvalid",
+        "last_lap_invalid",
+        "mLastLapInvalid",
+        "m_lastLapInvalid",
+        "invalid",
+    )
+    valid_fields = (
+        "current_lap_valid",
+        "mCurrentLapValid",
+        "m_currentLapValid",
+        "last_lap_valid",
+        "mLastLapValid",
+        "m_lastLapValid",
+        "valid",
+    )
+
+    for field in invalid_fields:
+        raw = get_attr(lap, field, default=None)
+        if raw is not None:
+            return not parse_truthy(raw)
+
+    for field in valid_fields:
+        raw = get_attr(lap, field, default=None)
+        if raw is not None:
+            return parse_truthy(raw)
+
+    return None
+
+def extract_lap_sector_times(lap):
+    sector1_ms = parse_int(
+        get_attr(lap, "sector1_time_in_ms", "sector1TimeInMS", "mSector1TimeInMS", "m_sector1TimeInMS", default=None),
+        None,
+    )
+    sector2_ms = parse_int(
+        get_attr(lap, "sector2_time_in_ms", "sector2TimeInMS", "mSector2TimeInMS", "m_sector2TimeInMS", default=None),
+        None,
+    )
+    sector3_ms = parse_int(
+        get_attr(lap, "sector3_time_in_ms", "sector3TimeInMS", "mSector3TimeInMS", "m_sector3TimeInMS", default=None),
+        None,
+    )
+    return sector1_ms, sector2_ms, sector3_ms
+
 def get_track_name(track_id):
     if track_id is None:
         return None
@@ -614,12 +675,24 @@ def update_lap_state_from_packet(header, pkt):
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
             print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
 
+            sector1_ms, sector2_ms, sector3_ms = extract_lap_sector_times(lap)
+            lap_valid = extract_lap_validity(lap)
+            if lap_valid is None:
+                lap_valid = True
+
+            if sector3_ms is None and last_lap_time is not None and sector1_ms is not None and sector2_ms is not None:
+                sector3_ms = max(0, last_lap_time - sector1_ms - sector2_ms)
+
             if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
                 safe_enqueue(LAP_QUEUE, (
                     f"/sessions/{SESSION_ID}/laps",
                     {
                         "lapNumber": CURRENT_LAP_NUM,
                         "lapTimeMs": last_lap_time,
+                        "sector1Ms": sector1_ms,
+                        "sector2Ms": sector2_ms,
+                        "sector3Ms": sector3_ms,
+                        "valid": lap_valid,
                         "trackName": TRACK_NAME,
                         "trackId": TRACK_ID,
                     },
@@ -627,9 +700,8 @@ def update_lap_state_from_packet(header, pkt):
                 ))
             else:
                 print(f"Ignoring implausible lap time: {last_lap_time} ms")
-
         CURRENT_LAP_NUM = current_lap
-
+        
     current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "mCurrentLapTimeInMS", "m_currentLapTimeInMS", default=None), None)
     best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "mBestLapTimeInMS", "m_bestLapTimeInMS", default=None), None)
 
