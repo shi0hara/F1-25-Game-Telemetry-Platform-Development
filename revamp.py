@@ -97,14 +97,23 @@ LAST_SESSION_META_SYNCED = {
 }
 
 CURRENT_SECTOR = None
-def infer_current_sector(lap):
-    sector1_ms, sector2_ms, sector3_ms = extract_lap_sector_times(lap)
 
-    if sector1_ms is None:
-        return 0
-    if sector2_ms is None:
-        return 1
-    return 2
+def extract_current_sector(lap):
+    return parse_int(
+        get_attr(
+            lap,
+            "sector",
+            "Sector",
+            "mSector",
+            "m_sector",
+            "current_sector",
+            "currentSector",
+            "mCurrentSector",
+            "m_currentSector",
+            default=None,
+        ),
+        None,
+    )
 
 def parse_truthy(value):
     if isinstance(value, bool):
@@ -704,7 +713,7 @@ def update_lap_state_from_packet(header, pkt):
     current_snapshot["lapNumber"] = current_lap
 
     global CURRENT_SECTOR
-    CURRENT_SECTOR = infer_current_sector(lap)
+    CURRENT_SECTOR = extract_current_sector(lap)
 
     # If lap number increased, the lap that just finished is the previous one
     if current_lap is not None and CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
@@ -809,7 +818,19 @@ def post_telemetry_sample(header, pkt):
     throttle = float(parse_number(get_attr(t, "throttle", "m_throttle", default=0.0), 0.0) or 0.0)
     brake = float(parse_number(get_attr(t, "brake", "m_brake", default=0.0), 0.0) or 0.0)
     steering = float(parse_number(get_attr(t, "steer", "m_steer", default=0.0), 0.0) or 0.0)
-    rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
+    rpm = int(parse_int(
+        get_attr(
+            t,
+            "engineRPM",
+            "EngineRPM",
+            "engine_rpm",
+            "m_engineRPM",
+            "m_engine_rpm",
+            "rpm",
+            default=0,
+        ),
+        0,
+    ) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
 
