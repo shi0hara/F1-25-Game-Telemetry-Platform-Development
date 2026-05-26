@@ -657,7 +657,6 @@ LAST_LAP_SNAPSHOT = {
 def extract_lap_snapshot(lap):
     sector1_ms, sector2_ms, sector3_ms = extract_lap_sector_times(lap)
     lap_valid = extract_lap_validity(lap)
-
     return {
         "sector1Ms": sector1_ms,
         "sector2Ms": sector2_ms,
@@ -667,11 +666,10 @@ def extract_lap_snapshot(lap):
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
-    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M
-    global LAST_LAP_SNAPSHOT
+    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, LAST_LAP_SNAPSHOT
 
     def is_plausible_lap_time_ms(ms):
-        return ms is not None and 10000 <= ms <= 600000  # 10s to 10min
+        return ms is not None and 10000 <= ms <= 600000
 
     arr = get_lap_array(pkt)
     if arr is None or len(arr) == 0:
@@ -691,119 +689,49 @@ def update_lap_state_from_packet(header, pkt):
     CURRENT_LAP_DISTANCE_M = lap_distance
     CURRENT_TOTAL_DISTANCE_M = total_distance
 
+    # Snapshot the ACTIVE lap every packet
     current_snapshot = extract_lap_snapshot(lap)
     current_snapshot["lapNumber"] = current_lap
 
+    # If lap number increased, the lap that just finished is the previous one
+    if current_lap is not None and CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
+        completed = dict(LAST_LAP_SNAPSHOT)
+        completed["lapNumber"] = CURRENT_LAP_NUM
+
+        sector1_ms = completed.get("sector1Ms")
+        sector2_ms = completed.get("sector2Ms")
+        sector3_ms = completed.get("sector3Ms")
+        lap_valid = completed.get("valid")
+
+        if lap_valid is None:
+            lap_valid = True
+
+        if sector3_ms is None and last_lap_time is not None and sector1_ms is not None and sector2_ms is not None:
+            sector3_ms = max(0, last_lap_time - sector1_ms - sector2_ms)
+
+        if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
+            safe_enqueue(LAP_QUEUE, (
+                f"/sessions/{SESSION_ID}/laps",
+                {
+                    "lapNumber": CURRENT_LAP_NUM,
+                    "lapTimeMs": last_lap_time,
+                    "sector1Ms": sector1_ms,
+                    "sector2Ms": sector2_ms,
+                    "sector3Ms": sector3_ms,
+                    "valid": lap_valid,
+                    "trackName": TRACK_NAME,
+                    "trackId": TRACK_ID,
+                },
+                3,
+            ))
+        else:
+            print(f"Ignoring implausible lap time: {last_lap_time} ms")
+
     if current_lap is not None:
-        if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
-            print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
-
-            completed = dict(LAST_LAP_SNAPSHOT)
-            completed["lapNumber"] = CURRENT_LAP_NUM
-
-            sector1_ms = completed.get("sector1Ms")
-            sector2_ms = completed.get("sector2Ms")
-            sector3_ms = completed.get("sector3Ms")
-            lap_valid = completed.get("valid")
-
-            if lap_valid is None:
-                lap_valid = True
-
-            if sector3_ms is None and last_lap_time is not None and sector1_ms is not None and sector2_ms is not None:
-                sector3_ms = max(0, last_lap_time - sector1_ms - sector2_ms)
-
-            if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
-                safe_enqueue(LAP_QUEUE, (
-                    f"/sessions/{SESSION_ID}/laps",
-                    {
-                        "lapNumber": CURRENT_LAP_NUM,
-                        "lapTimeMs": last_lap_time,
-                        "sector1Ms": sector1_ms,
-                        "sector2Ms": sector2_ms,
-                        "sector3Ms": sector3_ms,
-                        "valid": lap_valid,
-                        "trackName": TRACK_NAME,
-                        "trackId": TRACK_ID,
-                    },
-                    3,
-                ))
-            else:
-                print(f"Ignoring implausible lap time: {last_lap_time} ms")
-
         CURRENT_LAP_NUM = current_lap
 
-    # Keep updating the snapshot for the active lap
     LAST_LAP_SNAPSHOT = current_snapshot
 
-    current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "mCurrentLapTimeInMS", "m_currentLapTimeInMS", default=None), None)
-    best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "mBestLapTimeInMS", "m_bestLapTimeInMS", default=None), None)
-
-    if best_lap_time_ms is not None and is_plausible_lap_time_ms(best_lap_time_ms):
-        if BEST_LAP_TIME_MS is None or best_lap_time_ms < BEST_LAP_TIME_MS:
-            BEST_LAP_TIME_MS = best_lap_time_ms
-    elif current_lap_time_ms is not None and is_plausible_lap_time_ms(current_lap_time_ms) and BEST_LAP_TIME_MS is None:
-        BEST_LAP_TIME_MS = current_lap_time_ms
-
-    if current_lap_time_ms is not None and BEST_LAP_TIME_MS is not None:
-        LAST_DELTA_TO_PB_MS = current_lap_time_ms - BEST_LAP_TIME_MS
-    else:
-        LAST_DELTA_TO_PB_MS = None
-        
-    global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
-    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M
-
-    def is_plausible_lap_time_ms(ms):
-        return ms is not None and 10000 <= ms <= 600000  # 10s to 10min
-
-    arr = get_lap_array(pkt)
-    if arr is None or len(arr) == 0:
-        return
-
-    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
-    if not (0 <= player_idx < len(arr)):
-        player_idx = 0
-
-    lap = arr[player_idx]
-
-    current_lap = parse_int(get_attr(lap, "current_lap_num", "mCurrentLapNum", "m_currentLapNum", default=None), None)
-    last_lap_time = parse_int(get_attr(lap, "last_lap_time_in_ms", "mLastLapTimeInMS", "m_lastLapTimeInMS", default=None), None)
-
-    lap_distance = parse_number(get_attr(lap, "lap_distance", "mLapDistance", "m_lapDistance", default=None), None)
-    total_distance = parse_number(get_attr(lap, "total_distance", "mTotalDistance", "m_totalDistance", default=None), None)
-    CURRENT_LAP_DISTANCE_M = lap_distance
-    CURRENT_TOTAL_DISTANCE_M = total_distance
-
-    if current_lap is not None:
-        if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
-            print(f"\n---> LAP {CURRENT_LAP_NUM} COMPLETED! Time: {last_lap_time} ms <---\n")
-
-            sector1_ms, sector2_ms, sector3_ms = extract_lap_sector_times(lap)
-            lap_valid = extract_lap_validity(lap)
-            if lap_valid is None:
-                lap_valid = True
-
-            if sector3_ms is None and last_lap_time is not None and sector1_ms is not None and sector2_ms is not None:
-                sector3_ms = max(0, last_lap_time - sector1_ms - sector2_ms)
-
-            if SESSION_ID and is_plausible_lap_time_ms(last_lap_time):
-                safe_enqueue(LAP_QUEUE, (
-                    f"/sessions/{SESSION_ID}/laps",
-                    {
-                        "lapNumber": CURRENT_LAP_NUM,
-                        "lapTimeMs": last_lap_time,
-                        "sector1Ms": sector1_ms,
-                        "sector2Ms": sector2_ms,
-                        "sector3Ms": sector3_ms,
-                        "valid": lap_valid,
-                        "trackName": TRACK_NAME,
-                        "trackId": TRACK_ID,
-                    },
-                    3,
-                ))
-            else:
-                print(f"Ignoring implausible lap time: {last_lap_time} ms")
-        CURRENT_LAP_NUM = current_lap
-        
     current_lap_time_ms = parse_int(get_attr(lap, "current_lap_time_in_ms", "mCurrentLapTimeInMS", "m_currentLapTimeInMS", default=None), None)
     best_lap_time_ms = parse_int(get_attr(lap, "best_lap_time_in_ms", "mBestLapTimeInMS", "m_bestLapTimeInMS", default=None), None)
 
