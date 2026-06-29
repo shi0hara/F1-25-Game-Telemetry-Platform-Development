@@ -6,7 +6,10 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
-import useAutoSession from "../hooks/useAutoSession";
+import useActiveSession from "../hooks/useActiveSession";
+
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
 function getTrackKeyFromSession(data) {
   if (data?.trackKey) return data.trackKey;
@@ -15,51 +18,29 @@ function getTrackKeyFromSession(data) {
 }
 
 function getDefaultImage(trackKey) {
-  if (trackKey === "track_12") return "/maps/singapore.png";
-  return "/maps/default-track.png";
+  const mapImages = {
+    track_0: "/maps/albert-park.svg",
+    track_12: "/maps/singapore.png",
+    track_11: "/maps/monza.png",
+    track_13: "/maps/suzuka.png",
+  };
+
+  return mapImages[trackKey] || "/maps/default-track.png";
+}
+
+function getDefaultLabel(index) {
+  if (index === 0) return "Start line";
+  if (index === 1) return "Turn 1";
+  if (index === 2) return "Final corner";
+  return `Point ${index + 1}`;
 }
 
 function hasNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-async function generateCenterline() {
-  if (!sessionId) {
-    setMessage("No active session found.");
-    return;
-  }
-
-  try {
-    setMessage("Generating reference line from this session...");
-
-    const apiBase = "https://f1-telementry-1.onrender.com";
-
-    const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map/finalize`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        maxPoints: 800,
-      }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to generate reference line.");
-    }
-
-    setMessage(
-      `Reference line generated. Track key: ${data.trackKey}, points: ${data.centerlinePointCount}`
-    );
-  } catch (err) {
-    console.error(err);
-    setMessage(err.message);
-  }
-}
-
 export default function TrackCalibration({
+  username,
   sessionId: providedSessionId,
   trackKey: providedTrackKey,
   imageUrl: providedImageUrl,
@@ -73,7 +54,7 @@ export default function TrackCalibration({
     sessionData: autoSessionData,
     loading: sessionLoading,
     error: autoSessionError,
-  } = useAutoSession();
+  } = useActiveSession(username);
 
   const sessionId = providedSessionId || autoSessionId;
 
@@ -84,6 +65,8 @@ export default function TrackCalibration({
   const [label, setLabel] = useState("Start line");
   const [message, setMessage] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -94,17 +77,24 @@ export default function TrackCalibration({
 
     const sessionRef = doc(db, "sessions", sessionId);
 
-    const unsubscribe = onSnapshot(sessionRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setLiveSessionData(null);
-        setLatestMapPosition(null);
-        return;
-      }
+    const unsubscribe = onSnapshot(
+      sessionRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setLiveSessionData(null);
+          setLatestMapPosition(null);
+          return;
+        }
 
-      const data = snapshot.data();
-      setLiveSessionData(data);
-      setLatestMapPosition(data.latestMapPosition || null);
-    });
+        const data = snapshot.data();
+        setLiveSessionData(data);
+        setLatestMapPosition(data.latestMapPosition || null);
+      },
+      (err) => {
+        console.error("Session listener error:", err);
+        setMessage(err.message || "Failed to load session.");
+      }
+    );
 
     return unsubscribe;
   }, [sessionId]);
@@ -114,7 +104,7 @@ export default function TrackCalibration({
       providedTrackKey ||
       getTrackKeyFromSession(liveSessionData) ||
       getTrackKeyFromSession(autoSessionData) ||
-      "track_12"
+      "track_0"
     );
   }, [providedTrackKey, liveSessionData, autoSessionData]);
 
@@ -126,21 +116,30 @@ export default function TrackCalibration({
 
     const trackRef = doc(db, "trackMaps", activeTrackKey);
 
-    const unsubscribe = onSnapshot(trackRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setTrackMap(null);
-        return;
+    const unsubscribe = onSnapshot(
+      trackRef,
+      (snapshot) => {
+        if (!snapshot.exists()) {
+          setTrackMap(null);
+          if (!dirty) setAnchorPoints([]);
+          return;
+        }
+
+        const data = snapshot.data();
+        setTrackMap(data);
+
+        const savedAnchors = data.imageCalibration?.anchorPoints;
+
+        if (!dirty && Array.isArray(savedAnchors)) {
+          setAnchorPoints(savedAnchors);
+          setLabel(getDefaultLabel(savedAnchors.length));
+        }
+      },
+      (err) => {
+        console.error("Track map listener error:", err);
+        setMessage(err.message || "Failed to load track map.");
       }
-
-      const data = snapshot.data();
-      setTrackMap(data);
-
-      const savedAnchors = data.imageCalibration?.anchorPoints;
-
-      if (!dirty && Array.isArray(savedAnchors)) {
-        setAnchorPoints(savedAnchors);
-      }
-    });
+    );
 
     return unsubscribe;
   }, [activeTrackKey, dirty]);
@@ -159,6 +158,46 @@ export default function TrackCalibration({
   const imageHeight = Number(
     imageCalibration?.imageHeight || providedImageHeight || 800
   );
+
+  async function generateReferenceLine() {
+    if (!sessionId) {
+      setMessage("No active session found.");
+      return;
+    }
+
+    try {
+      setIsGenerating(true);
+      setMessage("Generating reference line from this session...");
+
+      const res = await fetch(
+        `${API_BASE}/sessions/${sessionId}/track-map/finalize`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            maxPoints: 800,
+          }),
+        }
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to generate reference line.");
+      }
+
+      setMessage(
+        `Reference line generated. Track key: ${data.trackKey}, points: ${data.centerlinePointCount}`
+      );
+    } catch (err) {
+      console.error(err);
+      setMessage(err.message || "Failed to generate reference line.");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
 
   function handleImageClick(event) {
     if (!latestMapPosition) {
@@ -189,14 +228,19 @@ export default function TrackCalibration({
     const imageY = clickY * scaleY;
 
     const point = {
-      label: label || `Point ${anchorPoints.length + 1}`,
+      label: label || getDefaultLabel(anchorPoints.length),
       worldX: Number(Number(latestMapPosition.worldX).toFixed(4)),
       worldZ: Number(Number(latestMapPosition.worldZ).toFixed(4)),
       imageX: Number(imageX.toFixed(2)),
       imageY: Number(imageY.toFixed(2)),
     };
 
-    setAnchorPoints((prev) => [...prev, point]);
+    setAnchorPoints((prev) => {
+      const next = [...prev, point];
+      setLabel(getDefaultLabel(next.length));
+      return next;
+    });
+
     setDirty(true);
     setMessage(`Added anchor: ${point.label}`);
   }
@@ -212,38 +256,54 @@ export default function TrackCalibration({
       return;
     }
 
-    const trackRef = doc(db, "trackMaps", activeTrackKey);
+    try {
+      setIsSaving(true);
+      setMessage("Saving calibration...");
 
-    await setDoc(
-      trackRef,
-      {
-        trackKey: activeTrackKey,
-        trackId: liveSessionData?.trackId ?? autoSessionData?.trackId ?? null,
-        trackName:
-          liveSessionData?.trackName ?? autoSessionData?.trackName ?? null,
-        imageCalibration: {
-          imageUrl,
-          imageWidth,
-          imageHeight,
-          anchorPoints,
-          calibratedAt: serverTimestamp(),
+      const trackRef = doc(db, "trackMaps", activeTrackKey);
+
+      await setDoc(
+        trackRef,
+        {
+          trackKey: activeTrackKey,
+          trackId: liveSessionData?.trackId ?? autoSessionData?.trackId ?? null,
+          trackName:
+            liveSessionData?.trackName ?? autoSessionData?.trackName ?? null,
+          imageCalibration: {
+            imageUrl,
+            imageWidth,
+            imageHeight,
+            anchorPoints,
+            calibratedAt: serverTimestamp(),
+          },
+          updatedAt: serverTimestamp(),
         },
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+        { merge: true }
+      );
 
-    setDirty(false);
-    setMessage("Calibration saved to Firebase.");
+      setDirty(false);
+      setMessage("Calibration saved to Firebase.");
+    } catch (err) {
+      console.error(err);
+      setMessage(err.message || "Failed to save calibration.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function removeAnchor(index) {
-    setAnchorPoints((prev) => prev.filter((_, i) => i !== index));
+    setAnchorPoints((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      setLabel(getDefaultLabel(next.length));
+      return next;
+    });
+
     setDirty(true);
   }
 
   function clearAnchors() {
     setAnchorPoints([]);
+    setLabel("Start line");
     setDirty(true);
     setMessage("Cleared local anchor points. Save to update Firebase.");
   }
@@ -290,9 +350,10 @@ export default function TrackCalibration({
           </p>
           <p>
             <strong>Track:</strong>{" "}
-            {liveSessionData?.trackName ||
-              autoSessionData?.trackName ||
-              "-"}
+            {liveSessionData?.trackName || autoSessionData?.trackName || "-"}
+          </p>
+          <p>
+            <strong>Image:</strong> {imageUrl}
           </p>
 
           <hr style={{ borderColor: "rgba(255,255,255,0.12)" }} />
@@ -310,13 +371,32 @@ export default function TrackCalibration({
                 {Number(latestMapPosition.worldZ).toFixed(2)}
               </p>
               <p>
-                <strong>Speed:</strong>{" "}
-                {latestMapPosition.speedKph ?? "-"} km/h
+                <strong>Speed:</strong> {latestMapPosition.speedKph ?? "-"} km/h
               </p>
             </>
           ) : (
             <p>Waiting for live map position...</p>
           )}
+
+          <hr style={{ borderColor: "rgba(255,255,255,0.12)" }} />
+
+          <button
+            onClick={generateReferenceLine}
+            disabled={isGenerating || !sessionId}
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#16a34a",
+              color: "white",
+              cursor: "pointer",
+              marginTop: "10px",
+              opacity: isGenerating || !sessionId ? 0.6 : 1,
+            }}
+          >
+            {isGenerating ? "Generating..." : "Generate Reference Line"}
+          </button>
 
           <hr style={{ borderColor: "rgba(255,255,255,0.12)" }} />
 
@@ -344,6 +424,7 @@ export default function TrackCalibration({
 
           <button
             onClick={saveCalibration}
+            disabled={isSaving || anchorPoints.length < 3}
             style={{
               width: "100%",
               padding: "10px",
@@ -353,9 +434,10 @@ export default function TrackCalibration({
               color: "white",
               cursor: "pointer",
               marginTop: "10px",
+              opacity: isSaving || anchorPoints.length < 3 ? 0.6 : 1,
             }}
           >
-            Save Calibration
+            {isSaving ? "Saving..." : "Save Calibration"}
           </button>
 
           <button
@@ -374,22 +456,6 @@ export default function TrackCalibration({
             Clear Anchors
           </button>
 
-          <button
-            onClick={generateCenterline}
-            style={{
-              width: "100%",
-              padding: "10px",
-              borderRadius: "8px",
-              border: "none",
-              background: "#16a34a",
-              color: "white",
-              cursor: "pointer",
-              marginTop: "10px",
-            }}
-          >
-            Generate Reference Line
-          </button>
-          
           {message && <p style={{ color: "#93c5fd" }}>{message}</p>}
 
           <h3>Anchor Points ({anchorPoints.length})</h3>
