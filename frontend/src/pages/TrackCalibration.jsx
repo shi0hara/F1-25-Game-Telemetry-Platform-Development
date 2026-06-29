@@ -19,7 +19,7 @@ function getTrackKeyFromSession(data) {
 
 function getDefaultImage(trackKey) {
   const mapImages = {
-    track_0: "/maps/albert-park.svg",
+    track_0: "/maps/albert-park.png",
     track_12: "/maps/singapore.png",
     track_11: "/maps/monza.png",
     track_13: "/maps/suzuka.png",
