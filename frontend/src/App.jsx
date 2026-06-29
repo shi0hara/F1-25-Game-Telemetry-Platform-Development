@@ -61,6 +61,7 @@ export default function App() {
             <Route path="/live" element={<ProtectedRoute user={user}><LiveTelemetry sessionId={sessionId} /></ProtectedRoute>} />
             <Route path="/leaderboard" element={<ProtectedRoute user={user}><Leaderboard /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute user={user}><Profile username={user} sessionId={sessionId} /></ProtectedRoute>} />
+            <Route path="/calibrate" element={<TrackCalibration />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
