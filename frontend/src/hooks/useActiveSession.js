@@ -21,6 +21,10 @@ function toMillis(value) {
     return value.seconds * 1000;
   }
 
+  if (typeof value === "number") {
+    return value;
+  }
+
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
@@ -31,11 +35,22 @@ function getTrackKeyFromSession(session) {
   return null;
 }
 
-function hasTelemetry(session) {
+function getSessionFreshness(session) {
+  return (
+    toMillis(session?.latestMapPosition?.timestamp) ||
+    toMillis(session?.latestTelemetry?.timestamp) ||
+    toMillis(session?.latestTelemetryAt) ||
+    toMillis(session?.updatedAt) ||
+    toMillis(session?.startedAt)
+  );
+}
+
+function hasLiveTelemetry(session) {
   return Boolean(
-    session?.latestTelemetry ||
-      session?.latestMapPosition ||
-      session?.latestTelemetryAt
+    session?.latestMapPosition?.worldX != null ||
+      session?.latestMapPosition?.worldZ != null ||
+      session?.latestTelemetry?.speedKph != null ||
+      session?.latestTelemetry
   );
 }
 
@@ -46,47 +61,35 @@ function isActiveSession(session) {
 function pickBestSession(sessions) {
   if (!Array.isArray(sessions) || sessions.length === 0) return null;
 
-  const activeSessions = sessions.filter(isActiveSession);
+  const sorted = [...sessions].sort((a, b) => {
+    const aFresh = getSessionFreshness(a);
+    const bFresh = getSessionFreshness(b);
+    return bFresh - aFresh;
+  });
 
-  const activeWithTelemetry = activeSessions
-    .filter(hasTelemetry)
-    .sort((a, b) => {
-      const aTime = toMillis(a.latestTelemetryAt) || toMillis(a.startedAt);
-      const bTime = toMillis(b.latestTelemetryAt) || toMillis(b.startedAt);
-      return bTime - aTime;
-    });
+  const activeWithLiveTelemetry = sorted.find(
+    (session) => isActiveSession(session) && hasLiveTelemetry(session)
+  );
 
-  if (activeWithTelemetry.length > 0) {
-    return activeWithTelemetry[0];
+  if (activeWithLiveTelemetry) {
+    return activeWithLiveTelemetry;
   }
 
-  if (activeSessions.length > 0) {
-    return activeSessions[0];
+  const anyWithLiveTelemetry = sorted.find(hasLiveTelemetry);
+
+  if (anyWithLiveTelemetry) {
+    return anyWithLiveTelemetry;
   }
 
-  return sessions[0];
+  const activeSession = sorted.find(isActiveSession);
+
+  if (activeSession) {
+    return activeSession;
+  }
+
+  return sorted[0];
 }
 
-/**
- * If username is provided:
- *   - resolves username -> user
- *   - watches that user's sessions
- *
- * If username is empty:
- *   - watches latest global sessions
- *
- * Returns:
- * {
- *   sessionId,
- *   sessionData,
- *   activeTrackKey,
- *   userId,
- *   userData,
- *   sessions,
- *   loading,
- *   error
- * }
- */
 export default function useActiveSession(username) {
   const normalizedUsername = useMemo(() => {
     return String(username || "").trim().toLowerCase();
@@ -111,6 +114,7 @@ export default function useActiveSession(username) {
     setSessions([]);
 
     if (!normalizedUsername) {
+      setLoading(false);
       return () => {
         cancelled = true;
       };
@@ -137,13 +141,12 @@ export default function useActiveSession(username) {
         }
 
         const userDoc = snap.docs[0];
-        const nextUser = {
-          id: userDoc.id,
-          ...userDoc.data(),
-        };
 
         setUserId(userDoc.id);
-        setUserData(nextUser);
+        setUserData({
+          id: userDoc.id,
+          ...userDoc.data(),
+        });
       } catch (err) {
         if (!cancelled) {
           console.error("User resolve error:", err);
@@ -173,12 +176,12 @@ export default function useActiveSession(username) {
           collection(db, "sessions"),
           where("userId", "==", userId),
           orderBy("startedAt", "desc"),
-          limit(20)
+          limit(50)
         )
       : query(
           collection(db, "sessions"),
           orderBy("startedAt", "desc"),
-          limit(20)
+          limit(50)
         );
 
     const unsubscribe = onSnapshot(
@@ -192,10 +195,9 @@ export default function useActiveSession(username) {
           ...docSnap.data(),
         }));
 
-        setSessions(docs);
-
         const bestSession = pickBestSession(docs);
 
+        setSessions(docs);
         setSessionId(bestSession?.id || null);
         setSessionData(bestSession || null);
       },
