@@ -278,57 +278,21 @@ function drawSmoothTelemetryTrail(ctx, trail, transform) {
   if (points.length < 2) return;
 
   ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  if (points.length === 2) {
-    const a = points[0];
-    const b = points[1];
-
-    ctx.lineWidth = 12;
-    ctx.globalAlpha = 0.22;
-    ctx.strokeStyle = getTelemetryColor(b.sample);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-
-    ctx.lineWidth = 5;
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = getTelemetryColor(b.sample);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-
-    ctx.restore();
-    return;
-  }
-
-  ctx.lineWidth = 12;
-  ctx.globalAlpha = 0.22;
-
-  for (let i = 1; i < points.length - 1; i++) {
-    drawTrailSegment(
-      ctx,
-      points[i - 1],
-      points[i],
-      points[i + 1],
-      getTelemetryColor(points[i].sample)
-    );
-  }
 
   ctx.lineWidth = 5;
   ctx.globalAlpha = 1;
+  ctx.lineCap = "butt";
+  ctx.lineJoin = "round";
 
-  for (let i = 1; i < points.length - 1; i++) {
-    drawTrailSegment(
-      ctx,
-      points[i - 1],
-      points[i],
-      points[i + 1],
-      getTelemetryColor(points[i].sample)
-    );
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1];
+    const current = points[i];
+
+    ctx.beginPath();
+    ctx.moveTo(previous.x, previous.y);
+    ctx.lineTo(current.x, current.y);
+    ctx.strokeStyle = getTelemetryColor(current.sample);
+    ctx.stroke();
   }
 
   ctx.restore();
