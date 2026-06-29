@@ -23,6 +23,42 @@ function hasNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+async function generateCenterline() {
+  if (!sessionId) {
+    setMessage("No active session found.");
+    return;
+  }
+
+  try {
+    setMessage("Generating reference line from this session...");
+
+    const apiBase = "https://f1-telementry-1.onrender.com";
+
+    const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map/finalize`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        maxPoints: 800,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to generate reference line.");
+    }
+
+    setMessage(
+      `Reference line generated. Track key: ${data.trackKey}, points: ${data.centerlinePointCount}`
+    );
+  } catch (err) {
+    console.error(err);
+    setMessage(err.message);
+  }
+}
+
 export default function TrackCalibration({
   sessionId: providedSessionId,
   trackKey: providedTrackKey,
@@ -338,6 +374,22 @@ export default function TrackCalibration({
             Clear Anchors
           </button>
 
+          <button
+            onClick={generateCenterline}
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#16a34a",
+              color: "white",
+              cursor: "pointer",
+              marginTop: "10px",
+            }}
+          >
+            Generate Reference Line
+          </button>
+          
           {message && <p style={{ color: "#93c5fd" }}>{message}</p>}
 
           <h3>Anchor Points ({anchorPoints.length})</h3>
