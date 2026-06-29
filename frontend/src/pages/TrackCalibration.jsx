@@ -427,11 +427,6 @@ export default function TrackCalibration({
             />
           </label>
 
-          <p style={{ fontSize: "13px", color: "#aaa" }}>
-            Drive to a real point in-game, then click the same point on the
-            image.
-          </p>
-
           <button
             onClick={saveCalibration}
             disabled={isSaving || anchorPoints.length < 3}
@@ -469,12 +464,6 @@ export default function TrackCalibration({
           {message && <p style={{ color: "#93c5fd" }}>{message}</p>}
 
           <h3>Anchor Points ({anchorPoints.length})</h3>
-
-          {anchorPoints.length < 3 && (
-            <p style={{ color: "orange", fontSize: "13px" }}>
-              You need at least 3 points. Use points far apart from each other.
-            </p>
-          )}
 
           <div style={{ display: "grid", gap: "8px" }}>
             {anchorPoints.map((point, index) => (
