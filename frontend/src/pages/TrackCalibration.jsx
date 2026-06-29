@@ -1,35 +1,128 @@
-import { useEffect, useRef, useState } from "react";
-import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  doc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { db } from "../firebase";
+import useAutoSession from "../hooks/useAutoSession";
+
+function getTrackKeyFromSession(data) {
+  if (data?.trackKey) return data.trackKey;
+  if (data?.trackId != null) return `track_${data.trackId}`;
+  return null;
+}
+
+function getDefaultImage(trackKey) {
+  if (trackKey === "track_12") return "/maps/singapore.png";
+  return "/maps/default-track.png";
+}
+
+function hasNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
 
 export default function TrackCalibration({
-  sessionId,
-  trackKey = "track_12",
-  imageUrl = "/maps/singapore.png",
-  imageWidth = 1200,
-  imageHeight = 800,
+  sessionId: providedSessionId,
+  trackKey: providedTrackKey,
+  imageUrl: providedImageUrl,
+  imageWidth: providedImageWidth = 1200,
+  imageHeight: providedImageHeight = 800,
 }) {
   const imageRef = useRef(null);
 
+  const {
+    sessionId: autoSessionId,
+    sessionData: autoSessionData,
+    loading: sessionLoading,
+    error: autoSessionError,
+  } = useAutoSession();
+
+  const sessionId = providedSessionId || autoSessionId;
+
+  const [liveSessionData, setLiveSessionData] = useState(null);
+  const [trackMap, setTrackMap] = useState(null);
   const [latestMapPosition, setLatestMapPosition] = useState(null);
   const [anchorPoints, setAnchorPoints] = useState([]);
   const [label, setLabel] = useState("Start line");
   const [message, setMessage] = useState("");
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setLiveSessionData(null);
+      setLatestMapPosition(null);
+      return;
+    }
 
     const sessionRef = doc(db, "sessions", sessionId);
 
     const unsubscribe = onSnapshot(sessionRef, (snapshot) => {
-      if (!snapshot.exists()) return;
+      if (!snapshot.exists()) {
+        setLiveSessionData(null);
+        setLatestMapPosition(null);
+        return;
+      }
 
       const data = snapshot.data();
+      setLiveSessionData(data);
       setLatestMapPosition(data.latestMapPosition || null);
     });
 
     return unsubscribe;
   }, [sessionId]);
+
+  const activeTrackKey = useMemo(() => {
+    return (
+      providedTrackKey ||
+      getTrackKeyFromSession(liveSessionData) ||
+      getTrackKeyFromSession(autoSessionData) ||
+      "track_12"
+    );
+  }, [providedTrackKey, liveSessionData, autoSessionData]);
+
+  useEffect(() => {
+    if (!activeTrackKey) {
+      setTrackMap(null);
+      return;
+    }
+
+    const trackRef = doc(db, "trackMaps", activeTrackKey);
+
+    const unsubscribe = onSnapshot(trackRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setTrackMap(null);
+        return;
+      }
+
+      const data = snapshot.data();
+      setTrackMap(data);
+
+      const savedAnchors = data.imageCalibration?.anchorPoints;
+
+      if (!dirty && Array.isArray(savedAnchors)) {
+        setAnchorPoints(savedAnchors);
+      }
+    });
+
+    return unsubscribe;
+  }, [activeTrackKey, dirty]);
+
+  const imageCalibration = trackMap?.imageCalibration || null;
+
+  const imageUrl =
+    providedImageUrl ||
+    imageCalibration?.imageUrl ||
+    getDefaultImage(activeTrackKey);
+
+  const imageWidth = Number(
+    imageCalibration?.imageWidth || providedImageWidth || 1200
+  );
+
+  const imageHeight = Number(
+    imageCalibration?.imageHeight || providedImageHeight || 800
+  );
 
   function handleImageClick(event) {
     if (!latestMapPosition) {
@@ -37,13 +130,22 @@ export default function TrackCalibration({
       return;
     }
 
+    if (
+      !hasNumber(latestMapPosition.worldX) ||
+      !hasNumber(latestMapPosition.worldZ)
+    ) {
+      setMessage("Current session has no worldX/worldZ yet.");
+      return;
+    }
+
     const img = imageRef.current;
+    if (!img) return;
+
     const rect = img.getBoundingClientRect();
 
     const clickX = event.clientX - rect.left;
     const clickY = event.clientY - rect.top;
 
-    // Convert displayed click position into actual image pixel coordinate.
     const scaleX = imageWidth / rect.width;
     const scaleY = imageHeight / rect.height;
 
@@ -52,57 +154,83 @@ export default function TrackCalibration({
 
     const point = {
       label: label || `Point ${anchorPoints.length + 1}`,
-
-      worldX: Number(latestMapPosition.worldX),
-      worldZ: Number(latestMapPosition.worldZ),
-
+      worldX: Number(Number(latestMapPosition.worldX).toFixed(4)),
+      worldZ: Number(Number(latestMapPosition.worldZ).toFixed(4)),
       imageX: Number(imageX.toFixed(2)),
       imageY: Number(imageY.toFixed(2)),
     };
 
     setAnchorPoints((prev) => [...prev, point]);
+    setDirty(true);
     setMessage(`Added anchor: ${point.label}`);
   }
 
   async function saveCalibration() {
+    if (!activeTrackKey) {
+      setMessage("No track key found.");
+      return;
+    }
+
     if (anchorPoints.length < 3) {
       setMessage("You need at least 3 anchor points.");
       return;
     }
 
-    const trackRef = doc(db, "trackMaps", trackKey);
+    const trackRef = doc(db, "trackMaps", activeTrackKey);
 
     await setDoc(
       trackRef,
       {
+        trackKey: activeTrackKey,
+        trackId: liveSessionData?.trackId ?? autoSessionData?.trackId ?? null,
+        trackName:
+          liveSessionData?.trackName ?? autoSessionData?.trackName ?? null,
         imageCalibration: {
           imageUrl,
           imageWidth,
           imageHeight,
           anchorPoints,
-          calibratedAt: new Date().toISOString(),
+          calibratedAt: serverTimestamp(),
         },
+        updatedAt: serverTimestamp(),
       },
       { merge: true }
     );
 
+    setDirty(false);
     setMessage("Calibration saved to Firebase.");
   }
 
   function removeAnchor(index) {
     setAnchorPoints((prev) => prev.filter((_, i) => i !== index));
+    setDirty(true);
+  }
+
+  function clearAnchors() {
+    setAnchorPoints([]);
+    setDirty(true);
+    setMessage("Cleared local anchor points. Save to update Firebase.");
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#0f0f0f",
-        color: "white",
-        padding: "24px",
-      }}
-    >
-      <h1>Track Calibration</h1>
+    <div className="page-container">
+      <h1>
+        Track <span className="text-blue">Calibration</span>
+      </h1>
+
+      {sessionLoading && <p>Detecting active session...</p>}
+
+      {autoSessionError && (
+        <p style={{ color: "red" }}>
+          Auto session error: {autoSessionError}
+        </p>
+      )}
+
+      {!sessionLoading && !sessionId && (
+        <p style={{ color: "orange" }}>
+          No active session found. Start the telemetry listener first.
+        </p>
+      )}
 
       <div
         style={{
@@ -113,14 +241,27 @@ export default function TrackCalibration({
         }}
       >
         <div
-          style={{
-            background: "#181818",
-            padding: "16px",
-            borderRadius: "12px",
-            border: "1px solid rgba(255,255,255,0.12)",
-          }}
+          className="card"
+          style={{ borderLeftColor: "var(--color-accent-blue)" }}
         >
-          <h2>Live World Position</h2>
+          <h2>Calibration Data</h2>
+
+          <p>
+            <strong>Session:</strong> {sessionId || "-"}
+          </p>
+          <p>
+            <strong>Track Key:</strong> {activeTrackKey || "-"}
+          </p>
+          <p>
+            <strong>Track:</strong>{" "}
+            {liveSessionData?.trackName ||
+              autoSessionData?.trackName ||
+              "-"}
+          </p>
+
+          <hr style={{ borderColor: "rgba(255,255,255,0.12)" }} />
+
+          <h3>Live World Position</h3>
 
           {latestMapPosition ? (
             <>
@@ -161,8 +302,8 @@ export default function TrackCalibration({
           </label>
 
           <p style={{ fontSize: "13px", color: "#aaa" }}>
-            Drive to the real location in-game, then click the matching
-            location on the image.
+            Drive to a real point in-game, then click the same point on the
+            image.
           </p>
 
           <button
@@ -181,9 +322,31 @@ export default function TrackCalibration({
             Save Calibration
           </button>
 
+          <button
+            onClick={clearAnchors}
+            style={{
+              width: "100%",
+              padding: "10px",
+              borderRadius: "8px",
+              border: "none",
+              background: "#7f1d1d",
+              color: "white",
+              cursor: "pointer",
+              marginTop: "10px",
+            }}
+          >
+            Clear Anchors
+          </button>
+
           {message && <p style={{ color: "#93c5fd" }}>{message}</p>}
 
           <h3>Anchor Points ({anchorPoints.length})</h3>
+
+          {anchorPoints.length < 3 && (
+            <p style={{ color: "orange", fontSize: "13px" }}>
+              You need at least 3 points. Use points far apart from each other.
+            </p>
+          )}
 
           <div style={{ display: "grid", gap: "8px" }}>
             {anchorPoints.map((point, index) => (
@@ -196,7 +359,9 @@ export default function TrackCalibration({
                   border: "1px solid rgba(255,255,255,0.1)",
                 }}
               >
-                <strong>{index + 1}. {point.label}</strong>
+                <strong>
+                  {index + 1}. {point.label}
+                </strong>
                 <p style={{ margin: "4px 0", fontSize: "13px" }}>
                   World: {point.worldX.toFixed(2)}, {point.worldZ.toFixed(2)}
                 </p>
@@ -253,15 +418,32 @@ export default function TrackCalibration({
                 left: `${(point.imageX / imageWidth) * 100}%`,
                 top: `${(point.imageY / imageHeight) * 100}%`,
                 transform: "translate(-50%, -50%)",
-                width: "16px",
-                height: "16px",
+                width: "18px",
+                height: "18px",
                 borderRadius: "50%",
                 background: "#22c55e",
                 border: "2px solid white",
                 pointerEvents: "none",
+                boxShadow: "0 0 12px rgba(34,197,94,0.8)",
               }}
               title={point.label}
-            />
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  left: "20px",
+                  top: "-2px",
+                  color: "white",
+                  background: "rgba(0,0,0,0.7)",
+                  padding: "2px 5px",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {index + 1}
+              </span>
+            </div>
           ))}
         </div>
       </div>
