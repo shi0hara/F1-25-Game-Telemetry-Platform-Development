@@ -111,6 +111,7 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
   const maxZ = Number(worldBounds.maxZ);
 
   if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
+  if (maxX === minX || maxZ === minZ) return null;
 
   return {
     worldToImage(worldX, worldZ) {
@@ -140,6 +141,103 @@ function drawTextBadge(ctx, text, x, y) {
   ctx.fillText(text, x + paddingX, y - paddingY);
 }
 
+function getTrailPoints(trail, transform) {
+  return trail
+    .filter((sample) => hasNumber(sample.worldX) && hasNumber(sample.worldZ))
+    .map((sample) => {
+      const pos = transform.worldToImage(sample.worldX, sample.worldZ);
+
+      return {
+        x: pos.x,
+        y: pos.y,
+        sample,
+      };
+    });
+}
+
+function drawTrailSegment(ctx, previous, current, next, color) {
+  const mid1 = {
+    x: (previous.x + current.x) / 2,
+    y: (previous.y + current.y) / 2,
+  };
+
+  const mid2 = {
+    x: (current.x + next.x) / 2,
+    y: (current.y + next.y) / 2,
+  };
+
+  ctx.beginPath();
+  ctx.moveTo(mid1.x, mid1.y);
+  ctx.quadraticCurveTo(current.x, current.y, mid2.x, mid2.y);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
+function drawSmoothTelemetryTrail(ctx, trail, transform) {
+  const points = getTrailPoints(trail, transform);
+
+  if (points.length < 2) return;
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // If there are only 2 points, draw a simple smooth line.
+  if (points.length === 2) {
+    const a = points[0];
+    const b = points[1];
+
+    ctx.lineWidth = 12;
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = getTelemetryColor(b.sample);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.lineWidth = 5;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = getTelemetryColor(b.sample);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.restore();
+    return;
+  }
+
+  // Soft glow layer
+  ctx.lineWidth = 12;
+  ctx.globalAlpha = 0.22;
+
+  for (let i = 1; i < points.length - 1; i++) {
+    drawTrailSegment(
+      ctx,
+      points[i - 1],
+      points[i],
+      points[i + 1],
+      getTelemetryColor(points[i].sample)
+    );
+  }
+
+  // Main trail layer
+  ctx.lineWidth = 5;
+  ctx.globalAlpha = 1;
+
+  for (let i = 1; i < points.length - 1; i++) {
+    drawTrailSegment(
+      ctx,
+      points[i - 1],
+      points[i],
+      points[i + 1],
+      getTelemetryColor(points[i].sample)
+    );
+  }
+
+  ctx.restore();
+}
+
 export default function TrackTelemetryMap({
   apiBase,
   sessionId,
@@ -156,6 +254,8 @@ export default function TrackTelemetryMap({
   useEffect(() => {
     async function loadTrackMap() {
       try {
+        if (!apiBase || !trackKey) return;
+
         const res = await fetch(
           `${apiBase}/track-maps/${trackKey}?includeCenterline=true`
         );
@@ -178,6 +278,8 @@ export default function TrackTelemetryMap({
   useEffect(() => {
     async function fetchLivePosition() {
       try {
+        if (!apiBase || !sessionId) return;
+
         const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map`);
 
         if (!res.ok) {
@@ -196,7 +298,7 @@ export default function TrackTelemetryMap({
         ) {
           setTrail((old) => {
             const next = [...old, latest];
-            return next.slice(-900);
+            return next.slice(-1200);
           });
         }
       } catch (err) {
@@ -234,7 +336,7 @@ export default function TrackTelemetryMap({
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !trackMap || !transform) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
     const image = new Image();
@@ -251,15 +353,31 @@ export default function TrackTelemetryMap({
       ctx.clearRect(0, 0, width, height);
       ctx.drawImage(image, 0, 0, width, height);
 
-      // Draw calibrated centerline
+      if (!trackMap || !transform) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+        ctx.fillRect(20, 20, 560, 75);
+
+        ctx.fillStyle = "white";
+        ctx.font = "16px Arial";
+        ctx.fillText("Waiting for track map / calibration...", 36, 55);
+
+        ctx.font = "13px Arial";
+        ctx.fillText("Drive a lap, finalize the map, then add anchor points.", 36, 80);
+        return;
+      }
+
+      // Draw reference centerline
       const centerline = Array.isArray(trackMap.centerline)
         ? trackMap.centerline
         : [];
 
       if (centerline.length > 1) {
+        ctx.save();
         ctx.beginPath();
 
-        centerline.forEach((point, index) => {
+        let started = false;
+
+        centerline.forEach((point) => {
           const worldX = point.x ?? point.worldX;
           const worldZ = point.z ?? point.worldZ;
 
@@ -267,26 +385,24 @@ export default function TrackTelemetryMap({
 
           const pos = transform.worldToImage(worldX, worldZ);
 
-          if (index === 0) ctx.moveTo(pos.x, pos.y);
-          else ctx.lineTo(pos.x, pos.y);
+          if (!started) {
+            ctx.moveTo(pos.x, pos.y);
+            started = true;
+          } else {
+            ctx.lineTo(pos.x, pos.y);
+          }
         });
 
         ctx.lineWidth = 2;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.45)";
         ctx.stroke();
+        ctx.restore();
       }
 
-      // Draw telemetry trail
-      for (const sample of trail) {
-        if (!hasNumber(sample.worldX) || !hasNumber(sample.worldZ)) continue;
-
-        const pos = transform.worldToImage(sample.worldX, sample.worldZ);
-
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = getTelemetryColor(sample);
-        ctx.fill();
-      }
+      // Draw long smooth telemetry trail
+      drawSmoothTelemetryTrail(ctx, trail, transform);
 
       // Draw live car marker
       const latest = sessionMap?.latestMapPosition;
@@ -308,9 +424,28 @@ export default function TrackTelemetryMap({
         ctx.stroke();
 
         const speedText =
-          latest.speedKph != null ? `${Math.round(latest.speedKph)} km/h` : "Live";
+          latest.speedKph != null
+            ? `${Math.round(latest.speedKph)} km/h`
+            : "Live";
+
         drawTextBadge(ctx, speedText, pos.x + 12, pos.y - 12);
       }
+    };
+
+    image.onerror = () => {
+      const width = imageWidth || 1200;
+      const height = imageHeight || 800;
+
+      canvas.width = width;
+      canvas.height = height;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#111";
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.fillStyle = "white";
+      ctx.font = "16px Arial";
+      ctx.fillText(`Map image not found: ${imageUrl}`, 30, 50);
     };
   }, [
     trackMap,
@@ -360,16 +495,19 @@ export default function TrackTelemetryMap({
         }}
       >
         <span>
-          <b style={{ color: "rgb(255, 60, 60)" }}>●</b> Brake
+          <b style={{ color: "rgb(255, 60, 60)" }}>━</b> Brake
         </span>
         <span>
-          <b style={{ color: "rgb(50, 255, 100)" }}>●</b> Throttle
+          <b style={{ color: "rgb(50, 255, 100)" }}>━</b> Throttle
         </span>
         <span>
-          <b style={{ color: "rgb(80, 160, 255)" }}>●</b> Steering / cornering
+          <b style={{ color: "rgb(80, 160, 255)" }}>━</b> Steering / cornering
         </span>
         <span>
-          <b style={{ color: "rgb(160, 160, 160)" }}>●</b> Coasting
+          <b style={{ color: "rgb(160, 160, 160)" }}>━</b> Coasting
+        </span>
+        <span>
+          <b style={{ color: "white" }}>●</b> Current car
         </span>
       </div>
     </div>
