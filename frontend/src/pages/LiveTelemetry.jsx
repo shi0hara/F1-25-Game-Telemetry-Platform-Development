@@ -6,164 +6,183 @@ import {
   LinearScale,
   LineElement,
   PointElement,
-  Filler,
   Tooltip,
   Legend,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
-import TelemetryChart from "../components/TelemetryChart";
+import TrackTelemetryMap from "../components/TrackTelemetryMap";
+import useActiveSession from "../hooks/useActiveSession";
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
   LineElement,
   PointElement,
-  Filler,
   Tooltip,
   Legend
 );
 
-function SteeringWheel({ steering = 0 }) {
-  const clamped = Math.max(-1, Math.min(1, Number(steering) || 0));
-  const angle = clamped * 180;
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-  return (
-    <div
-      style={{
-        height: "320px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
+function formatDate(value) {
+  if (!value) return "-";
 
-      <div
-        style={{
-          width: "180px",
-          height: "180px",
-          borderRadius: "50%",
-          border: "12px solid #d1d5db",
-          position: "relative",
-          boxShadow: "0 0 0 8px rgba(255,255,255,0.04) inset",
-          transform: `rotate(${angle}deg)`,
-          transition: "transform 80ms linear",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            width: "12px",
-            height: "12px",
-            borderRadius: "50%",
-            background: "#fff",
-            transform: "translate(-50%, -50%)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            width: "110px",
-            height: "6px",
-            background: "#d1d5db",
-            transform: "translate(-50%, -50%)",
-            borderRadius: "999px",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            width: "6px",
-            height: "110px",
-            background: "#d1d5db",
-            transform: "translate(-50%, -50%)",
-            borderRadius: "999px",
-          }}
-        />
-      </div>
+  const d =
+    typeof value === "string"
+      ? new Date(value)
+      : value?.toDate?.() || new Date(value);
 
-      <div style={{ textAlign: "center", marginTop: "8px", fontSize: "18px" }}>
-        <strong>{angle.toFixed(0)}°</strong>
-      </div>
-    </div>
-  );
+  if (Number.isNaN(d.getTime())) return "-";
+
+  return d.toLocaleString();
 }
 
-export default function LiveTelemetry({ sessionId }) {
+function formatLapTime(ms) {
+  if (ms == null) return "-";
+
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  const fraction = ms % 1000;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}.${fraction
+    .toString()
+    .padStart(3, "0")}`;
+}
+
+function getTrackKey(session) {
+  if (session?.trackKey) return session.trackKey;
+  if (session?.trackId != null) return `track_${session.trackId}`;
+  return null;
+}
+
+function getDefaultMapImage(trackKey) {
+  const mapImages = {
+    track_0: "/maps/albert-park.svg",
+    track_12: "/maps/singapore.png",
+    track_11: "/maps/monza.png",
+    track_13: "/maps/suzuka.png",
+  };
+
+  return mapImages[trackKey] || "/maps/default-track.png";
+}
+
+export default function LiveTelemetry() {
+  const [usernameInput, setUsernameInput] = useState("");
+  const [activeUsername, setActiveUsername] = useState("");
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  const [selectedSession, setSelectedSession] = useState(null);
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
   const [speedPoints, setSpeedPoints] = useState([]);
-  const [throttlePoints, setThrottlePoints] = useState([]);
-  const [brakePoints, setBrakePoints] = useState([]);
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  const {
+    sessionId: autoSessionId,
+    sessionData: autoSessionData,
+    sessions,
+    userData,
+    loading,
+    error,
+  } = useActiveSession(activeUsername);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!autoSessionId) {
+      setSelectedSessionId(null);
+      setSelectedSession(null);
+      setSelectedTelemetry(null);
+      setSpeedPoints([]);
+      return;
+    }
+
+    setSelectedSessionId((prev) => {
+      if (prev && sessions.some((session) => session.id === prev)) {
+        return prev;
+      }
+
+      return autoSessionId;
+    });
+  }, [autoSessionId, sessions]);
+
+  useEffect(() => {
+    if (!selectedSessionId) {
+      setSelectedSession(null);
       setSelectedTelemetry(null);
       return;
     }
 
-    const sessionRef = doc(db, "sessions", sessionId);
+    const sessionRef = doc(db, "sessions", selectedSessionId);
 
     const unsubscribe = onSnapshot(
       sessionRef,
       (snapshot) => {
         if (!snapshot.exists()) {
+          setSelectedSession(null);
           setSelectedTelemetry(null);
           return;
         }
 
-        const data = snapshot.data();
-        const telemetry = data.latestTelemetry || null;
-        setSelectedTelemetry(telemetry);
+        const data = {
+          id: snapshot.id,
+          ...snapshot.data(),
+        };
 
-        if (telemetry?.speedKph != null) {
+        setSelectedSession(data);
+
+        const latestTelemetry = data.latestTelemetry || null;
+        setSelectedTelemetry(latestTelemetry);
+
+        if (latestTelemetry?.speedKph != null) {
           setSpeedPoints((prev) => {
             const next = [
               ...prev,
               {
                 time: Date.now(),
-                speed: Number(telemetry.speedKph ?? 0),
+                speed: Number(latestTelemetry.speedKph ?? 0),
               },
             ];
-            return next.slice(-75);
-          });
-        }
 
-        if (telemetry?.throttle != null || telemetry?.brake != null) {
-          const now = Date.now();
-
-          setThrottlePoints((prev) => {
-            const next = [
-              ...prev,
-              { time: now, value: Number(telemetry.throttle ?? 0) * 100 },
-            ];
-            return next.slice(-75);
-          });
-
-          setBrakePoints((prev) => {
-            const next = [
-              ...prev,
-              { time: now, value: Number(telemetry.brake ?? 0) * 100 },
-            ];
             return next.slice(-75);
           });
         }
       },
       (err) => {
-        console.error("Session listener error:", err);
-        setError(err.message || "Failed to load session.");
+        console.error("Selected session listener error:", err);
+        setLocalError(err.message || "Failed to load selected session.");
       }
     );
 
     return unsubscribe;
-  }, [sessionId]);
+  }, [selectedSessionId]);
+
+  function handleSubmit(e) {
+    e.preventDefault();
+
+    setLocalError("");
+    setSpeedPoints([]);
+    setSelectedSessionId(null);
+    setSelectedSession(null);
+    setSelectedTelemetry(null);
+
+    setActiveUsername(usernameInput.trim().toLowerCase());
+  }
+
+  function clearUserFilter() {
+    setUsernameInput("");
+    setActiveUsername("");
+    setSpeedPoints([]);
+    setSelectedSessionId(null);
+    setSelectedSession(null);
+    setSelectedTelemetry(null);
+  }
+
+  const activeTrackKey = useMemo(() => {
+    return getTrackKey(selectedSession || autoSessionData);
+  }, [selectedSession, autoSessionData]);
+
+  const mapImageUrl = useMemo(() => {
+    return getDefaultMapImage(activeTrackKey);
+  }, [activeTrackKey]);
 
   const chartData = useMemo(() => {
     return {
@@ -188,135 +207,253 @@ export default function LiveTelemetry({ sessionId }) {
       animation: false,
       maintainAspectRatio: false,
       scales: {
-        x: { display: false },
-        y: { beginAtZero: true, max: 350 },
-      },
-      plugins: {
-        legend: {
-          display: true,
-          labels: { color: "#fff" }
+        x: {
+          display: false,
         },
-      },
-    };
-  }, []);
-
-  const throttleData = useMemo(() => {
-    return {
-      labels: throttlePoints.map(() => ""),
-      datasets: [
-        {
-          label: "Throttle (%)",
-          data: throttlePoints.map((p) => p.value),
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.25,
-          borderColor: "#22c55e",
-          backgroundColor: "rgba(34, 197, 94, 0.15)",
-          fill: true,
-        },
-      ],
-    };
-  }, [throttlePoints]);
-
-  const brakeData = useMemo(() => {
-    return {
-      labels: brakePoints.map(() => ""),
-      datasets: [
-        {
-          label: "Brake (%)",
-          data: brakePoints.map((p) => p.value),
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.25,
-          borderColor: "#ef4444",
-          backgroundColor: "rgba(239, 68, 68, 0.15)",
-          fill: true,
-        },
-      ],
-    };
-  }, [brakePoints]);
-
-  const percentOptions = useMemo(() => {
-    return {
-      responsive: true,
-      animation: false,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display: false },
         y: {
           beginAtZero: true,
-          max: 100,
-          ticks: { color: "#aaa", callback: (v) => `${v}%` },
-          grid: { color: "rgba(255,255,255,0.05)" },
+          max: 350,
+          ticks: {
+            color: "#fff",
+          },
+          grid: {
+            color: "rgba(255,255,255,0.12)",
+          },
         },
       },
       plugins: {
         legend: {
           display: true,
-          labels: { color: "#fff" },
+          labels: {
+            color: "#fff",
+          },
         },
       },
     };
   }, []);
+
+  const shownError = localError || error;
 
   return (
     <div className="page-container">
-      <h1>Live <span className="text-blue">Telemetry</span></h1>
-      
-      {error && <p style={{ color: "red" }}>Error: {error}</p>}
-      
-      <div className="grid-2" style={{ marginBottom: "20px" }}>
-        <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
-          <h2>Current Stats</h2>
-          {selectedTelemetry ? (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-              <p><strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0} km/h</p>
-              <p><strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}</p>
-              <p><strong>RPM:</strong> {selectedTelemetry?.rpm ?? selectedTelemetry?.engineRPM ?? "-"}</p>
-              <p><strong>Throttle:</strong> {((selectedTelemetry.throttle ?? 0) * 100).toFixed(0)}%</p>
-              <p><strong>Brake:</strong> {((selectedTelemetry.brake ?? 0) * 100).toFixed(0)}%</p>
-              <p><strong>Steering:</strong> {(selectedTelemetry.steering ?? 0).toFixed(2)}</p>
-              <p><strong>DRS:</strong> {selectedTelemetry.drs ? "On" : "Off"}</p>
-              <p><strong>Lap:</strong> {selectedTelemetry.lapNumber ?? "-"}</p>
-              <p><strong>Sector:</strong> {selectedTelemetry.currentSector != null ? selectedTelemetry.currentSector + 1 : "-"}</p>
+      <h1>
+        Live <span className="text-blue">Telemetry</span>
+      </h1>
+
+      <form onSubmit={handleSubmit} style={{ marginBottom: 16 }}>
+        <input
+          value={usernameInput}
+          onChange={(e) => setUsernameInput(e.target.value)}
+          placeholder="Enter username, or leave empty for latest session"
+          style={{
+            padding: 8,
+            width: 320,
+            marginRight: 8,
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.2)",
+          }}
+        />
+        <button type="submit">Load</button>
+        <button
+          type="button"
+          onClick={clearUserFilter}
+          style={{ marginLeft: 8 }}
+        >
+          Latest Session
+        </button>
+      </form>
+
+      {loading && <p>Loading active session...</p>}
+
+      {userData && (
+        <p>
+          Viewing user: <strong>{userData.username}</strong>
+          {userData.email ? ` (${userData.email})` : ""}
+        </p>
+      )}
+
+      {!activeUsername && (
+        <p style={{ color: "#aaa" }}>
+          Showing latest available session across all users.
+        </p>
+      )}
+
+      {shownError && <p style={{ color: "red" }}>Error: {shownError}</p>}
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h2>Sessions</h2>
+
+        {sessions.length === 0 ? (
+          <p>No sessions found.</p>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {sessions.map((session) => {
+              const isSelected = selectedSessionId === session.id;
+              const summary = session.processedSummary || {};
+
+              return (
+                <button
+                  key={session.id}
+                  onClick={() => {
+                    setSelectedSessionId(session.id);
+                    setSelectedSession(session);
+                    setSelectedTelemetry(session.latestTelemetry || null);
+                    setSpeedPoints([]);
+                  }}
+                  style={{
+                    textAlign: "left",
+                    padding: 12,
+                    border: isSelected
+                      ? "2px solid var(--color-accent-blue)"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: 8,
+                    background: isSelected
+                      ? "rgba(59,130,246,0.16)"
+                      : "rgba(255,255,255,0.04)",
+                    color: "white",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div>
+                    <strong>{session.trackName || "Unknown Track"}</strong>
+                  </div>
+                  <div>Session ID: {session.id}</div>
+                  <div>Track Key: {getTrackKey(session) || "-"}</div>
+                  <div>Session Type: {session.sessionType ?? "-"}</div>
+                  <div>Started: {formatDate(session.startedAt)}</div>
+                  <div>Ended: {formatDate(session.endedAt)}</div>
+                  <div>Best Lap: {formatLapTime(summary.bestLapTimeMs)}</div>
+                  <div>Top Speed: {summary.topSpeedKph ?? 0} km/h</div>
+                  <div>Total Laps: {summary.totalLaps ?? 0}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selectedSession && (
+        <>
+          <div className="grid-2" style={{ marginBottom: 20 }}>
+            <div className="card">
+              <h2>Selected Session</h2>
+
+              <p>
+                <strong>Session ID:</strong> {selectedSession.id}
+              </p>
+              <p>
+                <strong>Track:</strong> {selectedSession.trackName ?? "-"}
+              </p>
+              <p>
+                <strong>Track Key:</strong> {activeTrackKey ?? "-"}
+              </p>
+              <p>
+                <strong>Started:</strong>{" "}
+                {formatDate(selectedSession.startedAt)}
+              </p>
+              <p>
+                <strong>Ended:</strong> {formatDate(selectedSession.endedAt)}
+              </p>
             </div>
-          ) : (
-            <p>Waiting for telemetry data or session ID...</p>
-          )}
-        </div>
-      
-        <div className="card" style={{ borderLeftColor: "var(--color-accent-blue)" }}>
-          <h2>Steering Wheel</h2>
-          <SteeringWheel steering={selectedTelemetry?.steering ?? 0} />
-        </div>
-      </div>
 
-      <div className="card">
-        <h2>Speed Trace</h2>
-        <div style={{ height: "400px", width: "100%", marginTop: "16px" }}>
-          <Line data={chartData} options={chartOptions} />
-        </div>
-      </div>
+            <div className="card">
+              <h2>Current Telemetry</h2>
 
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Throttle Application</h2>
-        <div style={{ height: "300px", width: "100%", marginTop: "16px" }}>
-          <Line data={throttleData} options={percentOptions} />
-        </div>
-      </div>
+              {selectedTelemetry ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                  }}
+                >
+                  <p>
+                    <strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0} km/h
+                  </p>
+                  <p>
+                    <strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}
+                  </p>
+                  <p>
+                    <strong>RPM:</strong> {selectedTelemetry.rpm ?? 0}
+                  </p>
+                  <p>
+                    <strong>Throttle:</strong>{" "}
+                    {((selectedTelemetry.throttle ?? 0) * 100).toFixed(0)}%
+                  </p>
+                  <p>
+                    <strong>Brake:</strong>{" "}
+                    {((selectedTelemetry.brake ?? 0) * 100).toFixed(0)}%
+                  </p>
+                  <p>
+                    <strong>Steering:</strong>{" "}
+                    {(selectedTelemetry.steering ?? 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <strong>DRS:</strong> {selectedTelemetry.drs ? "On" : "Off"}
+                  </p>
+                  <p>
+                    <strong>Lap:</strong> {selectedTelemetry.lapNumber ?? "-"}
+                  </p>
+                  <p>
+                    <strong>Delta to PB:</strong>{" "}
+                    {selectedTelemetry.deltaToPB ?? "-"} ms
+                  </p>
+                  <p>
+                    <strong>Cornering Speed:</strong>{" "}
+                    {selectedTelemetry.corneringSpeed == null
+                      ? "-"
+                      : `${selectedTelemetry.corneringSpeed} km/h`}
+                  </p>
+                  <p>
+                    <strong>Braking Distance:</strong>{" "}
+                    {selectedTelemetry.brakingDistance == null
+                      ? "-"
+                      : `${Number(selectedTelemetry.brakingDistance).toFixed(
+                          1
+                        )} m`}
+                  </p>
+                  <p>
+                    <strong>World X:</strong>{" "}
+                    {selectedSession.latestMapPosition?.worldX?.toFixed?.(2) ??
+                      selectedTelemetry.worldX?.toFixed?.(2) ??
+                      "-"}
+                  </p>
+                  <p>
+                    <strong>World Z:</strong>{" "}
+                    {selectedSession.latestMapPosition?.worldZ?.toFixed?.(2) ??
+                      selectedTelemetry.worldZ?.toFixed?.(2) ??
+                      "-"}
+                  </p>
+                </div>
+              ) : (
+                <p>No latest telemetry for this session yet.</p>
+              )}
+            </div>
+          </div>
 
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Brake Application</h2>
-        <div style={{ height: "300px", width: "100%", marginTop: "16px" }}>
-          <Line data={brakeData} options={percentOptions} />
-        </div>
-      </div>
+          <div className="card" style={{ marginBottom: 20 }}>
+            <h2>Telemetry Map</h2>
 
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Lap Times</h2>
-        <p style={{ color: '#888', fontSize: '13px', marginBottom: '12px' }}>Sector and lap times update as you complete each lap.</p>
-        <TelemetryChart sessionId={sessionId} />
-      </div>
+            {activeTrackKey ? (
+              <TrackTelemetryMap
+                apiBase={API_BASE}
+                sessionId={selectedSession.id}
+                trackKey={activeTrackKey}
+                mapImageUrl={mapImageUrl}
+              />
+            ) : (
+              <p>No track key found for this session.</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>Speed Trace</h2>
+            <div style={{ height: 320, marginTop: 16 }}>
+              <Line data={chartData} options={chartOptions} />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
