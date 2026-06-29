@@ -21,6 +21,7 @@ CSV_PATH = "telemetry_live.csv"
 PRINT_HEADERS = False
 HEADER_PRINT_EVERY_SEC = 0.5
 
+MOTION_PACKET_ID = 0
 SESSION_PACKET_ID = 1
 LAP_DATA_PACKET_ID = 2
 EVENT_PACKET_ID = 3
@@ -81,6 +82,15 @@ SESSION_TYPE = None
 
 CURRENT_LAP_DISTANCE_M = None
 CURRENT_TOTAL_DISTANCE_M = None
+
+# Latest world-space car position from the Motion packet.
+# Use worldX/worldZ for 2D track-map overlays. worldY is height/elevation.
+CURRENT_WORLD_X = None
+CURRENT_WORLD_Y = None
+CURRENT_WORLD_Z = None
+CURRENT_YAW = None
+CURRENT_PITCH = None
+CURRENT_ROLL = None
 
 CORNER_ACTIVE = False
 CORNER_START = None
@@ -688,7 +698,23 @@ def flush_active_corner(end_sample=None, end_reason="shutdown"):
         "endTotalDistanceM": end_sample.get("totalDistance", CURRENT_TOTAL_DISTANCE_M),
         "startSpeedKph": CORNER_START.get("startSpeedKph"),
         "endSpeedKph": end_sample.get("speedKph"),
+        "minSpeedKph": CORNER_START.get("minSpeedKph"),
+        "maxBrake": CORNER_START.get("maxBrake", 0.0),
+        "maxThrottle": CORNER_START.get("maxThrottle", 0.0),
         "maxAbsSteering": CORNER_START.get("maxAbsSteering", 0.0),
+        "sampleCount": CORNER_START.get("sampleCount", 0),
+
+        "startWorldX": CORNER_START.get("startWorldX"),
+        "startWorldY": CORNER_START.get("startWorldY"),
+        "startWorldZ": CORNER_START.get("startWorldZ"),
+        "endWorldX": end_sample.get("worldX"),
+        "endWorldY": end_sample.get("worldY"),
+        "endWorldZ": end_sample.get("worldZ"),
+
+        "apexLapDistanceM": CORNER_START.get("apexLapDistanceM"),
+        "apexWorldX": CORNER_START.get("apexWorldX"),
+        "apexWorldY": CORNER_START.get("apexWorldY"),
+        "apexWorldZ": CORNER_START.get("apexWorldZ"),
         "endReason": end_reason,
     }
 
@@ -725,10 +751,37 @@ def update_corner_state_from_sample(sample_body):
                 "startLapDistanceM": lap_distance,
                 "startTotalDistanceM": sample_body.get("totalDistance"),
                 "startSpeedKph": sample_body.get("speedKph"),
+                "minSpeedKph": sample_body.get("speedKph"),
+                "maxBrake": sample_body.get("brake") or 0.0,
+                "maxThrottle": sample_body.get("throttle") or 0.0,
                 "maxAbsSteering": steering_abs,
+                "sampleCount": 1,
+                "startWorldX": sample_body.get("worldX"),
+                "startWorldY": sample_body.get("worldY"),
+                "startWorldZ": sample_body.get("worldZ"),
+                "apexLapDistanceM": lap_distance,
+                "apexWorldX": sample_body.get("worldX"),
+                "apexWorldY": sample_body.get("worldY"),
+                "apexWorldZ": sample_body.get("worldZ"),
             }
     else:
-        CORNER_START["maxAbsSteering"] = max(CORNER_START["maxAbsSteering"], steering_abs)
+        CORNER_START["sampleCount"] = int(CORNER_START.get("sampleCount", 0) or 0) + 1
+
+        speed = sample_body.get("speedKph")
+        if speed is not None:
+            current_min = CORNER_START.get("minSpeedKph")
+            if current_min is None or speed < current_min:
+                CORNER_START["minSpeedKph"] = speed
+
+        CORNER_START["maxBrake"] = max(CORNER_START.get("maxBrake", 0.0), sample_body.get("brake") or 0.0)
+        CORNER_START["maxThrottle"] = max(CORNER_START.get("maxThrottle", 0.0), sample_body.get("throttle") or 0.0)
+
+        if steering_abs > CORNER_START.get("maxAbsSteering", 0.0):
+            CORNER_START["maxAbsSteering"] = steering_abs
+            CORNER_START["apexLapDistanceM"] = lap_distance
+            CORNER_START["apexWorldX"] = sample_body.get("worldX")
+            CORNER_START["apexWorldY"] = sample_body.get("worldY")
+            CORNER_START["apexWorldZ"] = sample_body.get("worldZ")
 
         if steering_abs <= CORNER_END_THRESHOLD:
             flush_active_corner(sample_body, end_reason="steering_released")
@@ -755,6 +808,66 @@ def sync_session_metadata():
         LAST_SESSION_META_SYNCED = dict(payload)
     except Exception as e:
         print("Session metadata sync error:", e)
+
+
+
+def get_motion_array(pkt):
+    return get_attr(pkt, "car_motion_data", "m_carMotionData")
+
+
+def update_motion_state_from_packet(header, pkt):
+    """
+    Reads the Motion packet and stores the player's latest world-space position.
+    F1 world coordinates are what the website should align to a track image.
+
+    2D map overlay:
+      worldX -> horizontal game coordinate
+      worldZ -> vertical/depth game coordinate
+      worldY -> elevation/height
+    """
+    global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z
+    global CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
+
+    arr = get_motion_array(pkt)
+    if arr is None or len(arr) == 0:
+        return
+
+    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
+    if not (0 <= player_idx < len(arr)):
+        player_idx = 0
+
+    car = arr[player_idx]
+
+    CURRENT_WORLD_X = parse_number(get_attr(
+        car,
+        "world_position_x",
+        "worldPositionX",
+        "m_worldPositionX",
+        "m_world_position_x",
+        default=None,
+    ), None)
+
+    CURRENT_WORLD_Y = parse_number(get_attr(
+        car,
+        "world_position_y",
+        "worldPositionY",
+        "m_worldPositionY",
+        "m_world_position_y",
+        default=None,
+    ), None)
+
+    CURRENT_WORLD_Z = parse_number(get_attr(
+        car,
+        "world_position_z",
+        "worldPositionZ",
+        "m_worldPositionZ",
+        "m_world_position_z",
+        default=None,
+    ), None)
+
+    CURRENT_YAW = parse_number(get_attr(car, "yaw", "m_yaw", default=None), None)
+    CURRENT_PITCH = parse_number(get_attr(car, "pitch", "m_pitch", default=None), None)
+    CURRENT_ROLL = parse_number(get_attr(car, "roll", "m_roll", default=None), None)
 
 
 def get_lap_array(pkt):
@@ -918,6 +1031,7 @@ def post_latest_telemetry(sample_body):
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
+    global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z, CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
 
     if not SESSION_ID or pkt is None:
         return
@@ -984,6 +1098,19 @@ def post_telemetry_sample(header, pkt):
         "lapNumber": CURRENT_LAP_NUM,
         "lapDistance": CURRENT_LAP_DISTANCE_M,
         "totalDistance": CURRENT_TOTAL_DISTANCE_M,
+
+        # Map/position fields for website overlays.
+        # Store these in Firebase and map worldX/worldZ to image coordinates in the frontend.
+        "worldX": CURRENT_WORLD_X,
+        "worldY": CURRENT_WORLD_Y,
+        "worldZ": CURRENT_WORLD_Z,
+        "yaw": CURRENT_YAW,
+        "pitch": CURRENT_PITCH,
+        "roll": CURRENT_ROLL,
+
+        "trackId": TRACK_ID,
+        "trackName": TRACK_NAME,
+
         "speedKph": speed,
         "throttle": throttle,
         "brake": brake,
@@ -1106,6 +1233,14 @@ def main():
                 "lap_number",
                 "lap_distance",
                 "total_distance",
+                "world_x",
+                "world_y",
+                "world_z",
+                "yaw",
+                "pitch",
+                "roll",
+                "track_id",
+                "track_name",
                 "speed_kph",
                 "throttle",
                 "brake",
@@ -1149,6 +1284,9 @@ def main():
                 race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_final_class_packet(pid, race_active, race_started_at)
 
+                if pid == MOTION_PACKET_ID and pkt is not None:
+                    update_motion_state_from_packet(header, pkt)
+
                 if pid == TIME_TRIAL_PACKET_ID and pkt is not None:
                     update_time_trial_state(pkt)
 
@@ -1178,6 +1316,14 @@ def main():
                             CURRENT_LAP_NUM,
                             CURRENT_LAP_DISTANCE_M,
                             CURRENT_TOTAL_DISTANCE_M,
+                            CURRENT_WORLD_X,
+                            CURRENT_WORLD_Y,
+                            CURRENT_WORLD_Z,
+                            CURRENT_YAW,
+                            CURRENT_PITCH,
+                            CURRENT_ROLL,
+                            TRACK_ID,
+                            TRACK_NAME,
                             speed,
                             throttle,
                             brake,
