@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
 import useActiveSession from "./hooks/useActiveSession";
+import TrackCalibration from "./pages/TrackCalibration";
 
 const ProtectedRoute = ({ user, children }) => {
   if (!user) {
