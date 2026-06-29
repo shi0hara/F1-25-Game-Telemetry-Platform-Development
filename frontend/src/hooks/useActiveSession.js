@@ -1,44 +1,128 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   collection,
-  query,
-  where,
-  orderBy,
+  getDocs,
   limit,
   onSnapshot,
-  getDocs,
+  orderBy,
+  query,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
+function toMillis(value) {
+  if (!value) return 0;
+
+  if (typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+
+  if (typeof value.seconds === "number") {
+    return value.seconds * 1000;
+  }
+
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getTrackKeyFromSession(session) {
+  if (session?.trackKey) return session.trackKey;
+  if (session?.trackId != null) return `track_${session.trackId}`;
+  return null;
+}
+
+function hasTelemetry(session) {
+  return Boolean(
+    session?.latestTelemetry ||
+      session?.latestMapPosition ||
+      session?.latestTelemetryAt
+  );
+}
+
+function isActiveSession(session) {
+  return !session?.endedAt;
+}
+
+function pickBestSession(sessions) {
+  if (!Array.isArray(sessions) || sessions.length === 0) return null;
+
+  const activeSessions = sessions.filter(isActiveSession);
+
+  const activeWithTelemetry = activeSessions
+    .filter(hasTelemetry)
+    .sort((a, b) => {
+      const aTime = toMillis(a.latestTelemetryAt) || toMillis(a.startedAt);
+      const bTime = toMillis(b.latestTelemetryAt) || toMillis(b.startedAt);
+      return bTime - aTime;
+    });
+
+  if (activeWithTelemetry.length > 0) {
+    return activeWithTelemetry[0];
+  }
+
+  if (activeSessions.length > 0) {
+    return activeSessions[0];
+  }
+
+  return sessions[0];
+}
+
 /**
- * Resolves the logged-in username to a Firestore user document,
- * then subscribes to their most recent (active) session in real-time.
+ * If username is provided:
+ *   - resolves username -> user
+ *   - watches that user's sessions
  *
- * Returns { sessionId, userId, loading, error }
+ * If username is empty:
+ *   - watches latest global sessions
+ *
+ * Returns:
+ * {
+ *   sessionId,
+ *   sessionData,
+ *   activeTrackKey,
+ *   userId,
+ *   userData,
+ *   sessions,
+ *   loading,
+ *   error
+ * }
  */
 export default function useActiveSession(username) {
-  const [userId, setUserId] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const normalizedUsername = useMemo(() => {
+    return String(username || "").trim().toLowerCase();
+  }, [username]);
 
-  // Step 1: Resolve username -> userId
+  const [userId, setUserId] = useState(null);
+  const [userData, setUserData] = useState(null);
+  const [sessionId, setSessionId] = useState(null);
+  const [sessionData, setSessionData] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   useEffect(() => {
-    if (!username) {
-      setUserId(null);
-      setSessionId(null);
-      return;
+    let cancelled = false;
+
+    setError("");
+    setUserId(null);
+    setUserData(null);
+    setSessionId(null);
+    setSessionData(null);
+    setSessions([]);
+
+    if (!normalizedUsername) {
+      return () => {
+        cancelled = true;
+      };
     }
 
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    const resolveUser = async () => {
+    async function resolveUser() {
       try {
+        setLoading(true);
+
         const q = query(
           collection(db, "users"),
-          where("usernameLower", "==", username.trim().toLowerCase()),
+          where("usernameLower", "==", normalizedUsername),
           limit(1)
         );
 
@@ -47,61 +131,96 @@ export default function useActiveSession(username) {
         if (cancelled) return;
 
         if (snap.empty) {
-          setError("No user found in database for this username.");
+          setError("No user found for this username.");
           setLoading(false);
           return;
         }
 
-        setUserId(snap.docs[0].id);
+        const userDoc = snap.docs[0];
+        const nextUser = {
+          id: userDoc.id,
+          ...userDoc.data(),
+        };
+
+        setUserId(userDoc.id);
+        setUserData(nextUser);
       } catch (err) {
         if (!cancelled) {
+          console.error("User resolve error:", err);
           setError(err.message || "Failed to resolve user.");
           setLoading(false);
         }
       }
-    };
+    }
 
     resolveUser();
 
     return () => {
       cancelled = true;
     };
-  }, [username]);
+  }, [normalizedUsername]);
 
-  // Step 2: Subscribe to the user's most recent session
   useEffect(() => {
-    if (!userId) {
-      setSessionId(null);
-      setLoading(false);
+    if (normalizedUsername && !userId) {
       return;
     }
 
-    const q = query(
-      collection(db, "sessions"),
-      where("userId", "==", userId),
-      orderBy("startedAt", "desc"),
-      limit(1)
-    );
+    setLoading(true);
+    setError("");
+
+    const sessionsQuery = normalizedUsername
+      ? query(
+          collection(db, "sessions"),
+          where("userId", "==", userId),
+          orderBy("startedAt", "desc"),
+          limit(20)
+        )
+      : query(
+          collection(db, "sessions"),
+          orderBy("startedAt", "desc"),
+          limit(20)
+        );
 
     const unsubscribe = onSnapshot(
-      q,
+      sessionsQuery,
       (snapshot) => {
-        if (snapshot.empty) {
-          setSessionId(null);
-        } else {
-          setSessionId(snapshot.docs[0].id);
-        }
         setLoading(false);
+        setError("");
+
+        const docs = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+
+        setSessions(docs);
+
+        const bestSession = pickBestSession(docs);
+
+        setSessionId(bestSession?.id || null);
+        setSessionData(bestSession || null);
       },
       (err) => {
-        console.error("Active session listener error:", err);
-        setError(err.message || "Failed to load active session.");
+        console.error("Sessions listener error:", err);
         setLoading(false);
+        setError(err.message || "Failed to load sessions.");
       }
     );
 
     return unsubscribe;
-  }, [userId]);
+  }, [normalizedUsername, userId]);
 
-  return { sessionId, userId, loading, error };
+  const activeTrackKey = useMemo(() => {
+    return getTrackKeyFromSession(sessionData);
+  }, [sessionData]);
+
+  return {
+    sessionId,
+    sessionData,
+    activeTrackKey,
+    userId,
+    userData,
+    sessions,
+    loading,
+    error,
+  };
 }
