@@ -5,7 +5,11 @@ function clamp(value, min, max) {
 }
 
 function hasNumber(value) {
-  return typeof value === "number" && Number.isFinite(value);
+  return Number.isFinite(Number(value));
+}
+
+function num(value) {
+  return Number(value);
 }
 
 function getTelemetryColor(sample) {
@@ -31,91 +35,183 @@ function getTelemetryColor(sample) {
   return "rgb(160, 160, 160)";
 }
 
-function solveAffineTransform(anchorPoints) {
-  if (!Array.isArray(anchorPoints) || anchorPoints.length < 3) {
+function invert3x3(m) {
+  const a = m[0][0];
+  const b = m[0][1];
+  const c = m[0][2];
+
+  const d = m[1][0];
+  const e = m[1][1];
+  const f = m[1][2];
+
+  const g = m[2][0];
+  const h = m[2][1];
+  const i = m[2][2];
+
+  const A = e * i - f * h;
+  const B = -(d * i - f * g);
+  const C = d * h - e * g;
+
+  const D = -(b * i - c * h);
+  const E = a * i - c * g;
+  const F = -(a * h - b * g);
+
+  const G = b * f - c * e;
+  const H = -(a * f - c * d);
+  const I = a * e - b * d;
+
+  const det = a * A + b * B + c * C;
+
+  if (Math.abs(det) < 0.000000001) {
     return null;
   }
 
-  const p1 = anchorPoints[0];
-  const p2 = anchorPoints[1];
-  const p3 = anchorPoints[2];
+  return [
+    [A / det, D / det, G / det],
+    [B / det, E / det, H / det],
+    [C / det, F / det, I / det],
+  ];
+}
 
-  const x1 = Number(p1.worldX);
-  const y1 = Number(p1.worldZ);
-  const x2 = Number(p2.worldX);
-  const y2 = Number(p2.worldZ);
-  const x3 = Number(p3.worldX);
-  const y3 = Number(p3.worldZ);
+function multiplyMatrixVector(m, v) {
+  return [
+    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+  ];
+}
 
-  const u1 = Number(p1.imageX);
-  const v1 = Number(p1.imageY);
-  const u2 = Number(p2.imageX);
-  const v2 = Number(p2.imageY);
-  const u3 = Number(p3.imageX);
-  const v3 = Number(p3.imageY);
+function solveLeastSquaresAffine(anchorPoints) {
+  const points = Array.isArray(anchorPoints)
+    ? anchorPoints.filter((point) => {
+        return (
+          hasNumber(point.worldX) &&
+          hasNumber(point.worldZ) &&
+          hasNumber(point.imageX) &&
+          hasNumber(point.imageY)
+        );
+      })
+    : [];
 
-  const det =
-    x1 * (y2 - y3) -
-    y1 * (x2 - x3) +
-    x2 * y3 -
-    x3 * y2;
-
-  if (Math.abs(det) < 0.000001) {
+  if (points.length < 3) {
     return null;
   }
 
-  function solveFor(a1, a2, a3) {
-    const A =
-      (a1 * (y2 - y3) -
-        y1 * (a2 - a3) +
-        a2 * y3 -
-        a3 * y2) /
-      det;
+  let sumXX = 0;
+  let sumXZ = 0;
+  let sumX = 0;
 
-    const B =
-      (x1 * (a2 - a3) -
-        a1 * (x2 - x3) +
-        x2 * a3 -
-        x3 * a2) /
-      det;
+  let sumZZ = 0;
+  let sumZ = 0;
+  let n = points.length;
 
-    const C =
-      (x1 * (y2 * a3 - a2 * y3) -
-        y1 * (x2 * a3 - a2 * x3) +
-        a1 * (x2 * y3 - x3 * y2)) /
-      det;
+  let sumImageXWorldX = 0;
+  let sumImageXWorldZ = 0;
+  let sumImageX = 0;
 
-    return { A, B, C };
+  let sumImageYWorldX = 0;
+  let sumImageYWorldZ = 0;
+  let sumImageY = 0;
+
+  for (const point of points) {
+    const worldX = num(point.worldX);
+    const worldZ = num(point.worldZ);
+    const imageX = num(point.imageX);
+    const imageY = num(point.imageY);
+
+    sumXX += worldX * worldX;
+    sumXZ += worldX * worldZ;
+    sumX += worldX;
+
+    sumZZ += worldZ * worldZ;
+    sumZ += worldZ;
+
+    sumImageXWorldX += imageX * worldX;
+    sumImageXWorldZ += imageX * worldZ;
+    sumImageX += imageX;
+
+    sumImageYWorldX += imageY * worldX;
+    sumImageYWorldZ += imageY * worldZ;
+    sumImageY += imageY;
   }
 
-  const xTransform = solveFor(u1, u2, u3);
-  const yTransform = solveFor(v1, v2, v3);
+  const normalMatrix = [
+    [sumXX, sumXZ, sumX],
+    [sumXZ, sumZZ, sumZ],
+    [sumX, sumZ, n],
+  ];
 
-  return {
+  const inverse = invert3x3(normalMatrix);
+
+  if (!inverse) {
+    return null;
+  }
+
+  const imageXCoefficients = multiplyMatrixVector(inverse, [
+    sumImageXWorldX,
+    sumImageXWorldZ,
+    sumImageX,
+  ]);
+
+  const imageYCoefficients = multiplyMatrixVector(inverse, [
+    sumImageYWorldX,
+    sumImageYWorldZ,
+    sumImageY,
+  ]);
+
+  const transform = {
+    anchorCount: points.length,
+
     worldToImage(worldX, worldZ) {
+      const x = num(worldX);
+      const z = num(worldZ);
+
       return {
-        x: xTransform.A * worldX + xTransform.B * worldZ + xTransform.C,
-        y: yTransform.A * worldX + yTransform.B * worldZ + yTransform.C,
+        x:
+          imageXCoefficients[0] * x +
+          imageXCoefficients[1] * z +
+          imageXCoefficients[2],
+        y:
+          imageYCoefficients[0] * x +
+          imageYCoefficients[1] * z +
+          imageYCoefficients[2],
       };
     },
   };
+
+  let totalErrorSquared = 0;
+
+  for (const point of points) {
+    const predicted = transform.worldToImage(point.worldX, point.worldZ);
+    const dx = predicted.x - num(point.imageX);
+    const dy = predicted.y - num(point.imageY);
+
+    totalErrorSquared += dx * dx + dy * dy;
+  }
+
+  transform.rmsePixels = Math.sqrt(totalErrorSquared / points.length);
+
+  return transform;
 }
 
 function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
   if (!worldBounds) return null;
 
-  const minX = Number(worldBounds.minX);
-  const maxX = Number(worldBounds.maxX);
-  const minZ = Number(worldBounds.minZ);
-  const maxZ = Number(worldBounds.maxZ);
+  const minX = num(worldBounds.minX);
+  const maxX = num(worldBounds.maxX);
+  const minZ = num(worldBounds.minZ);
+  const maxZ = num(worldBounds.maxZ);
 
   if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
   if (maxX === minX || maxZ === minZ) return null;
 
   return {
+    anchorCount: 0,
+    rmsePixels: null,
+
     worldToImage(worldX, worldZ) {
-      const xNorm = (worldX - minX) / (maxX - minX);
-      const zNorm = (worldZ - minZ) / (maxZ - minZ);
+      const xNorm = (num(worldX) - minX) / (maxX - minX);
+      const zNorm = (num(worldZ) - minZ) / (maxZ - minZ);
 
       return {
         x: xNorm * imageWidth,
@@ -152,6 +248,9 @@ function getTrailPoints(trail, transform) {
         y: pos.y,
         sample,
       };
+    })
+    .filter((point) => {
+      return Number.isFinite(point.x) && Number.isFinite(point.y);
     });
 }
 
@@ -242,8 +341,8 @@ function readCenterlinePoint(point) {
   if (!hasNumber(worldX) || !hasNumber(worldZ)) return null;
 
   return {
-    worldX,
-    worldZ,
+    worldX: num(worldX),
+    worldZ: num(worldZ),
   };
 }
 
@@ -310,8 +409,21 @@ export default function TrackTelemetryMap({
           hasNumber(latest.worldZ)
         ) {
           setTrail((old) => {
+            const last = old[old.length - 1];
+
+            const samePosition =
+              last &&
+              Number(last.worldX).toFixed(3) ===
+                Number(latest.worldX).toFixed(3) &&
+              Number(last.worldZ).toFixed(3) ===
+                Number(latest.worldZ).toFixed(3);
+
+            if (samePosition) {
+              return old;
+            }
+
             const next = [...old, latest];
-            return next.slice(-1200);
+            return next.slice(-1600);
           });
         }
       } catch (err) {
@@ -321,7 +433,7 @@ export default function TrackTelemetryMap({
     }
 
     fetchLivePosition();
-    const interval = setInterval(fetchLivePosition, 250);
+    const interval = setInterval(fetchLivePosition, 200);
 
     return () => clearInterval(interval);
   }, [apiBase, sessionId]);
@@ -334,8 +446,11 @@ export default function TrackTelemetryMap({
   const transform = useMemo(() => {
     const anchors = trackMap?.imageCalibration?.anchorPoints;
 
-    const affine = solveAffineTransform(anchors);
-    if (affine) return affine;
+    const calibratedTransform = solveLeastSquaresAffine(anchors);
+
+    if (calibratedTransform) {
+      return calibratedTransform;
+    }
 
     return solveBoundsTransform(trackMap?.worldBounds, imageWidth, imageHeight);
   }, [trackMap, imageWidth, imageHeight]);
@@ -361,7 +476,7 @@ export default function TrackTelemetryMap({
 
       if (!trackMap || !transform) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
-        ctx.fillRect(20, 20, 580, 75);
+        ctx.fillRect(20, 20, 620, 75);
 
         ctx.fillStyle = "white";
         ctx.font = "16px Arial";
@@ -373,6 +488,7 @@ export default function TrackTelemetryMap({
           36,
           80
         );
+
         return;
       }
 
@@ -391,6 +507,8 @@ export default function TrackTelemetryMap({
           if (!readable) continue;
 
           const pos = transform.worldToImage(readable.worldX, readable.worldZ);
+
+          if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
 
           if (!started) {
             ctx.moveTo(pos.x, pos.y);
@@ -419,21 +537,41 @@ export default function TrackTelemetryMap({
       ) {
         const pos = transform.worldToImage(latest.worldX, latest.worldZ);
 
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
+        if (Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
+          ctx.fillStyle = "white";
+          ctx.fill();
+
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = getTelemetryColor(latest);
+          ctx.stroke();
+
+          const speedText =
+            latest.speedKph != null
+              ? `${Math.round(Number(latest.speedKph))} km/h`
+              : "Live";
+
+          drawTextBadge(ctx, speedText, pos.x + 12, pos.y - 12);
+        }
+      }
+
+      if (transform.anchorCount > 0) {
+        const rmseText =
+          transform.rmsePixels != null
+            ? `Calibration: ${transform.anchorCount} anchors, ±${transform.rmsePixels.toFixed(
+                1
+              )} px`
+            : `Calibration: ${transform.anchorCount} anchors`;
+
+        ctx.font = "13px Arial";
+        const badgeWidth = ctx.measureText(rmseText).width + 20;
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+        ctx.fillRect(16, height - 38, badgeWidth, 26);
+
         ctx.fillStyle = "white";
-        ctx.fill();
-
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = getTelemetryColor(latest);
-        ctx.stroke();
-
-        const speedText =
-          latest.speedKph != null
-            ? `${Math.round(latest.speedKph)} km/h`
-            : "Live";
-
-        drawTextBadge(ctx, speedText, pos.x + 12, pos.y - 12);
+        ctx.fillText(rmseText, 26, height - 20);
       }
     };
 
