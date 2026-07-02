@@ -54,10 +54,10 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => navigate("/calibrate")}
-                className="btn-calibrate"
+                onClick={() => navigate("/admin")}
+                className="btn-admin"
               >
-                Track Calibration
+                Admin
               </button>
             )}
 
