@@ -1,0 +1,190 @@
+.admin-users-page {
+  display: grid;
+  gap: 20px;
+}
+
+.admin-users-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-users-header p,
+.admin-account-meta p {
+  margin: 4px 0;
+  color: #aaa;
+}
+
+.admin-users-link {
+  border-radius: 6px;
+  background: #2563eb;
+  color: #fff;
+  padding: 10px 14px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.admin-users-message {
+  margin: 0;
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.12);
+  color: #bfdbfe;
+  padding: 10px 12px;
+}
+
+.admin-users-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.admin-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.admin-section-title h2 {
+  margin: 0;
+}
+
+.admin-section-title div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.admin-users-scroll,
+.admin-session-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.admin-users-scroll {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.admin-user-row {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+  padding: 10px;
+  text-align: left;
+}
+
+.admin-user-row.active {
+  border-color: #60a5fa;
+  background: rgba(37, 99, 235, 0.18);
+}
+
+.admin-user-row span,
+.admin-user-row small,
+.admin-session-row span {
+  color: #aaa;
+}
+
+.admin-account-editor form {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-account-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-account-editor input,
+.admin-account-editor select {
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  padding: 0 10px;
+}
+
+.admin-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-section-title button,
+.admin-editor-actions button,
+.admin-session-row button {
+  border: 0;
+  border-radius: 6px;
+  background: #374151;
+  color: #fff;
+  cursor: pointer;
+  padding: 9px 12px;
+}
+
+.admin-section-title button:disabled,
+.admin-editor-actions button:disabled,
+.admin-session-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.admin-section-title .danger,
+.admin-session-row .danger {
+  background: #991b1b;
+}
+
+.admin-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: #111;
+  padding: 12px;
+}
+
+.admin-session-row div {
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 820px) {
+  .admin-users-header,
+  .admin-users-layout,
+  .admin-session-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-users-header {
+    display: grid;
+  }
+
+  .admin-section-title {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-section-title div,
+  .admin-editor-actions {
+    justify-content: stretch;
+  }
+
+  .admin-section-title button,
+  .admin-editor-actions button,
+  .admin-session-row button,
+  .admin-users-link {
+    width: 100%;
+  }
+}
