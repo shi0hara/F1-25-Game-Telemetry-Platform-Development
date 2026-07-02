@@ -337,6 +337,8 @@ export default function TrackTelemetryMap({
   sessionId,
   trackKey,
   mapImageUrl = "/maps/default-track.png",
+  selectedTrailKey = "current",
+  onTrailOptionsChange,
 }) {
   const canvasRef = useRef(null);
   const currentLapTrailRef = useRef([]);
@@ -347,7 +349,6 @@ export default function TrackTelemetryMap({
   const [currentLapTrail, setCurrentLapTrail] = useState([]);
   const [currentLapNumber, setCurrentLapNumber] = useState(null);
   const [completedLapTrails, setCompletedLapTrails] = useState([]);
-  const [selectedTrailKey, setSelectedTrailKey] = useState("current");
   const [error, setError] = useState(null);
 
   function saveCompletedLap(lapNumber, points) {
@@ -377,7 +378,6 @@ export default function TrackTelemetryMap({
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
     setCompletedLapTrails([]);
-    setSelectedTrailKey("current");
   }
 
   function appendToCurrentLapTrail(latest) {
@@ -494,17 +494,60 @@ export default function TrackTelemetryMap({
     return solveBoundsTransform(trackMap?.worldBounds, imageWidth, imageHeight);
   }, [trackMap, imageWidth, imageHeight]);
 
+  useEffect(() => {
+    if (!onTrailOptionsChange) return;
+
+    const currentLabel =
+      currentLapNumber == null
+        ? "Current Lap Trail"
+        : `Current Lap ${currentLapNumber} Trail`;
+
+    onTrailOptionsChange({
+      currentLapNumber,
+      currentPointCount: currentLapTrail.length,
+      completedLapTrails,
+      options: [
+        {
+          key: "current",
+          type: "current",
+          lapNumber: currentLapNumber,
+          label: currentLabel,
+          pointCount: currentLapTrail.length,
+        },
+        ...completedLapTrails.map((trail) => ({
+          key: trail.key,
+          type: "completed",
+          lapNumber: trail.lapNumber,
+          label: trail.label,
+          pointCount: trail.pointCount,
+        })),
+      ],
+    });
+  }, [
+    currentLapNumber,
+    currentLapTrail.length,
+    completedLapTrails,
+    onTrailOptionsChange,
+  ]);
+
   const selectedCompletedTrail = useMemo(() => {
-    return completedLapTrails.find((trail) => trail.key === selectedTrailKey) || null;
+    return (
+      completedLapTrails.find((trail) => trail.key === selectedTrailKey) || null
+    );
   }, [completedLapTrails, selectedTrailKey]);
 
+  const activeTrailKey =
+    selectedTrailKey === "current" || selectedCompletedTrail
+      ? selectedTrailKey
+      : "current";
+
   const displayedTrail =
-    selectedTrailKey === "current"
+    activeTrailKey === "current"
       ? currentLapTrail
       : selectedCompletedTrail?.points || [];
 
   const selectedTrailLabel =
-    selectedTrailKey === "current"
+    activeTrailKey === "current"
       ? currentLapNumber == null
         ? "Current Lap Trail"
         : `Current Lap ${currentLapNumber} Trail`
@@ -677,70 +720,6 @@ export default function TrackTelemetryMap({
         >
           {error}
         </div>
-      )}
-
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "8px",
-          marginBottom: "10px",
-          alignItems: "center",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setSelectedTrailKey("current")}
-          style={{
-            padding: "8px 10px",
-            borderRadius: "8px",
-            border:
-              selectedTrailKey === "current"
-                ? "2px solid var(--color-accent-blue)"
-                : "1px solid rgba(255,255,255,0.18)",
-            background:
-              selectedTrailKey === "current"
-                ? "rgba(59,130,246,0.18)"
-                : "rgba(255,255,255,0.05)",
-            color: "white",
-            cursor: "pointer",
-          }}
-        >
-          {currentLapNumber == null
-            ? "Current Lap Trail"
-            : `Current Lap ${currentLapNumber} Trail`}
-        </button>
-
-        {completedLapTrails.map((lapTrail) => (
-          <button
-            type="button"
-            key={lapTrail.key}
-            onClick={() => setSelectedTrailKey(lapTrail.key)}
-            style={{
-              padding: "8px 10px",
-              borderRadius: "8px",
-              border:
-                selectedTrailKey === lapTrail.key
-                  ? "2px solid var(--color-accent-green)"
-                  : "1px solid rgba(255,255,255,0.18)",
-              background:
-                selectedTrailKey === lapTrail.key
-                  ? "rgba(34,197,94,0.16)"
-                  : "rgba(255,255,255,0.05)",
-              color: "white",
-              cursor: "pointer",
-            }}
-            title={`${lapTrail.pointCount} map points`}
-          >
-            {lapTrail.label}
-          </button>
-        ))}
-      </div>
-
-      {completedLapTrails.length === 0 && (
-        <p style={{ marginTop: 0, color: "#aaa", fontSize: "14px" }}>
-          Completed lap trails will appear here after the lap number changes.
-        </p>
       )}
 
       <canvas
