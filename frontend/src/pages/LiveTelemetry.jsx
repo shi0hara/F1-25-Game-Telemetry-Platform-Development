@@ -12,6 +12,7 @@ import {
 import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
 import TrackTelemetryMap from "../components/TrackTelemetryMap";
+import TelemetryChart from "../components/TelemetryChart";
 import useActiveSession from "../hooks/useActiveSession";
 
 ChartJS.register(
@@ -25,6 +26,15 @@ ChartJS.register(
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
+
+function createEmptyMapTrailState() {
+  return {
+    currentLapNumber: null,
+    currentPointCount: 0,
+    completedLapTrails: [],
+    options: [],
+  };
+}
 
 function formatDate(value) {
   if (!value) return "-";
@@ -68,6 +78,60 @@ function getDefaultMapImage(trackKey) {
   return mapImages[trackKey] || "/maps/default-track.png";
 }
 
+function LapTrailSelector({ options, selectedKey, onSelect }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "8px",
+        marginBottom: "12px",
+        alignItems: "center",
+      }}
+    >
+      {options.map((option) => {
+        const selected = selectedKey === option.key;
+        const isCurrent = option.type === "current";
+
+        return (
+          <button
+            type="button"
+            key={option.key}
+            onClick={() => onSelect(option.key)}
+            title={`${option.pointCount ?? 0} map points`}
+            style={{
+              padding: "8px 10px",
+              borderRadius: "8px",
+              border: selected
+                ? `2px solid ${
+                    isCurrent
+                      ? "var(--color-accent-blue)"
+                      : "var(--color-accent-green)"
+                  }`
+                : "1px solid rgba(255,255,255,0.18)",
+              background: selected
+                ? isCurrent
+                  ? "rgba(59,130,246,0.18)"
+                  : "rgba(34,197,94,0.16)"
+                : "rgba(255,255,255,0.05)",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+
+      {options.length === 1 && (
+        <span style={{ color: "#aaa", fontSize: "14px" }}>
+          Completed lap buttons appear after the lap number changes.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function LiveTelemetry() {
   const [usernameInput, setUsernameInput] = useState("");
   const [activeUsername, setActiveUsername] = useState("");
@@ -75,6 +139,10 @@ export default function LiveTelemetry() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
   const [speedPoints, setSpeedPoints] = useState([]);
+  const [selectedTrailKey, setSelectedTrailKey] = useState("current");
+  const [mapTrailState, setMapTrailState] = useState(() =>
+    createEmptyMapTrailState()
+  );
   const [localError, setLocalError] = useState("");
 
   const {
@@ -92,6 +160,8 @@ export default function LiveTelemetry() {
       setSelectedSession(null);
       setSelectedTelemetry(null);
       setSpeedPoints([]);
+      setSelectedTrailKey("current");
+      setMapTrailState(createEmptyMapTrailState());
       return;
     }
 
@@ -105,10 +175,15 @@ export default function LiveTelemetry() {
   }, [autoSessionId, sessions]);
 
   useEffect(() => {
+    setSelectedTrailKey("current");
+    setMapTrailState(createEmptyMapTrailState());
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     if (!selectedSessionId) {
       setSelectedSession(null);
       setSelectedTelemetry(null);
-      return;
+      return undefined;
     }
 
     const sessionRef = doc(db, "sessions", selectedSessionId);
@@ -155,6 +230,11 @@ export default function LiveTelemetry() {
     return unsubscribe;
   }, [selectedSessionId]);
 
+  function resetLapSelection() {
+    setSelectedTrailKey("current");
+    setMapTrailState(createEmptyMapTrailState());
+  }
+
   function handleSubmit(e) {
     e.preventDefault();
 
@@ -163,6 +243,7 @@ export default function LiveTelemetry() {
     setSelectedSessionId(null);
     setSelectedSession(null);
     setSelectedTelemetry(null);
+    resetLapSelection();
 
     setActiveUsername(usernameInput.trim().toLowerCase());
   }
@@ -174,6 +255,7 @@ export default function LiveTelemetry() {
     setSelectedSessionId(null);
     setSelectedSession(null);
     setSelectedTelemetry(null);
+    resetLapSelection();
   }
 
   const activeTrackKey = useMemo(() => {
@@ -184,12 +266,38 @@ export default function LiveTelemetry() {
     return getDefaultMapImage(activeTrackKey);
   }, [activeTrackKey]);
 
+  const lapOptions = useMemo(() => {
+    if (mapTrailState.options.length > 0) {
+      return mapTrailState.options;
+    }
+
+    return [
+      {
+        key: "current",
+        type: "current",
+        lapNumber: null,
+        label: "Current Lap Trail",
+        pointCount: 0,
+      },
+    ];
+  }, [mapTrailState]);
+
+  const selectedLapOption = useMemo(() => {
+    return (
+      lapOptions.find((option) => option.key === selectedTrailKey) ||
+      lapOptions[0]
+    );
+  }, [lapOptions, selectedTrailKey]);
+
+  const activeTrailKey = selectedLapOption?.key || "current";
+  const selectedLapNumber = selectedLapOption?.lapNumber ?? null;
+
   const chartData = useMemo(() => {
     return {
       labels: speedPoints.map(() => ""),
       datasets: [
         {
-          label: "Speed (km/h)",
+          label: "Live Speed (km/h)",
           data: speedPoints.map((p) => p.speed),
           borderWidth: 2,
           pointRadius: 0,
@@ -299,6 +407,7 @@ export default function LiveTelemetry() {
                     setSelectedSession(session);
                     setSelectedTelemetry(session.latestTelemetry || null);
                     setSpeedPoints([]);
+                    resetLapSelection();
                   }}
                   style={{
                     textAlign: "left",
@@ -368,7 +477,8 @@ export default function LiveTelemetry() {
                   }}
                 >
                   <p>
-                    <strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0} km/h
+                    <strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0}{" "}
+                    km/h
                   </p>
                   <p>
                     <strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}
@@ -434,20 +544,42 @@ export default function LiveTelemetry() {
           <div className="card" style={{ marginBottom: 20 }}>
             <h2>Telemetry Map</h2>
 
+            <LapTrailSelector
+              options={lapOptions}
+              selectedKey={activeTrailKey}
+              onSelect={setSelectedTrailKey}
+            />
+
             {activeTrackKey ? (
               <TrackTelemetryMap
                 apiBase={API_BASE}
                 sessionId={selectedSession.id}
                 trackKey={activeTrackKey}
                 mapImageUrl={mapImageUrl}
+                selectedTrailKey={activeTrailKey}
+                onTrailOptionsChange={setMapTrailState}
               />
             ) : (
               <p>No track key found for this session.</p>
             )}
+
+            <div
+              style={{
+                marginTop: 22,
+                paddingTop: 18,
+                borderTop: "1px solid rgba(255,255,255,0.12)",
+              }}
+            >
+              <h2>Lap Telemetry Chart</h2>
+              <TelemetryChart
+                sessionId={selectedSession.id}
+                selectedLapNumber={selectedLapNumber}
+              />
+            </div>
           </div>
 
           <div className="card">
-            <h2>Speed Trace</h2>
+            <h2>Live Speed Trace</h2>
             <div style={{ height: 320, marginTop: 16 }}>
               <Line data={chartData} options={chartOptions} />
             </div>
