@@ -43,6 +43,7 @@ TELEMETRY_BATCH = []
 
 DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
+LISTENER_TOKEN = os.getenv("LISTENER_TOKEN")
 
 PLAYER_NAME_DETECTED = False
 
@@ -154,6 +155,8 @@ adapter = HTTPAdapter(max_retries=retries, pool_connections=20, pool_maxsize=20)
 http.mount("http://", adapter)
 http.mount("https://", adapter)
 http.headers.update({"Content-Type": "application/json"})
+if LISTENER_TOKEN:
+    http.headers.update({"X-Listener-Token": LISTENER_TOKEN})
 
 
 def parse_truthy(value):
@@ -529,7 +532,16 @@ def extract_event_code(event_pkt):
 
 
 def prompt_identity():
-    global DRIVER_USERNAME, DRIVER_EMAIL
+    global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN
+
+    if not LISTENER_TOKEN:
+        entered_token = input("Listener token (press Enter to use username/email): ").strip()
+        if entered_token:
+            LISTENER_TOKEN = entered_token
+            http.headers.update({"X-Listener-Token": LISTENER_TOKEN})
+
+    if LISTENER_TOKEN:
+        return
 
     if not DRIVER_USERNAME:
         DRIVER_USERNAME = input("Username: ").strip()
@@ -616,23 +628,32 @@ def queue_worker(qobj, label):
 
 
 def create_user_and_session():
-    global USER_ID, SESSION_ID
+    global USER_ID, SESSION_ID, DRIVER_USERNAME, DRIVER_EMAIL
 
     while not STOP_EVENT.is_set():
         try:
-            print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
+            if LISTENER_TOKEN:
+                print(f"Connecting to backend at {API_BASE} with listener token ...")
+            else:
+                print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
 
             user_res = http.post(
                 f"{API_BASE}/users/ensure",
-                json={
-                    "username": DRIVER_USERNAME,
-                    "email": DRIVER_EMAIL,
-                },
+                json=(
+                    {}
+                    if LISTENER_TOKEN
+                    else {
+                        "username": DRIVER_USERNAME,
+                        "email": DRIVER_EMAIL,
+                    }
+                ),
                 timeout=REQUEST_TIMEOUT,
             )
             user_res.raise_for_status()
             user_data = user_res.json()
             USER_ID = user_data["id"]
+            DRIVER_USERNAME = user_data.get("username") or DRIVER_USERNAME
+            DRIVER_EMAIL = user_data.get("email") or DRIVER_EMAIL
 
             session_res = http.post(
                 f"{API_BASE}/sessions",
@@ -1205,6 +1226,8 @@ def main():
     detected_name = sniff_player_name(sock, timeout_sec=10.0)
     if detected_name and not is_fake_name(detected_name):
         print("Detected in-game player name:", detected_name)
+    elif LISTENER_TOKEN:
+        print("Using listener token account.")
     else:
         print("Using username:", DRIVER_USERNAME)
 
