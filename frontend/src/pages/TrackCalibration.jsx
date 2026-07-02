@@ -2,14 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   doc,
   onSnapshot,
-  serverTimestamp,
-  setDoc,
 } from "firebase/firestore";
 import { db } from "../firebase";
 import useActiveSession from "../hooks/useActiveSession";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
+
+function getAuthHeaders() {
+  const token = window.localStorage.getItem("f1AuthToken");
+
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
 
 function getTrackKeyFromSession(data) {
   if (data?.trackKey) return data.trackKey;
@@ -178,9 +185,7 @@ export default function TrackCalibration({
         `${API_BASE}/sessions/${sessionId}/track-map/finalize`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             maxPoints: 800,
           }),
@@ -265,27 +270,30 @@ export default function TrackCalibration({
       setIsSaving(true);
       setMessage("Saving calibration...");
 
-      const trackRef = doc(db, "trackMaps", activeTrackKey);
-
-      await setDoc(
-        trackRef,
+      const res = await fetch(
+        `${API_BASE}/track-maps/${encodeURIComponent(activeTrackKey)}/calibration`,
         {
-          trackKey: activeTrackKey,
-          trackId: liveSessionData?.trackId ?? activeSessionData?.trackId ?? null,
-          trackName:
-            liveSessionData?.trackName ?? activeSessionData?.trackName ?? null,
-          imageCalibration: {
+          method: "PATCH",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            trackId: liveSessionData?.trackId ?? activeSessionData?.trackId ?? null,
+            trackName:
+              liveSessionData?.trackName ?? activeSessionData?.trackName ?? null,
             imageUrl,
             imageWidth,
             imageHeight,
             anchorPoints,
-            calibratedAt: serverTimestamp(),
-          },
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
+          }),
+        }
       );
 
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to save calibration.");
+      }
+
+      setTrackMap(data);
       setDirty(false);
       setMessage("Calibration saved to Firebase.");
     } catch (err) {
