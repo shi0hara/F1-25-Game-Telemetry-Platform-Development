@@ -37,7 +37,19 @@ export default function Login({ onLogin }) {
       body: JSON.stringify(body),
     });
 
-    const data = await res.json();
+    const text = await res.text();
+    let data = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      const returnedHtml = text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html");
+      throw new Error(
+        returnedHtml
+          ? `Backend returned a web page instead of JSON. Check VITE_API_BASE: ${API_BASE}`
+          : "Backend returned an invalid response."
+      );
+    }
 
     if (!res.ok) {
       throw new Error(data.error || "Authentication failed.");
