@@ -298,6 +298,28 @@ function drawSmoothTelemetryTrail(ctx, trail, transform) {
   ctx.restore();
 }
 
+function getLapNumber(sample, fallback = null) {
+  if (!hasNumber(sample?.lapNumber)) return fallback;
+  return Number(sample.lapNumber);
+}
+
+function getLapTrailKey(lapNumber) {
+  return `lap-${lapNumber}`;
+}
+
+function getLapTrailLabel(lapNumber) {
+  return `Lap ${lapNumber} Trail`;
+}
+
+function isSameMapPosition(a, b) {
+  return (
+    a &&
+    b &&
+    Number(a.worldX).toFixed(3) === Number(b.worldX).toFixed(3) &&
+    Number(a.worldZ).toFixed(3) === Number(b.worldZ).toFixed(3)
+  );
+}
+
 function readCenterlinePoint(point) {
   const worldX = point.x ?? point.worldX;
   const worldZ = point.z ?? point.worldZ;
@@ -317,11 +339,59 @@ export default function TrackTelemetryMap({
   mapImageUrl = "/maps/default-track.png",
 }) {
   const canvasRef = useRef(null);
+  const currentLapTrailRef = useRef([]);
+  const currentLapNumberRef = useRef(null);
 
   const [trackMap, setTrackMap] = useState(null);
   const [sessionMap, setSessionMap] = useState(null);
-  const [trail, setTrail] = useState([]);
+  const [currentLapTrail, setCurrentLapTrail] = useState([]);
+  const [currentLapNumber, setCurrentLapNumber] = useState(null);
+  const [completedLapTrails, setCompletedLapTrails] = useState([]);
+  const [selectedTrailKey, setSelectedTrailKey] = useState("current");
   const [error, setError] = useState(null);
+
+  function saveCompletedLap(lapNumber, points) {
+    if (lapNumber == null || !Array.isArray(points) || points.length < 2) {
+      return;
+    }
+
+    const trail = {
+      key: getLapTrailKey(lapNumber),
+      lapNumber,
+      label: getLapTrailLabel(lapNumber),
+      pointCount: points.length,
+      points,
+      startedAt: points[0]?.timestamp || null,
+      endedAt: points[points.length - 1]?.timestamp || null,
+    };
+
+    setCompletedLapTrails((prev) => {
+      const withoutCurrentLap = prev.filter((item) => item.key !== trail.key);
+      return [...withoutCurrentLap, trail].sort((a, b) => a.lapNumber - b.lapNumber);
+    });
+  }
+
+  function resetLapTrails() {
+    currentLapTrailRef.current = [];
+    currentLapNumberRef.current = null;
+    setCurrentLapTrail([]);
+    setCurrentLapNumber(null);
+    setCompletedLapTrails([]);
+    setSelectedTrailKey("current");
+  }
+
+  function appendToCurrentLapTrail(latest) {
+    const old = currentLapTrailRef.current;
+    const last = old[old.length - 1];
+
+    if (isSameMapPosition(last, latest)) {
+      return;
+    }
+
+    const next = [...old, latest].slice(-1600);
+    currentLapTrailRef.current = next;
+    setCurrentLapTrail(next);
+  }
 
   useEffect(() => {
     async function loadTrackMap() {
@@ -350,7 +420,7 @@ export default function TrackTelemetryMap({
   }, [apiBase, trackKey]);
 
   useEffect(() => {
-    setTrail([]);
+    resetLapTrails();
 
     async function fetchLivePosition() {
       try {
@@ -372,23 +442,28 @@ export default function TrackTelemetryMap({
           hasNumber(latest.worldX) &&
           hasNumber(latest.worldZ)
         ) {
-          setTrail((old) => {
-            const last = old[old.length - 1];
+          const previousLapNumber = currentLapNumberRef.current;
+          const nextLapNumber = getLapNumber(latest, previousLapNumber);
 
-            const samePosition =
-              last &&
-              Number(last.worldX).toFixed(3) ===
-                Number(latest.worldX).toFixed(3) &&
-              Number(last.worldZ).toFixed(3) ===
-                Number(latest.worldZ).toFixed(3);
+          if (previousLapNumber === null && nextLapNumber !== null) {
+            currentLapNumberRef.current = nextLapNumber;
+            setCurrentLapNumber(nextLapNumber);
+          }
 
-            if (samePosition) {
-              return old;
-            }
+          if (
+            previousLapNumber !== null &&
+            nextLapNumber !== null &&
+            nextLapNumber !== previousLapNumber
+          ) {
+            saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
 
-            const next = [...old, latest];
-            return next.slice(-1600);
-          });
+            currentLapTrailRef.current = [];
+            setCurrentLapTrail([]);
+            currentLapNumberRef.current = nextLapNumber;
+            setCurrentLapNumber(nextLapNumber);
+          }
+
+          appendToCurrentLapTrail(latest);
         }
       } catch (err) {
         console.error(err);
@@ -418,6 +493,22 @@ export default function TrackTelemetryMap({
 
     return solveBoundsTransform(trackMap?.worldBounds, imageWidth, imageHeight);
   }, [trackMap, imageWidth, imageHeight]);
+
+  const selectedCompletedTrail = useMemo(() => {
+    return completedLapTrails.find((trail) => trail.key === selectedTrailKey) || null;
+  }, [completedLapTrails, selectedTrailKey]);
+
+  const displayedTrail =
+    selectedTrailKey === "current"
+      ? currentLapTrail
+      : selectedCompletedTrail?.points || [];
+
+  const selectedTrailLabel =
+    selectedTrailKey === "current"
+      ? currentLapNumber == null
+        ? "Current Lap Trail"
+        : `Current Lap ${currentLapNumber} Trail`
+      : selectedCompletedTrail?.label || "Saved Lap Trail";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -490,7 +581,14 @@ export default function TrackTelemetryMap({
         ctx.restore();
       }
 
-      drawSmoothTelemetryTrail(ctx, trail, transform);
+      drawSmoothTelemetryTrail(ctx, displayedTrail, transform);
+
+      drawTextBadge(
+        ctx,
+        `${selectedTrailLabel} (${displayedTrail.length} points)`,
+        20,
+        52
+      );
 
       const latest = sessionMap?.latestMapPosition;
 
@@ -557,7 +655,8 @@ export default function TrackTelemetryMap({
   }, [
     trackMap,
     transform,
-    trail,
+    displayedTrail,
+    selectedTrailLabel,
     sessionMap,
     imageUrl,
     imageWidth,
@@ -578,6 +677,70 @@ export default function TrackTelemetryMap({
         >
           {error}
         </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "8px",
+          marginBottom: "10px",
+          alignItems: "center",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setSelectedTrailKey("current")}
+          style={{
+            padding: "8px 10px",
+            borderRadius: "8px",
+            border:
+              selectedTrailKey === "current"
+                ? "2px solid var(--color-accent-blue)"
+                : "1px solid rgba(255,255,255,0.18)",
+            background:
+              selectedTrailKey === "current"
+                ? "rgba(59,130,246,0.18)"
+                : "rgba(255,255,255,0.05)",
+            color: "white",
+            cursor: "pointer",
+          }}
+        >
+          {currentLapNumber == null
+            ? "Current Lap Trail"
+            : `Current Lap ${currentLapNumber} Trail`}
+        </button>
+
+        {completedLapTrails.map((lapTrail) => (
+          <button
+            type="button"
+            key={lapTrail.key}
+            onClick={() => setSelectedTrailKey(lapTrail.key)}
+            style={{
+              padding: "8px 10px",
+              borderRadius: "8px",
+              border:
+                selectedTrailKey === lapTrail.key
+                  ? "2px solid var(--color-accent-green)"
+                  : "1px solid rgba(255,255,255,0.18)",
+              background:
+                selectedTrailKey === lapTrail.key
+                  ? "rgba(34,197,94,0.16)"
+                  : "rgba(255,255,255,0.05)",
+              color: "white",
+              cursor: "pointer",
+            }}
+            title={`${lapTrail.pointCount} map points`}
+          >
+            {lapTrail.label}
+          </button>
+        ))}
+      </div>
+
+      {completedLapTrails.length === 0 && (
+        <p style={{ marginTop: 0, color: "#aaa", fontSize: "14px" }}>
+          Completed lap trails will appear here after the lap number changes.
+        </p>
       )}
 
       <canvas
