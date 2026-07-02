@@ -1,10 +1,23 @@
 import { useEffect, useState } from "react";
-import { collection, query, where, limit, getDocs, onSnapshot, orderBy } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  limit,
+  getDocs,
+  onSnapshot,
+  orderBy,
+} from "firebase/firestore";
 import { db } from "../firebase";
+import ListenerTokenPanel from "../components/ListenerTokenPanel";
+import "../components/ListenerTokenPanel.css";
 
 function formatDate(value) {
   if (!value) return "-";
-  const d = typeof value === "string" ? new Date(value) : value?.toDate?.() || new Date(value);
+  const d =
+    typeof value === "string"
+      ? new Date(value)
+      : value?.toDate?.() || new Date(value);
   if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleString();
 }
@@ -86,22 +99,35 @@ export default function Profile({ username, sessionId }) {
 
   return (
     <div className="page-container">
-      <h1>Driver <span className="text-green">Profile</span></h1>
+      <h1>
+        Driver <span className="text-green">Profile</span>
+      </h1>
+
       <div className="grid-2">
         <div className="card">
           <h2>{username}</h2>
-          <p>Status: <span className="text-green">Active</span></p>
+          <p>
+            Status: <span className="text-green">Active</span>
+          </p>
           <p>Academy: Republic Poly Sim Racing</p>
         </div>
-        <div className="card" style={{ borderLeftColor: 'var(--color-accent-yellow)' }}>
+
+        <div
+          className="card"
+          style={{ borderLeftColor: "var(--color-accent-yellow)" }}
+        >
           <h2>Career Stats</h2>
           <p>Total Laps Recorded: 1,204</p>
           <p>Weekly Leaderboard Appearances: 4</p>
           <p>AI Coaching Score: 85/100</p>
         </div>
       </div>
-      
-      <div className="card" style={{ marginTop: '20px' }}>
+
+      <div style={{ marginTop: "20px" }}>
+        <ListenerTokenPanel />
+      </div>
+
+      <div className="card" style={{ marginTop: "20px" }}>
         <h2>Your Sessions</h2>
         {error && <p style={{ color: "red" }}>{error}</p>}
         {sessions.length === 0 && !error ? (
@@ -117,21 +143,26 @@ export default function Profile({ username, sessionId }) {
                   key={session.id}
                   onClick={() => setSelectedSession(session)}
                   style={{
-                     textAlign: "left",
-                     padding: 12,
-                     border: isSelected ? "2px solid #555" : "1px solid #333",
-                     borderRadius: 8,
-                     background: isSelected ? "#2a2a2a" : "#1a1a1a",
-                     color: "#fff",
-                     cursor: "pointer",
+                    textAlign: "left",
+                    padding: 12,
+                    border: isSelected ? "2px solid #555" : "1px solid #333",
+                    borderRadius: 8,
+                    background: isSelected ? "#2a2a2a" : "#1a1a1a",
+                    color: "#fff",
+                    cursor: "pointer",
                   }}
                 >
-                  <div style={{ color: 'var(--color-accent-yellow)' }}><strong>{session.trackName || "Unknown Track"}</strong></div>
+                  <div style={{ color: "var(--color-accent-yellow)" }}>
+                    <strong>{session.trackName || "Unknown Track"}</strong>
+                  </div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
                   <div>Started: {formatDate(session.startedAt)}</div>
                   <div>Ended: {formatDate(session.endedAt)}</div>
                   <div>
-                    Best Lap: <span style={{ color: 'var(--color-accent-green)' }}>{formatLapTime(summary.bestLapTimeMs)}</span>
+                    Best Lap:{" "}
+                    <span style={{ color: "var(--color-accent-green)" }}>
+                      {formatLapTime(summary.bestLapTimeMs)}
+                    </span>
                   </div>
                   <div>Top Speed: {summary.topSpeedKph ?? 0} km/h</div>
                   <div>Total Laps: {summary.totalLaps ?? 0}</div>
