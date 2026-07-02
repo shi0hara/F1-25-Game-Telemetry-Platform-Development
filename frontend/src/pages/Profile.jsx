@@ -133,6 +133,10 @@ function getProfileStorageKey(username) {
 }
 
 function readStoredProfile(storageKey) {
+  if (typeof localStorage === "undefined") {
+    return {};
+  }
+
   try {
     return JSON.parse(localStorage.getItem(storageKey) || "{}");
   } catch (err) {
