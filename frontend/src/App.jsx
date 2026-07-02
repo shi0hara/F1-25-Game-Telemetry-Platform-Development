@@ -9,6 +9,7 @@ import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
+import AdminUsers from "./pages/AdminUsers";
 import useActiveSession from "./hooks/useActiveSession";
 import TrackCalibration from "./pages/TrackCalibration";
 
@@ -136,6 +137,14 @@ export default function App() {
                 <ProtectedRoute user={user}>
                   <Profile username={username} sessionId={sessionId} />
                 </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute user={user}>
+                  <AdminUsers />
+                </AdminRoute>
               }
             />
             <Route
