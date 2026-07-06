@@ -33,6 +33,7 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
   const [bestS1, setBestS1] = useState(null);
   const [bestS2, setBestS2] = useState(null);
   const [bestS3, setBestS3] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -40,57 +41,66 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
     const lapsRef = collection(db, "sessions", sessionId, "laps");
     const q = query(lapsRef, orderBy("lapNumber", "asc"));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const rows = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        setError("");
 
-      setLaps(rows);
+        const rows = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
 
-      let nextBestLap = null;
-      let nextBestS1 = null;
-      let nextBestS2 = null;
-      let nextBestS3 = null;
+        setLaps(rows);
 
-      for (const lap of rows) {
-        const valid = isLapValid(lap.valid);
-        if (!valid) continue;
+        let nextBestLap = null;
+        let nextBestS1 = null;
+        let nextBestS2 = null;
+        let nextBestS3 = null;
 
-        if (
-          lap.lapTimeMs > 0 &&
-          (nextBestLap === null || lap.lapTimeMs < nextBestLap)
-        ) {
-          nextBestLap = lap.lapTimeMs;
+        for (const lap of rows) {
+          const valid = isLapValid(lap.valid);
+          if (!valid) continue;
+
+          if (
+            lap.lapTimeMs > 0 &&
+            (nextBestLap === null || lap.lapTimeMs < nextBestLap)
+          ) {
+            nextBestLap = lap.lapTimeMs;
+          }
+
+          if (
+            lap.sector1Ms > 0 &&
+            (nextBestS1 === null || lap.sector1Ms < nextBestS1)
+          ) {
+            nextBestS1 = lap.sector1Ms;
+          }
+
+          if (
+            lap.sector2Ms > 0 &&
+            (nextBestS2 === null || lap.sector2Ms < nextBestS2)
+          ) {
+            nextBestS2 = lap.sector2Ms;
+          }
+
+          if (
+            lap.sector3Ms > 0 &&
+            (nextBestS3 === null || lap.sector3Ms < nextBestS3)
+          ) {
+            nextBestS3 = lap.sector3Ms;
+          }
         }
 
-        if (
-          lap.sector1Ms > 0 &&
-          (nextBestS1 === null || lap.sector1Ms < nextBestS1)
-        ) {
-          nextBestS1 = lap.sector1Ms;
-        }
-
-        if (
-          lap.sector2Ms > 0 &&
-          (nextBestS2 === null || lap.sector2Ms < nextBestS2)
-        ) {
-          nextBestS2 = lap.sector2Ms;
-        }
-
-        if (
-          lap.sector3Ms > 0 &&
-          (nextBestS3 === null || lap.sector3Ms < nextBestS3)
-        ) {
-          nextBestS3 = lap.sector3Ms;
-        }
+        setBestLap(nextBestLap);
+        setBestS1(nextBestS1);
+        setBestS2(nextBestS2);
+        setBestS3(nextBestS3);
+      },
+      (err) => {
+        console.error("Lap chart listener error:", err);
+        setError(err.message || "Failed to load lap telemetry.");
       }
-
-      setBestLap(nextBestLap);
-      setBestS1(nextBestS1);
-      setBestS2(nextBestS2);
-      setBestS3(nextBestS3);
-    });
+    );
 
     return () => unsubscribe();
   }, [sessionId]);
@@ -110,6 +120,8 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
 
   return (
     <div>
+      {error && <p style={{ color: "#ef4444" }}>Error: {error}</p>}
+
       <div
         style={{
           padding: "12px",
@@ -138,19 +150,27 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
             </div>
             <div>
               <strong>Sector 1</strong>
-              <div>{formatTime(selectedLap.sector1Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector1Ms, bestS1) }}>
+                {formatTime(selectedLap.sector1Ms)}
+              </div>
             </div>
             <div>
               <strong>Sector 2</strong>
-              <div>{formatTime(selectedLap.sector2Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector2Ms, bestS2) }}>
+                {formatTime(selectedLap.sector2Ms)}
+              </div>
             </div>
             <div>
               <strong>Sector 3</strong>
-              <div>{formatTime(selectedLap.sector3Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector3Ms, bestS3) }}>
+                {formatTime(selectedLap.sector3Ms)}
+              </div>
             </div>
             <div>
               <strong>Lap Time</strong>
-              <div>{formatTime(selectedLap.lapTimeMs)}</div>
+              <div style={{ color: getCellColor(selectedLap.lapTimeMs, bestLap) }}>
+                {formatTime(selectedLap.lapTimeMs)}
+              </div>
             </div>
             <div>
               <strong>Valid</strong>

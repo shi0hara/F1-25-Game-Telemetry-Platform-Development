@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
+import { db } from "../firebase";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -332,6 +334,114 @@ function readCenterlinePoint(point) {
   };
 }
 
+function readStoredMapPoint(sample) {
+  if (!sample || typeof sample !== "object") return null;
+
+  const mapPosition = sample.mapPosition || {};
+  const worldX = sample.worldX ?? mapPosition.worldX ?? sample.x;
+  const worldY = sample.worldY ?? mapPosition.worldY ?? sample.y;
+  const worldZ = sample.worldZ ?? mapPosition.worldZ ?? sample.z;
+  const fallbackLap = hasNumber(sample.lap) ? Number(sample.lap) : null;
+
+  if (!hasNumber(worldX) || !hasNumber(worldZ)) return null;
+
+  return {
+    timestamp: sample.timestamp ?? sample.t ?? null,
+    sampleIndex: hasNumber(sample.sampleIndex ?? sample.i)
+      ? Number(sample.sampleIndex ?? sample.i)
+      : null,
+    lapNumber: getLapNumber(sample, fallbackLap),
+    lapDistance: hasNumber(sample.lapDistance ?? sample.d)
+      ? Number(sample.lapDistance ?? sample.d)
+      : null,
+    totalDistance: hasNumber(sample.totalDistance)
+      ? Number(sample.totalDistance)
+      : null,
+    worldX: Number(worldX),
+    worldY: hasNumber(worldY) ? Number(worldY) : null,
+    worldZ: Number(worldZ),
+    speedKph: hasNumber(sample.speedKph ?? sample.v)
+      ? Number(sample.speedKph ?? sample.v)
+      : null,
+    throttle: hasNumber(sample.throttle ?? sample.th)
+      ? Number(sample.throttle ?? sample.th)
+      : null,
+    brake: hasNumber(sample.brake ?? sample.br)
+      ? Number(sample.brake ?? sample.br)
+      : null,
+    steering: hasNumber(sample.steering ?? sample.st)
+      ? Number(sample.steering ?? sample.st)
+      : null,
+  };
+}
+
+function getChunkSamples(chunk) {
+  if (Array.isArray(chunk?.samples)) return chunk.samples;
+  if (Array.isArray(chunk?.mapPreviewPoints)) return chunk.mapPreviewPoints;
+  return [];
+}
+
+function sortStoredMapPoints(points) {
+  return [...points].sort((a, b) => {
+    const aLap = getLapNumber(a, 0) ?? 0;
+    const bLap = getLapNumber(b, 0) ?? 0;
+    if (aLap !== bLap) return aLap - bLap;
+
+    if (a.lapDistance != null && b.lapDistance != null) {
+      return a.lapDistance - b.lapDistance;
+    }
+
+    if (a.sampleIndex != null && b.sampleIndex != null) {
+      return a.sampleIndex - b.sampleIndex;
+    }
+
+    return 0;
+  });
+}
+
+function buildLapTrailsFromChunks(chunkDocs) {
+  const points = [];
+
+  for (const chunk of chunkDocs) {
+    for (const sample of getChunkSamples(chunk)) {
+      const point = readStoredMapPoint(sample);
+      if (point && point.lapNumber != null) {
+        points.push(point);
+      }
+    }
+  }
+
+  const grouped = new Map();
+
+  for (const point of sortStoredMapPoints(points)) {
+    const key = getLapTrailKey(point.lapNumber);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        lapNumber: point.lapNumber,
+        label: getLapTrailLabel(point.lapNumber),
+        pointCount: 0,
+        points: [],
+        startedAt: point.timestamp || null,
+        endedAt: null,
+      });
+    }
+
+    const trail = grouped.get(key);
+    const last = trail.points[trail.points.length - 1];
+
+    if (!isSameMapPosition(last, point)) {
+      trail.points.push(point);
+      trail.pointCount = trail.points.length;
+      trail.endedAt = point.timestamp || trail.endedAt;
+    }
+  }
+
+  return [...grouped.values()]
+    .filter((trail) => trail.points.length >= 2)
+    .sort((a, b) => a.lapNumber - b.lapNumber);
+}
+
 export default function TrackTelemetryMap({
   apiBase,
   sessionId,
@@ -349,6 +459,7 @@ export default function TrackTelemetryMap({
   const [currentLapTrail, setCurrentLapTrail] = useState([]);
   const [currentLapNumber, setCurrentLapNumber] = useState(null);
   const [completedLapTrails, setCompletedLapTrails] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState(null);
 
   function saveCompletedLap(lapNumber, points) {
@@ -394,6 +505,11 @@ export default function TrackTelemetryMap({
   }
 
   useEffect(() => {
+    resetLapTrails();
+    setSessionMap(null);
+  }, [sessionId]);
+
+  useEffect(() => {
     async function loadTrackMap() {
       try {
         setError(null);
@@ -420,8 +536,42 @@ export default function TrackTelemetryMap({
   }, [apiBase, trackKey]);
 
   useEffect(() => {
-    resetLapTrails();
+    if (!sessionId) return undefined;
 
+    setHistoryLoading(true);
+
+    const chunksRef = collection(db, "sessions", sessionId, "telemetryChunks");
+    const chunksQuery = query(chunksRef, orderBy("receivedAt", "asc"));
+
+    const unsubscribe = onSnapshot(
+      chunksQuery,
+      (snapshot) => {
+        const chunkDocs = snapshot.docs.map((doc) => doc.data() || {});
+        const trails = buildLapTrailsFromChunks(chunkDocs);
+
+        setCompletedLapTrails(trails);
+
+        if (trails.length > 0) {
+          const latestTrail = trails[trails.length - 1];
+          currentLapNumberRef.current = latestTrail.lapNumber;
+          currentLapTrailRef.current = latestTrail.points;
+          setCurrentLapNumber(latestTrail.lapNumber);
+          setCurrentLapTrail(latestTrail.points);
+        }
+
+        setHistoryLoading(false);
+      },
+      (err) => {
+        console.error("Lap trail history listener error:", err);
+        setHistoryLoading(false);
+        setError(err.message || "Failed to load saved lap trails.");
+      }
+    );
+
+    return unsubscribe;
+  }, [sessionId]);
+
+  useEffect(() => {
     async function fetchLivePosition() {
       try {
         if (!apiBase || !sessionId) return;
@@ -501,32 +651,42 @@ export default function TrackTelemetryMap({
       currentLapNumber == null
         ? "Current Lap Trail"
         : `Current Lap ${currentLapNumber} Trail`;
+    const savedCurrentLap =
+      currentLapNumber != null &&
+      completedLapTrails.some((trail) => trail.lapNumber === currentLapNumber);
+    const savedLapOptions = completedLapTrails.map((trail) => ({
+      key: trail.key,
+      type: "lap",
+      lapNumber: trail.lapNumber,
+      label: `Lap ${trail.lapNumber}`,
+      pointCount: trail.pointCount,
+    }));
+    const shouldShowCurrentOption =
+      currentLapTrail.length > 1 && !savedCurrentLap;
+    const options = [...savedLapOptions];
+
+    if (shouldShowCurrentOption || options.length === 0) {
+      options.push({
+        key: "current",
+        type: "current",
+        lapNumber: currentLapNumber,
+        label: currentLabel,
+        pointCount: currentLapTrail.length,
+      });
+    }
 
     onTrailOptionsChange({
       currentLapNumber,
       currentPointCount: currentLapTrail.length,
       completedLapTrails,
-      options: [
-        {
-          key: "current",
-          type: "current",
-          lapNumber: currentLapNumber,
-          label: currentLabel,
-          pointCount: currentLapTrail.length,
-        },
-        ...completedLapTrails.map((trail) => ({
-          key: trail.key,
-          type: "completed",
-          lapNumber: trail.lapNumber,
-          label: trail.label,
-          pointCount: trail.pointCount,
-        })),
-      ],
+      historyLoading,
+      options,
     });
   }, [
     currentLapNumber,
     currentLapTrail.length,
     completedLapTrails,
+    historyLoading,
     onTrailOptionsChange,
   ]);
 
@@ -536,22 +696,32 @@ export default function TrackTelemetryMap({
     );
   }, [completedLapTrails, selectedTrailKey]);
 
+  const fallbackCompletedTrail = completedLapTrails[0] || null;
   const activeTrailKey =
     selectedTrailKey === "current" || selectedCompletedTrail
       ? selectedTrailKey
-      : "current";
+      : fallbackCompletedTrail?.key || "current";
+  const activeCompletedTrail =
+    activeTrailKey === "current"
+      ? null
+      : selectedCompletedTrail || fallbackCompletedTrail;
+  const shouldUseLiveTrailForSelectedLap =
+    activeCompletedTrail?.lapNumber === currentLapNumber &&
+    currentLapTrail.length > (activeCompletedTrail?.points?.length || 0);
 
   const displayedTrail =
     activeTrailKey === "current"
       ? currentLapTrail
-      : selectedCompletedTrail?.points || [];
+      : shouldUseLiveTrailForSelectedLap
+        ? currentLapTrail
+        : activeCompletedTrail?.points || [];
 
   const selectedTrailLabel =
     activeTrailKey === "current"
       ? currentLapNumber == null
         ? "Current Lap Trail"
         : `Current Lap ${currentLapNumber} Trail`
-      : selectedCompletedTrail?.label || "Saved Lap Trail";
+      : activeCompletedTrail?.label || "Saved Lap Trail";
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -720,6 +890,12 @@ export default function TrackTelemetryMap({
         >
           {error}
         </div>
+      )}
+
+      {historyLoading && (
+        <p style={{ marginTop: 0, color: "#aaa", fontSize: "14px" }}>
+          Loading saved lap trails...
+        </p>
       )}
 
       <canvas
