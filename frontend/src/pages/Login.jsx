@@ -14,6 +14,7 @@ export default function Login({ onLogin }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
   const navigate = useNavigate();
 
   const isSignup = mode === "signup";
@@ -85,6 +86,9 @@ export default function Login({ onLogin }) {
       window.localStorage.setItem("f1AuthToken", data.token);
       window.localStorage.setItem("f1User", JSON.stringify(data.user));
 
+      setIsLaunching(true);
+      await new Promise((resolve) => setTimeout(resolve, 700));
+
       onLogin(data.user, data.token);
       navigate("/");
     } catch (err) {
@@ -109,6 +113,7 @@ export default function Login({ onLogin }) {
             type="button"
             className={!isSignup ? "active" : ""}
             onClick={() => resetForm("login")}
+            disabled={isSubmitting || isLaunching}
           >
             Log in
           </button>
@@ -116,12 +121,16 @@ export default function Login({ onLogin }) {
             type="button"
             className={isSignup ? "active" : ""}
             onClick={() => resetForm("signup")}
+            disabled={isSubmitting || isLaunching}
           >
             Sign up
           </button>
         </div>
 
-        <form onSubmit={handleLogin} className="login-form">
+        <form
+          onSubmit={handleLogin}
+          className={`login-form ${isLaunching ? "auth-launch" : ""}`}
+        >
           {isSignup ? (
             <>
               <div className="form-group">
