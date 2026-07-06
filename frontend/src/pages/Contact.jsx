@@ -2,39 +2,48 @@ import "../App.css";
 
 export default function Contact() {
   return (
-    <div className="page-container" style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="contact-card">
-        
-        {/* Stylized Contact Header */}
-        <div className="contact-header-art">
-          <div className="giant-c">
-            <span className="c-text">C</span>
-            <div className="c-receiver-dot top-dot"></div>
-            <div className="c-receiver-dot bottom-dot"></div>
-          </div>
-          <div className="ontact-text">
-            <span>ontact us:</span>
-            <div className="contact-underline"></div>
-          </div>
-        </div>
+    <div className="contact-shell">
+      <div className="contact-poster">
+        <div className="contact-accent" aria-hidden="true"></div>
 
-        {/* Contact Details */}
-        <div className="contact-details">
-          <div className="contact-item">
-            <div className="contact-icon text-primary">&#9990;</div>
-            <span className="contact-info">23456789899</span>
-          </div>
-          <div className="contact-item">
-            <div className="contact-icon text-primary">&#9993;</div>
-            <span className="contact-info">support@rptelemetry.org</span>
-          </div>
-          
-          {/* Social Icons Spiced up */}
-          <div className="social-links">
-            <a href="#" className="social-icon">&#9655;</a> {/* YouTube */}
-            <a href="#" className="social-icon">&#128247;</a> {/* Insta */}
-            <a href="#" className="social-icon">f</a> {/* Facebook */}
-            <a href="#" className="social-icon">&#120143;</a> {/* X/Twitter */}
+        <div className="contact-center">
+          <p className="contact-kicker">Support Desk</p>
+          <h1 className="contact-heading">Contact Us</h1>
+          <p className="contact-subheading">
+            Reach our telemetry team for account access, data sync issues, or race-week support.
+          </p>
+
+          <div className="contact-panel">
+            <a className="contact-row" href="tel:+123456789899" aria-label="Call support">
+              <span className="contact-glyph" aria-hidden="true">&#9990;</span>
+              <span className="contact-copy-wrap">
+                <span className="contact-label">Phone</span>
+                <span className="contact-copy">+1 234 567 89899</span>
+              </span>
+            </a>
+
+            <div className="social-links" aria-label="Social channels">
+              <a href="#" className="social-pill" aria-label="YouTube">
+                <span className="social-mark">YT</span>
+                <span className="social-name">YouTube</span>
+              </a>
+              <a href="#" className="social-pill" aria-label="Instagram">
+                <span className="social-mark">IG</span>
+                <span className="social-name">Instagram</span>
+              </a>
+              <a href="#" className="social-pill" aria-label="Facebook">
+                <span className="social-mark">FB</span>
+                <span className="social-name">Facebook</span>
+              </a>
+            </div>
+
+            <a className="contact-row" href="mailto:support@rptelemetry.org" aria-label="Email support">
+              <span className="contact-glyph" aria-hidden="true">&#9993;</span>
+              <span className="contact-copy-wrap">
+                <span className="contact-label">Email</span>
+                <span className="contact-copy">support@rptelemetry.org</span>
+              </span>
+            </a>
           </div>
         </div>
       </div>
