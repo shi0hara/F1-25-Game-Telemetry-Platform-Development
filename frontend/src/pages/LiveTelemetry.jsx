@@ -579,6 +579,7 @@ export default function LiveTelemetry() {
             >
               <h2>Lap Telemetry Chart</h2>
               <TelemetryChart
+                apiBase={API_BASE}
                 sessionId={selectedSession.id}
                 selectedLapNumber={selectedLapNumber}
               />

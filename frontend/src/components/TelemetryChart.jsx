@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
 
 function formatTime(ms) {
   if (ms == null || ms <= 0) return "-";
@@ -27,7 +25,11 @@ function sameLap(a, b) {
   return Number(a) === Number(b);
 }
 
-export default function TelemetryChart({ sessionId, selectedLapNumber = null }) {
+export default function TelemetryChart({
+  apiBase,
+  sessionId,
+  selectedLapNumber = null,
+}) {
   const [laps, setLaps] = useState([]);
   const [bestLap, setBestLap] = useState(null);
   const [bestS1, setBestS1] = useState(null);
@@ -36,21 +38,24 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!apiBase || !sessionId) return undefined;
 
-    const lapsRef = collection(db, "sessions", sessionId, "laps");
-    const q = query(lapsRef, orderBy("lapNumber", "asc"));
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
+    async function loadLaps() {
+      try {
+        const res = await fetch(`${apiBase}/sessions/${sessionId}/laps`);
+
+        if (!res.ok) {
+          throw new Error("Failed to load lap telemetry.");
+        }
+
+        const data = await res.json();
+        const rows = Array.isArray(data.laps) ? data.laps : [];
+
+        if (cancelled) return;
+
         setError("");
-
-        const rows = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
         setLaps(rows);
 
         let nextBestLap = null;
@@ -95,15 +100,23 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
         setBestS1(nextBestS1);
         setBestS2(nextBestS2);
         setBestS3(nextBestS3);
-      },
-      (err) => {
-        console.error("Lap chart listener error:", err);
+
+      } catch (err) {
+        if (cancelled) return;
+
+        console.error("Lap chart load error:", err);
         setError(err.message || "Failed to load lap telemetry.");
       }
-    );
+    }
 
-    return () => unsubscribe();
-  }, [sessionId]);
+    loadLaps();
+    const interval = setInterval(loadLaps, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [apiBase, sessionId]);
 
   const selectedLap = useMemo(() => {
     if (selectedLapNumber == null) return null;

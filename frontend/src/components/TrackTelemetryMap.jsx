@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
-import { db } from "../firebase";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -375,70 +373,27 @@ function readStoredMapPoint(sample) {
   };
 }
 
-function getChunkSamples(chunk) {
-  if (Array.isArray(chunk?.samples)) return chunk.samples;
-  if (Array.isArray(chunk?.mapPreviewPoints)) return chunk.mapPreviewPoints;
-  return [];
-}
+function normalizeLapTrailsFromApi(lapTrails) {
+  if (!Array.isArray(lapTrails)) return [];
 
-function sortStoredMapPoints(points) {
-  return [...points].sort((a, b) => {
-    const aLap = getLapNumber(a, 0) ?? 0;
-    const bLap = getLapNumber(b, 0) ?? 0;
-    if (aLap !== bLap) return aLap - bLap;
+  return lapTrails
+    .map((trail) => {
+      const points = Array.isArray(trail.points)
+        ? trail.points.map(readStoredMapPoint).filter(Boolean)
+        : [];
 
-    if (a.lapDistance != null && b.lapDistance != null) {
-      return a.lapDistance - b.lapDistance;
-    }
-
-    if (a.sampleIndex != null && b.sampleIndex != null) {
-      return a.sampleIndex - b.sampleIndex;
-    }
-
-    return 0;
-  });
-}
-
-function buildLapTrailsFromChunks(chunkDocs) {
-  const points = [];
-
-  for (const chunk of chunkDocs) {
-    for (const sample of getChunkSamples(chunk)) {
-      const point = readStoredMapPoint(sample);
-      if (point && point.lapNumber != null) {
-        points.push(point);
-      }
-    }
-  }
-
-  const grouped = new Map();
-
-  for (const point of sortStoredMapPoints(points)) {
-    const key = getLapTrailKey(point.lapNumber);
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        key,
-        lapNumber: point.lapNumber,
-        label: getLapTrailLabel(point.lapNumber),
-        pointCount: 0,
-        points: [],
-        startedAt: point.timestamp || null,
-        endedAt: null,
-      });
-    }
-
-    const trail = grouped.get(key);
-    const last = trail.points[trail.points.length - 1];
-
-    if (!isSameMapPosition(last, point)) {
-      trail.points.push(point);
-      trail.pointCount = trail.points.length;
-      trail.endedAt = point.timestamp || trail.endedAt;
-    }
-  }
-
-  return [...grouped.values()]
-    .filter((trail) => trail.points.length >= 2)
+      return {
+        key: trail.key || getLapTrailKey(trail.lapNumber),
+        lapNumber: getLapNumber(trail, null),
+        label: trail.label || getLapTrailLabel(trail.lapNumber),
+        pointCount: points.length,
+        originalPointCount: trail.originalPointCount || points.length,
+        points,
+        startedAt: trail.startedAt || points[0]?.timestamp || null,
+        endedAt: trail.endedAt || points[points.length - 1]?.timestamp || null,
+      };
+    })
+    .filter((trail) => trail.lapNumber != null && trail.points.length >= 2)
     .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
@@ -536,18 +491,25 @@ export default function TrackTelemetryMap({
   }, [apiBase, trackKey]);
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!apiBase || !sessionId) return undefined;
 
+    let cancelled = false;
     setHistoryLoading(true);
 
-    const chunksRef = collection(db, "sessions", sessionId, "telemetryChunks");
-    const chunksQuery = query(chunksRef, orderBy("receivedAt", "asc"));
+    async function loadSavedLapTrails() {
+      try {
+        const res = await fetch(
+          `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=1200`
+        );
 
-    const unsubscribe = onSnapshot(
-      chunksQuery,
-      (snapshot) => {
-        const chunkDocs = snapshot.docs.map((doc) => doc.data() || {});
-        const trails = buildLapTrailsFromChunks(chunkDocs);
+        if (!res.ok) {
+          throw new Error("Failed to load saved lap trails.");
+        }
+
+        const data = await res.json();
+        const trails = normalizeLapTrailsFromApi(data.lapTrails);
+
+        if (cancelled) return;
 
         setCompletedLapTrails(trails);
 
@@ -560,16 +522,23 @@ export default function TrackTelemetryMap({
         }
 
         setHistoryLoading(false);
-      },
-      (err) => {
-        console.error("Lap trail history listener error:", err);
+      } catch (err) {
+        if (cancelled) return;
+
+        console.error("Lap trail history load error:", err);
         setHistoryLoading(false);
         setError(err.message || "Failed to load saved lap trails.");
       }
-    );
+    }
 
-    return unsubscribe;
-  }, [sessionId]);
+    loadSavedLapTrails();
+    const interval = setInterval(loadSavedLapTrails, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [apiBase, sessionId]);
 
   useEffect(() => {
     async function fetchLivePosition() {
