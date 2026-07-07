@@ -32,6 +32,7 @@ function createEmptyMapTrailState() {
     currentLapNumber: null,
     currentPointCount: 0,
     completedLapTrails: [],
+    historyLoading: false,
     options: [],
   };
 }
@@ -78,7 +79,7 @@ function getDefaultMapImage(trackKey) {
   return mapImages[trackKey] || "/maps/default-track.png";
 }
 
-function LapTrailSelector({ options, selectedKey, onSelect }) {
+function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
   return (
     <div
       style={{
@@ -125,7 +126,9 @@ function LapTrailSelector({ options, selectedKey, onSelect }) {
 
       {options.length === 1 && (
         <span style={{ color: "#aaa", fontSize: "14px" }}>
-          Completed lap buttons appear after the lap number changes.
+          {loading
+            ? "Loading lap tabs..."
+            : "Lap tabs appear when saved telemetry points are found."}
         </span>
       )}
     </div>
@@ -403,11 +406,14 @@ export default function LiveTelemetry() {
                 <button
                   key={session.id}
                   onClick={() => {
+                    const isDifferentSession = selectedSessionId !== session.id;
                     setSelectedSessionId(session.id);
                     setSelectedSession(session);
                     setSelectedTelemetry(session.latestTelemetry || null);
                     setSpeedPoints([]);
-                    resetLapSelection();
+                    if (isDifferentSession) {
+                      resetLapSelection();
+                    }
                   }}
                   style={{
                     textAlign: "left",
@@ -548,6 +554,7 @@ export default function LiveTelemetry() {
               options={lapOptions}
               selectedKey={activeTrailKey}
               onSelect={setSelectedTrailKey}
+              loading={mapTrailState.historyLoading}
             />
 
             {activeTrackKey ? (
@@ -572,6 +579,7 @@ export default function LiveTelemetry() {
             >
               <h2>Lap Telemetry Chart</h2>
               <TelemetryChart
+                apiBase={API_BASE}
                 sessionId={selectedSession.id}
                 selectedLapNumber={selectedLapNumber}
               />

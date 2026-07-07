@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
-import { db } from "../firebase";
 
 function formatTime(ms) {
   if (ms == null || ms <= 0) return "-";
@@ -27,73 +25,98 @@ function sameLap(a, b) {
   return Number(a) === Number(b);
 }
 
-export default function TelemetryChart({ sessionId, selectedLapNumber = null }) {
+export default function TelemetryChart({
+  apiBase,
+  sessionId,
+  selectedLapNumber = null,
+}) {
   const [laps, setLaps] = useState([]);
   const [bestLap, setBestLap] = useState(null);
   const [bestS1, setBestS1] = useState(null);
   const [bestS2, setBestS2] = useState(null);
   const [bestS3, setBestS3] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!apiBase || !sessionId) return undefined;
 
-    const lapsRef = collection(db, "sessions", sessionId, "laps");
-    const q = query(lapsRef, orderBy("lapNumber", "asc"));
+    let cancelled = false;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const rows = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+    async function loadLaps() {
+      try {
+        const res = await fetch(`${apiBase}/sessions/${sessionId}/laps`);
 
-      setLaps(rows);
-
-      let nextBestLap = null;
-      let nextBestS1 = null;
-      let nextBestS2 = null;
-      let nextBestS3 = null;
-
-      for (const lap of rows) {
-        const valid = isLapValid(lap.valid);
-        if (!valid) continue;
-
-        if (
-          lap.lapTimeMs > 0 &&
-          (nextBestLap === null || lap.lapTimeMs < nextBestLap)
-        ) {
-          nextBestLap = lap.lapTimeMs;
+        if (!res.ok) {
+          throw new Error("Failed to load lap telemetry.");
         }
 
-        if (
-          lap.sector1Ms > 0 &&
-          (nextBestS1 === null || lap.sector1Ms < nextBestS1)
-        ) {
-          nextBestS1 = lap.sector1Ms;
+        const data = await res.json();
+        const rows = Array.isArray(data.laps) ? data.laps : [];
+
+        if (cancelled) return;
+
+        setError("");
+        setLaps(rows);
+
+        let nextBestLap = null;
+        let nextBestS1 = null;
+        let nextBestS2 = null;
+        let nextBestS3 = null;
+
+        for (const lap of rows) {
+          const valid = isLapValid(lap.valid);
+          if (!valid) continue;
+
+          if (
+            lap.lapTimeMs > 0 &&
+            (nextBestLap === null || lap.lapTimeMs < nextBestLap)
+          ) {
+            nextBestLap = lap.lapTimeMs;
+          }
+
+          if (
+            lap.sector1Ms > 0 &&
+            (nextBestS1 === null || lap.sector1Ms < nextBestS1)
+          ) {
+            nextBestS1 = lap.sector1Ms;
+          }
+
+          if (
+            lap.sector2Ms > 0 &&
+            (nextBestS2 === null || lap.sector2Ms < nextBestS2)
+          ) {
+            nextBestS2 = lap.sector2Ms;
+          }
+
+          if (
+            lap.sector3Ms > 0 &&
+            (nextBestS3 === null || lap.sector3Ms < nextBestS3)
+          ) {
+            nextBestS3 = lap.sector3Ms;
+          }
         }
 
-        if (
-          lap.sector2Ms > 0 &&
-          (nextBestS2 === null || lap.sector2Ms < nextBestS2)
-        ) {
-          nextBestS2 = lap.sector2Ms;
-        }
+        setBestLap(nextBestLap);
+        setBestS1(nextBestS1);
+        setBestS2(nextBestS2);
+        setBestS3(nextBestS3);
 
-        if (
-          lap.sector3Ms > 0 &&
-          (nextBestS3 === null || lap.sector3Ms < nextBestS3)
-        ) {
-          nextBestS3 = lap.sector3Ms;
-        }
+      } catch (err) {
+        if (cancelled) return;
+
+        console.error("Lap chart load error:", err);
+        setError(err.message || "Failed to load lap telemetry.");
       }
+    }
 
-      setBestLap(nextBestLap);
-      setBestS1(nextBestS1);
-      setBestS2(nextBestS2);
-      setBestS3(nextBestS3);
-    });
+    loadLaps();
+    const interval = setInterval(loadLaps, 2000);
 
-    return () => unsubscribe();
-  }, [sessionId]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [apiBase, sessionId]);
 
   const selectedLap = useMemo(() => {
     if (selectedLapNumber == null) return null;
@@ -110,6 +133,8 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
 
   return (
     <div>
+      {error && <p style={{ color: "#ef4444" }}>Error: {error}</p>}
+
       <div
         style={{
           padding: "12px",
@@ -138,19 +163,27 @@ export default function TelemetryChart({ sessionId, selectedLapNumber = null }) 
             </div>
             <div>
               <strong>Sector 1</strong>
-              <div>{formatTime(selectedLap.sector1Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector1Ms, bestS1) }}>
+                {formatTime(selectedLap.sector1Ms)}
+              </div>
             </div>
             <div>
               <strong>Sector 2</strong>
-              <div>{formatTime(selectedLap.sector2Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector2Ms, bestS2) }}>
+                {formatTime(selectedLap.sector2Ms)}
+              </div>
             </div>
             <div>
               <strong>Sector 3</strong>
-              <div>{formatTime(selectedLap.sector3Ms)}</div>
+              <div style={{ color: getCellColor(selectedLap.sector3Ms, bestS3) }}>
+                {formatTime(selectedLap.sector3Ms)}
+              </div>
             </div>
             <div>
               <strong>Lap Time</strong>
-              <div>{formatTime(selectedLap.lapTimeMs)}</div>
+              <div style={{ color: getCellColor(selectedLap.lapTimeMs, bestLap) }}>
+                {formatTime(selectedLap.lapTimeMs)}
+              </div>
             </div>
             <div>
               <strong>Valid</strong>
