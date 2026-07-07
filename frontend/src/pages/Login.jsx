@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { signInWithCustomToken } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
+import { auth } from "../firebase";
 import "../App.css";
 
 const API_BASE =
@@ -44,7 +46,8 @@ export default function Login({ onLogin }) {
     try {
       data = text ? JSON.parse(text) : {};
     } catch {
-      const returnedHtml = text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html");
+      const returnedHtml =
+        text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html");
       throw new Error(
         returnedHtml
           ? `Backend returned a web page instead of JSON. Check VITE_API_BASE: ${API_BASE}`
@@ -85,6 +88,10 @@ export default function Login({ onLogin }) {
 
       window.localStorage.setItem("f1AuthToken", data.token);
       window.localStorage.setItem("f1User", JSON.stringify(data.user));
+
+      if (data.firebaseToken) {
+        await signInWithCustomToken(auth, data.firebaseToken);
+      }
 
       setIsLaunching(true);
       await new Promise((resolve) => setTimeout(resolve, 700));
@@ -202,7 +209,11 @@ export default function Login({ onLogin }) {
 
           {error && <p className="form-error">{error}</p>}
 
-          <button type="submit" className="btn-primary login-btn" disabled={isSubmitting}>
+          <button
+            type="submit"
+            className="btn-primary login-btn"
+            disabled={isSubmitting}
+          >
             {isSubmitting
               ? "Please wait..."
               : isSignup

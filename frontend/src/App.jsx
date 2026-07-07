@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { signOut } from "firebase/auth";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
 import Dashboard from "./pages/Dashboard";
@@ -12,6 +13,7 @@ import NotFound from "./pages/NotFound";
 import AdminUsers from "./pages/AdminUsers";
 import useActiveSession from "./hooks/useActiveSession";
 import TrackCalibration from "./pages/TrackCalibration";
+import { auth } from "./firebase";
 
 function getStoredUser() {
   try {
@@ -81,7 +83,8 @@ export default function App() {
     setUser(normalizedUser);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut(auth).catch(() => {});
     setUser(null);
   };
 
