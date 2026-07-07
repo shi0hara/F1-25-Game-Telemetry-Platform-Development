@@ -11,6 +11,13 @@ const REQUEST_TIMEOUT_MS = 30000; // 30 seconds
  * @throws {{ code: string, message: string, cooldownMinutes?: number }}
  */
 export async function generateRacingSuit({ base64Photo, teamKey, teamColours, user }) {
+  if (!user) {
+    throw {
+      code: 'AUTH_FAILED',
+      message: 'Please sign in to use AI generation.',
+    };
+  }
+
   const token = await user.getIdToken();
 
   const controller = new AbortController();

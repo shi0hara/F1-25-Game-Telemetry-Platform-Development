@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { generateRacingSuit } from "../services/racingSuitService.js";
+import { auth } from "../firebase.js";
 
 /**
  * Custom React hook for managing AI racing suit generation state.
@@ -17,7 +18,7 @@ import { generateRacingSuit } from "../services/racingSuitService.js";
  *   clearError: () => void
  * }}
  */
-export function useAiRacingSuit(user) {
+export function useAiRacingSuit() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState(null);
   const [cooldownMinutes, setCooldownMinutes] = useState(null);
@@ -79,7 +80,7 @@ export function useAiRacingSuit(user) {
           base64Photo,
           teamKey,
           teamColours,
-          user,
+          user: auth.currentUser,
         });
 
         setIsGenerating(false);
@@ -97,7 +98,7 @@ export function useAiRacingSuit(user) {
         return null;
       }
     },
-    [user, startCooldownTimer]
+    [startCooldownTimer]
   );
 
   /**
@@ -121,7 +122,7 @@ export function useAiRacingSuit(user) {
         base64Photo,
         teamKey,
         teamColours,
-        user,
+        user: auth.currentUser,
       });
 
       setIsGenerating(false);
@@ -138,7 +139,7 @@ export function useAiRacingSuit(user) {
 
       return null;
     }
-  }, [user, retryCount, startCooldownTimer]);
+  }, [retryCount, startCooldownTimer]);
 
   /**
    * Clears the current error state, resets retry count, and cancels any cooldown timer.

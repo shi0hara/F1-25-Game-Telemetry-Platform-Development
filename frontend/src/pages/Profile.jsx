@@ -10,7 +10,7 @@ import {
   onSnapshot,
   orderBy,
 } from "firebase/firestore";
-import { db, auth } from "../firebase";
+import { db } from "../firebase";
 import { useAiRacingSuit } from "../hooks/useAiRacingSuit.js";
 import { validateImageFile } from "../services/fileValidator.js";
 import { downscaleForPersistence } from "../services/imageDownscaler.js";
@@ -218,7 +218,7 @@ export default function Profile({ username, sessionId }) {
   const streamRef = useRef(null);
   const cameraSectionRef = useRef(null);
 
-  const aiSuit = useAiRacingSuit(auth.currentUser);
+  const aiSuit = useAiRacingSuit();
 
   const activeTeamTheme = useMemo(() => {
     return TEAM_THEMES[favoriteTeam] || getDefaultTheme();
