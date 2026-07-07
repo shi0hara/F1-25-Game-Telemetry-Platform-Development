@@ -1,12 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { generateRacingSuit } from "../services/racingSuitService.js";
-import { auth } from "../firebase.js";
 
 /**
  * Custom React hook for managing AI racing suit generation state.
  * Handles loading, errors, retry logic (max 3 attempts), and cooldown timers.
  *
- * @param {object} user - Firebase Auth user object (used to obtain ID tokens)
  * @returns {{
  *   isGenerating: boolean,
  *   error: { code: string, message: string } | null,
@@ -80,7 +78,6 @@ export function useAiRacingSuit() {
           base64Photo,
           teamKey,
           teamColours,
-          user: auth.currentUser,
         });
 
         setIsGenerating(false);
@@ -122,7 +119,6 @@ export function useAiRacingSuit() {
         base64Photo,
         teamKey,
         teamColours,
-        user: auth.currentUser,
       });
 
       setIsGenerating(false);

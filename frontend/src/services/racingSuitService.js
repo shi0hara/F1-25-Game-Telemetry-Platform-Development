@@ -6,19 +6,19 @@ const REQUEST_TIMEOUT_MS = 30000; // 30 seconds
 
 /**
  * Calls the backend proxy to generate an AI racing suit image.
- * @param {{ base64Photo: string, teamKey: string, teamColours: object, user: object }} params
+ * @param {{ base64Photo: string, teamKey: string, teamColours: object }} params
  * @returns {Promise<string>} The AI-generated image as a base64 data URL
  * @throws {{ code: string, message: string, cooldownMinutes?: number }}
  */
-export async function generateRacingSuit({ base64Photo, teamKey, teamColours, user }) {
-  if (!user) {
+export async function generateRacingSuit({ base64Photo, teamKey, teamColours }) {
+  const token = window.localStorage.getItem('f1AuthToken');
+
+  if (!token) {
     throw {
       code: 'AUTH_FAILED',
       message: 'Please sign in to use AI generation.',
     };
   }
-
-  const token = await user.getIdToken();
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);

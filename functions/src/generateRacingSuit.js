@@ -5,6 +5,7 @@ import { validateGenerationPayload } from "./middleware/validatePayload.js";
 import { preprocessImage, postprocessImage } from "./services/imageProcessor.js";
 import { buildPrompt } from "./services/promptBuilder.js";
 import { generateImage } from "./services/openRouterClient.js";
+import { getTeamReferenceImages } from "./services/referenceImages.js";
 
 /**
  * Main request handler for the generateRacingSuit Cloud Function.
@@ -63,8 +64,11 @@ export async function handleGenerateRacingSuit(req, res) {
     // Step 5: Build the prompt
     const prompt = buildPrompt(req.body.teamKey, req.body.teamColours);
 
-    // Step 6: Generate image via OpenRouter
-    const rawB64 = await generateImage(prompt, processedImage);
+    // Step 6: Load team reference images
+    const teamReferences = await getTeamReferenceImages(req.body.teamKey);
+
+    // Step 7: Generate image via OpenRouter
+    const rawB64 = await generateImage(prompt, processedImage, teamReferences);
 
     // Step 7: Post-process the generated image
     const finalDataUrl = await postprocessImage(rawB64);

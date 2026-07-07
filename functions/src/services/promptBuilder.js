@@ -37,7 +37,9 @@ export function buildPrompt(teamKey, teamColours) {
     `Generate a photorealistic F1 racing suit styled to the ${teamLabel} team on the person in this photo.`,
     `Use the team colour scheme: primary colour ${teamColours.primary}, secondary colour ${teamColours.secondary}, accent colour ${teamColours.accent}.`,
     `Keep the person's face, head, and hair completely unchanged and unmodified.`,
-    `Replace only the clothing on the torso and arms with the team racing suit. Leave the background and any visible lower body unchanged.`,
+    `Replace only the clothing on the torso and arms with the team racing suit.`,
+    `Apply a soft gaussian blur to the entire background behind the person, creating a professional portrait-style depth of field effect.`,
+    `Use the additional reference images provided to match the exact style, design, and sponsor placement of the real ${teamLabel} racing suit.`,
     `Include team branding elements: sponsor logos area, team branding zones, and stitching lines matching the ${teamLabel} colour scheme.`,
   ].join(" ");
 

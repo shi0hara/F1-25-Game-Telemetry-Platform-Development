@@ -11,11 +11,12 @@ const TIMEOUT_MS = 90000; // 90 seconds
  * Generate an AI image using the OpenRouter Image API.
  *
  * @param {string} prompt - The text prompt for image generation
- * @param {string} base64Reference - Base64-encoded JPEG data URL of the reference image
+ * @param {string} base64Reference - Base64-encoded JPEG data URL of the user's photo
+ * @param {string[]} teamReferences - Additional base64 data URLs of team suit reference images
  * @returns {Promise<string>} Base64-encoded generated image from the response
  * @throws {{ status: number, code: string, message: string }}
  */
-export async function generateImage(prompt, base64Reference) {
+export async function generateImage(prompt, base64Reference, teamReferences = []) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   const model = process.env.OPENROUTER_MODEL;
 
@@ -48,6 +49,10 @@ export async function generateImage(prompt, base64Reference) {
             type: "image_url",
             image_url: { url: base64Reference },
           },
+          ...teamReferences.map((ref) => ({
+            type: "image_url",
+            image_url: { url: ref },
+          })),
         ],
       }),
       signal: controller.signal,
