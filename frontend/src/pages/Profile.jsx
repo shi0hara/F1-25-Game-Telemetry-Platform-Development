@@ -73,7 +73,7 @@ const TEAM_THEMES = {
     label: "Visa Cash App Racing Bulls",
     primary: "#1434CB",
     secondary: "#0A0E1A",
-    accent: "#FF1E00",
+    accent: "#FFFFFF",
   },
   kicksauber: {
     label: "Kick Sauber",
