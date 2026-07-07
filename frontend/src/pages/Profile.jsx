@@ -66,6 +66,18 @@ const TEAM_THEMES = {
     secondary: "#1A1A1A",
     accent: "#D0122D",
   },
+  racingbulls: {
+    label: "Visa Cash App Racing Bulls",
+    primary: "#1434CB",
+    secondary: "#0A0E1A",
+    accent: "#FF1E00",
+  },
+  kicksauber: {
+    label: "Kick Sauber",
+    primary: "#00E701",
+    secondary: "#0F1210",
+    accent: "#FFFFFF",
+  },
 };
 
 function getProfileStorageKey(username) {
