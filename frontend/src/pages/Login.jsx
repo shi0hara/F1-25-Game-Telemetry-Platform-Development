@@ -108,10 +108,15 @@ export default function Login({ onLogin }) {
             : "Log in to track your F1 25 data and receive AI coaching."}
         </p>
 
-        <div className="auth-switch" role="tablist" aria-label="Authentication mode">
+        <div
+          className={`auth-switch ${isSignup ? "is-signup" : "is-login"}`}
+          role="tablist"
+          aria-label="Authentication mode"
+        >
           <button
             type="button"
             className={!isSignup ? "active" : ""}
+            aria-selected={!isSignup}
             onClick={() => resetForm("login")}
             disabled={isSubmitting || isLaunching}
           >
@@ -120,6 +125,7 @@ export default function Login({ onLogin }) {
           <button
             type="button"
             className={isSignup ? "active" : ""}
+            aria-selected={isSignup}
             onClick={() => resetForm("signup")}
             disabled={isSubmitting || isLaunching}
           >

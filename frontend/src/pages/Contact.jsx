@@ -27,7 +27,13 @@ export default function Contact() {
                 <span className="social-mark">YT</span>
                 <span className="social-name">YouTube</span>
               </a>
-              <a href="#" className="social-pill" aria-label="Instagram">
+              <a
+                href="https://www.instagram.com/f1rp.official/"
+                className="social-pill"
+                aria-label="Instagram"
+                target="_blank"
+                rel="noreferrer"
+              >
                 <span className="social-mark">IG</span>
                 <span className="social-name">Instagram</span>
               </a>
