@@ -216,6 +216,7 @@ export default function Profile({ username, sessionId }) {
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const cameraSectionRef = useRef(null);
 
   const aiSuit = useAiRacingSuit(auth.currentUser);
 
@@ -240,6 +241,15 @@ export default function Profile({ username, sessionId }) {
     videoRef.current.srcObject = streamRef.current;
     videoRef.current.play().catch(() => {
       // Browser may block autoplay until media metadata is ready.
+    });
+  }, [cameraActive]);
+
+  useEffect(() => {
+    if (!cameraActive || !cameraSectionRef.current) return;
+
+    cameraSectionRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
     });
   }, [cameraActive]);
 
@@ -363,6 +373,13 @@ export default function Profile({ username, sessionId }) {
 
   async function startCamera() {
     setCameraError("");
+
+    if (cameraSectionRef.current) {
+      cameraSectionRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -584,34 +601,36 @@ export default function Profile({ username, sessionId }) {
           </div>
         )}
 
-        {cameraActive ? (
-          <div className="camera-panel">
-            <div className="camera-frame-wrap">
-              <video ref={videoRef} autoPlay playsInline muted className="camera-preview" />
-              <div className="camera-frame-guide" aria-hidden="true">
-                <span>Face + shoulders in frame</span>
+        <div ref={cameraSectionRef}>
+          {cameraActive ? (
+            <div className="camera-panel">
+              <div className="camera-frame-wrap">
+                <video ref={videoRef} autoPlay playsInline muted className="camera-preview" />
+                <div className="camera-frame-guide" aria-hidden="true">
+                  <span>Face + shoulders in frame</span>
+                </div>
+              </div>
+              <div className="camera-controls">
+                <button type="button" className="btn-primary" onClick={captureFromCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
+                  Capture Profile Shot
+                </button>
+                <button type="button" className="btn-secondary" onClick={stopCamera}>
+                  Cancel Camera
+                </button>
               </div>
             </div>
+          ) : (
             <div className="camera-controls">
-              <button type="button" className="btn-primary" onClick={captureFromCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
-                Capture Profile Shot
+              <button type="button" className="btn-primary" onClick={startCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
+                Open Camera
               </button>
-              <button type="button" className="btn-secondary" onClick={stopCamera}>
-                Cancel Camera
-              </button>
+              <label className={`btn-secondary upload-trigger${(aiSuit.isGenerating || aiSuit.cooldownMinutes != null) ? " disabled" : ""}`}>
+                Upload Image
+                <input type="file" accept="image/*" onChange={handleFileUpload} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null} />
+              </label>
             </div>
-          </div>
-        ) : (
-          <div className="camera-controls">
-            <button type="button" className="btn-primary" onClick={startCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
-              Open Camera
-            </button>
-            <label className={`btn-secondary upload-trigger${(aiSuit.isGenerating || aiSuit.cooldownMinutes != null) ? " disabled" : ""}`}>
-              Upload Image
-              <input type="file" accept="image/*" onChange={handleFileUpload} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null} />
-            </label>
-          </div>
-        )}
+          )}
+        </div>
 
         {cameraError && <p className="profile-error">Camera error: {cameraError}</p>}
       </div>
