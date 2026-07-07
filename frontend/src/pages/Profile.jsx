@@ -10,7 +10,10 @@ import {
   onSnapshot,
   orderBy,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { db, auth } from "../firebase";
+import { useAiRacingSuit } from "../hooks/useAiRacingSuit.js";
+import { validateImageFile } from "../services/fileValidator.js";
+import { downscaleForPersistence } from "../services/imageDownscaler.js";
 import ListenerTokenPanel from "../components/ListenerTokenPanel";
 import "../components/ListenerTokenPanel.css";
 import "./Profile.css";
@@ -214,6 +217,8 @@ export default function Profile({ username, sessionId }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
 
+  const aiSuit = useAiRacingSuit(auth.currentUser);
+
   const activeTeamTheme = useMemo(() => {
     return TEAM_THEMES[favoriteTeam] || getDefaultTheme();
   }, [favoriteTeam]);
@@ -316,21 +321,41 @@ export default function Profile({ username, sessionId }) {
     setSavingProfile(true);
     setError("");
 
-    const payload = {
-      favoriteTeam: nextPayload.favoriteTeam,
-      profilePhoto: nextPayload.profilePhoto,
-      aiProfilePhoto: nextPayload.aiProfilePhoto,
-    };
-
     try {
-      if (resolvedUser?.id) {
-        await updateDoc(doc(db, "users", resolvedUser.id), payload);
+      // Downscale images before persisting for storage efficiency
+      const downscaledPhoto = nextPayload.profilePhoto
+        ? await downscaleForPersistence(nextPayload.profilePhoto)
+        : "";
+      const downscaledAiPhoto = nextPayload.aiProfilePhoto
+        ? await downscaleForPersistence(nextPayload.aiProfilePhoto)
+        : "";
+
+      const payload = {
+        favoriteTeam: nextPayload.favoriteTeam,
+        profilePhoto: downscaledPhoto,
+        aiProfilePhoto: downscaledAiPhoto,
+      };
+
+      try {
+        if (resolvedUser?.id) {
+          await updateDoc(doc(db, "users", resolvedUser.id), payload);
+        }
+        saveLocalProfile(username, payload);
+      } catch (err) {
+        console.error("Failed to save profile:", err);
+        saveLocalProfile(username, payload);
+        setError("Saved locally. Cloud sync failed.");
       }
-      saveLocalProfile(username, payload);
     } catch (err) {
-      console.error("Failed to save profile:", err);
-      saveLocalProfile(username, payload);
-      setError("Saved locally only. Cloud sync failed.");
+      console.error("Failed to downscale images:", err);
+      // If downscaling fails, save undownscaled images (better than losing data)
+      const fallbackPayload = {
+        favoriteTeam: nextPayload.favoriteTeam,
+        profilePhoto: nextPayload.profilePhoto,
+        aiProfilePhoto: nextPayload.aiProfilePhoto,
+      };
+      saveLocalProfile(username, fallbackPayload);
+      setError("Saved locally. Cloud sync failed.");
     } finally {
       setSavingProfile(false);
     }
@@ -371,9 +396,18 @@ export default function Profile({ username, sessionId }) {
 
   async function updateProfileFromImageData(imageDataUrl, keepTeamPrompt = true) {
     try {
-      const aiImage = await buildAiOutfitImage(imageDataUrl, favoriteTeam);
+      // Try AI generation via the backend hook first
+      const aiImage = await aiSuit.generate(imageDataUrl, favoriteTeam, {
+        primary: activeTeamTheme.primary,
+        secondary: activeTeamTheme.secondary,
+        accent: activeTeamTheme.accent,
+      });
+
+      // Fall back to local canvas-based generation if AI service fails
+      const finalAiImage = aiImage || await buildAiOutfitImage(imageDataUrl, favoriteTeam);
+
       setProfilePhoto(imageDataUrl);
-      setAiProfilePhoto(aiImage);
+      setAiProfilePhoto(finalAiImage);
 
       if (keepTeamPrompt) {
         setAskTeamAfterPhoto(true);
@@ -382,7 +416,7 @@ export default function Profile({ username, sessionId }) {
       await persistProfile({
         favoriteTeam,
         profilePhoto: imageDataUrl,
-        aiProfilePhoto: aiImage,
+        aiProfilePhoto: finalAiImage,
       });
     } catch (err) {
       console.error("Failed to process profile image:", err);
@@ -410,6 +444,12 @@ export default function Profile({ username, sessionId }) {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      setError(validation.message);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async () => {
       const sourceDataUrl = String(reader.result || "");
@@ -426,16 +466,36 @@ export default function Profile({ username, sessionId }) {
     setFavoriteTeam(nextTeam);
     setAskTeamAfterPhoto(false);
 
+    const nextTheme = TEAM_THEMES[nextTeam] || getDefaultTheme();
     let nextAiPhoto = aiProfilePhoto;
+
     if (profilePhoto) {
-      try {
-        nextAiPhoto = await buildAiOutfitImage(profilePhoto, nextTeam);
+      // Requirement 4.1: Trigger generation when photo exists
+      const aiImage = await aiSuit.generate(profilePhoto, nextTeam, {
+        primary: nextTheme.primary,
+        secondary: nextTheme.secondary,
+        accent: nextTheme.accent,
+      });
+
+      if (aiImage) {
+        // Requirement 4.3: Replace with new image on success
+        nextAiPhoto = aiImage;
         setAiProfilePhoto(nextAiPhoto);
-      } catch (err) {
-        console.error("Failed to regenerate themed AI profile image:", err);
+      } else {
+        // Requirement 4.4: Retain previous AI image on failure, show error
+        // The hook already sets aiSuit.error, which displays the notification
+        // Fall back to local generation for immediate visual feedback
+        try {
+          nextAiPhoto = await buildAiOutfitImage(profilePhoto, nextTeam);
+          setAiProfilePhoto(nextAiPhoto);
+        } catch {
+          // Keep previous AI photo if even local fallback fails
+        }
       }
     }
+    // Requirement 4.5: When no profilePhoto exists, save team preference only
 
+    // Requirement 4.1: Save team preference regardless of generation outcome
     await persistProfile({
       favoriteTeam: nextTeam,
       profilePhoto,
@@ -481,17 +541,48 @@ export default function Profile({ username, sessionId }) {
 
           <div className="profile-photo-slot">
             <h3>AI Racing Suit</h3>
-            {aiProfilePhoto ? (
+            {aiSuit.isGenerating && (
+              <div className="ai-generating-overlay">
+                <div className="ai-spinner" aria-label="Generating"></div>
+                <p>Generating your racing suit (~15-30 seconds)</p>
+              </div>
+            )}
+            {aiProfilePhoto && !aiSuit.isGenerating ? (
               <img
                 src={aiProfilePhoto}
                 alt="AI-styled racing suit profile"
                 className="profile-photo"
               />
-            ) : (
+            ) : !aiSuit.isGenerating ? (
               <div className="profile-placeholder">AI image appears after capture/upload.</div>
-            )}
+            ) : null}
           </div>
         </div>
+
+        {/* AI Generation Error & Retry UI */}
+        {aiSuit.error && (
+          <div className="ai-error-panel">
+            <p className="ai-error-message">{aiSuit.error.message}</p>
+            {aiSuit.canRetry && (
+              <button type="button" className="btn-secondary" onClick={aiSuit.retry}>
+                Retry
+              </button>
+            )}
+            {aiSuit.retryCount >= 3 && (
+              <p className="ai-error-exhausted">Multiple attempts failed. Please try again later.</p>
+            )}
+            <button type="button" className="btn-text" onClick={aiSuit.clearError}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Cooldown Timer */}
+        {aiSuit.cooldownMinutes != null && (
+          <div className="ai-cooldown-panel">
+            <p>Rate limit reached. Try again in {aiSuit.cooldownMinutes} minute{aiSuit.cooldownMinutes !== 1 ? 's' : ''}.</p>
+          </div>
+        )}
 
         {cameraActive ? (
           <div className="camera-panel">
@@ -502,7 +593,7 @@ export default function Profile({ username, sessionId }) {
               </div>
             </div>
             <div className="camera-controls">
-              <button type="button" className="btn-primary" onClick={captureFromCamera}>
+              <button type="button" className="btn-primary" onClick={captureFromCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
                 Capture Profile Shot
               </button>
               <button type="button" className="btn-secondary" onClick={stopCamera}>
@@ -512,12 +603,12 @@ export default function Profile({ username, sessionId }) {
           </div>
         ) : (
           <div className="camera-controls">
-            <button type="button" className="btn-primary" onClick={startCamera}>
+            <button type="button" className="btn-primary" onClick={startCamera} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}>
               Open Camera
             </button>
-            <label className="btn-secondary upload-trigger">
+            <label className={`btn-secondary upload-trigger${(aiSuit.isGenerating || aiSuit.cooldownMinutes != null) ? " disabled" : ""}`}>
               Upload Image
-              <input type="file" accept="image/*" onChange={handleFileUpload} />
+              <input type="file" accept="image/*" onChange={handleFileUpload} disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null} />
             </label>
           </div>
         )}
@@ -544,6 +635,7 @@ export default function Profile({ username, sessionId }) {
                 type="button"
                 onClick={() => handleTeamChange(teamKey)}
                 className={`team-option ${selected ? "selected" : ""}`}
+                disabled={aiSuit.isGenerating || aiSuit.cooldownMinutes != null}
                 style={{
                   "--team-primary": team.primary,
                   "--team-secondary": team.secondary,

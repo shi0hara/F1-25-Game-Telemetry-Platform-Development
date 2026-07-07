@@ -224,6 +224,39 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--team-accent) 36%, transparent 64%);
 }
 
+.ai-generating-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  gap: 1rem;
+}
+
+.ai-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--profile-team-primary, #00D2BE);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.ai-generating-overlay p {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.9rem;
+}
+
+.upload-trigger.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 @media (max-width: 900px) {
   .profile-photo-grid,
   .team-grid,
@@ -238,4 +271,55 @@
   .camera-controls {
     flex-direction: column;
   }
+}
+
+.ai-error-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 8px;
+  margin-top: 0.75rem;
+}
+
+.ai-error-message {
+  color: #fca5a5;
+  flex: 1;
+  margin: 0;
+}
+
+.ai-error-exhausted {
+  width: 100%;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.ai-cooldown-panel {
+  padding: 0.5rem 1rem;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  border-radius: 8px;
+  margin-top: 0.75rem;
+}
+
+.ai-cooldown-panel p {
+  color: #fbbf24;
+  margin: 0;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.btn-text:hover {
+  color: rgba(255, 255, 255, 0.8);
 }
