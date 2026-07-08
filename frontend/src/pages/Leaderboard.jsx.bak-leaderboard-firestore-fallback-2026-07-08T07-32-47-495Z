@@ -1,19 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-} from "firebase/firestore";
-import { db } from "../firebase";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
-
-const FALLBACK_SESSION_LIMIT = 100;
-const MIN_VALID_LAP_MS = 10000;
-const MAX_VALID_LAP_MS = 600000;
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -39,144 +27,21 @@ function formatSector(ms) {
     : "-";
 }
 
-function toMillis(value) {
-  if (!value) return 0;
-  if (typeof value.toMillis === "function") return value.toMillis();
-  if (typeof value.toDate === "function") return value.toDate().getTime();
-  if (typeof value.seconds === "number") return value.seconds * 1000;
-  if (typeof value._seconds === "number") return value._seconds * 1000;
-  if (typeof value === "number") return value;
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function formatDate(value) {
-  const ms = toMillis(value);
-  if (!ms) return "-";
-  return new Date(ms).toLocaleDateString();
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleDateString();
 }
 
 function shortSessionId(value) {
   return value ? String(value).slice(0, 8) : "-";
 }
 
-function normalizeKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "_");
-}
-
-function isValidLap(lap) {
-  const lapTimeMs = Number(lap?.lapTimeMs);
-  return (
-    lap?.valid === true &&
-    Number.isFinite(lapTimeMs) &&
-    lapTimeMs >= MIN_VALID_LAP_MS &&
-    lapTimeMs <= MAX_VALID_LAP_MS
-  );
-}
-
-function buildFallbackEntry(session, lap) {
-  const lapTimeMs = Number(lap.lapTimeMs);
-  const userKey =
-    session.userId ||
-    normalizeKey(session.username) ||
-    normalizeKey(session.email) ||
-    session.id;
-
-  return {
-    userKey,
-    userId: session.userId || null,
-    username: session.username || "Unknown Driver",
-    sessionId: session.id,
-    lapId: lap.id,
-    lapNumber: lap.lapNumber ?? null,
-    lapTimeMs,
-    lapTime: formatLapTime(lapTimeMs),
-    sector1Ms: lap.sector1Ms ?? null,
-    sector2Ms: lap.sector2Ms ?? null,
-    sector3Ms: lap.sector3Ms ?? null,
-    valid: true,
-    trackName: lap.trackName || session.trackName || null,
-    trackId: lap.trackId ?? session.trackId ?? null,
-    trackKey: session.trackKey || null,
-    sessionStartedAt: session.startedAt || null,
-    recordedAt: lap.recordedAt || null,
-    sortRecordedAtMs: toMillis(lap.recordedAt),
-  };
-}
-
-function rankEntries(entries) {
-  const sorted = [...entries].sort((a, b) => {
-    if (a.lapTimeMs !== b.lapTimeMs) return a.lapTimeMs - b.lapTimeMs;
-    return b.sortRecordedAtMs - a.sortRecordedAtMs;
-  });
-
-  const leaderTime = sorted[0]?.lapTimeMs ?? null;
-
-  return sorted.map((entry, index) => ({
-    ...entry,
-    rank: index + 1,
-    gapToLeaderMs: leaderTime !== null ? entry.lapTimeMs - leaderTime : null,
-  }));
-}
-
-async function loadLeaderboardFromFirestore() {
-  const sessionsQuery = query(
-    collection(db, "sessions"),
-    orderBy("startedAt", "desc"),
-    limit(FALLBACK_SESSION_LIMIT)
-  );
-  const sessionsSnap = await getDocs(sessionsQuery);
-  const bestByUser = new Map();
-  let scannedLaps = 0;
-  let validLaps = 0;
-
-  for (const sessionDoc of sessionsSnap.docs) {
-    const session = { id: sessionDoc.id, ...sessionDoc.data() };
-    const lapsSnap = await getDocs(collection(db, "sessions", sessionDoc.id, "laps"));
-
-    lapsSnap.forEach((lapDoc) => {
-      scannedLaps += 1;
-      const lap = { id: lapDoc.id, ...lapDoc.data() };
-      if (!isValidLap(lap)) return;
-
-      validLaps += 1;
-      const entry = buildFallbackEntry(session, lap);
-      const existing = bestByUser.get(entry.userKey);
-
-      if (
-        !existing ||
-        entry.lapTimeMs < existing.lapTimeMs ||
-        (entry.lapTimeMs === existing.lapTimeMs &&
-          entry.sortRecordedAtMs > existing.sortRecordedAtMs)
-      ) {
-        bestByUser.set(entry.userKey, entry);
-      }
-    });
-  }
-
-  const rows = rankEntries([...bestByUser.values()]).slice(0, 50);
-
-  return {
-    rows,
-    meta: {
-      source: "firestore_fallback",
-      leaderboardType: "best_valid_actual_lap_per_user",
-      scannedSessions: sessionsSnap.size,
-      scannedLaps,
-      validLaps,
-      userCount: bestByUser.size,
-    },
-  };
-}
-
 export default function Leaderboard() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [meta, setMeta] = useState(null);
 
   useEffect(() => {
@@ -186,33 +51,20 @@ export default function Leaderboard() {
       try {
         setLoading(true);
         setError("");
-        setNotice("");
 
-        let payload = null;
+        const res = await fetch(`${API_BASE}/leaderboard?limit=50`);
+        const contentType = res.headers.get("content-type") || "";
+        const data = contentType.includes("application/json")
+          ? await res.json()
+          : null;
 
-        try {
-          const res = await fetch(`${API_BASE}/leaderboard?limit=50`);
-          const contentType = res.headers.get("content-type") || "";
-          const data = contentType.includes("application/json")
-            ? await res.json()
-            : null;
-
-          if (!res.ok) {
-            throw new Error(
-              data?.error || `Backend leaderboard failed: HTTP ${res.status}`
-            );
-          }
-
-          payload = data;
-        } catch (backendErr) {
-          console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore();
-          setNotice("Backend leaderboard unavailable, showing Firestore fallback.");
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to load leaderboard.");
         }
 
         if (cancelled) return;
-        setRows(Array.isArray(payload.rows) ? payload.rows : []);
-        setMeta(payload.meta || null);
+        setRows(Array.isArray(data.rows) ? data.rows : []);
+        setMeta(data.meta || null);
       } catch (err) {
         if (cancelled) return;
         console.error("Leaderboard load error:", err);
@@ -262,7 +114,6 @@ export default function Leaderboard() {
         </div>
 
         {loading && <p>Loading leaderboard...</p>}
-        {notice && !error && <p style={{ color: "#facc15" }}>{notice}</p>}
         {error && <p style={{ color: "var(--color-accent-red, #f87171)" }}>{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
@@ -299,7 +150,7 @@ export default function Leaderboard() {
 
                   return (
                     <tr
-                      key={`${row.userKey || row.userId || row.username}-${row.sessionId}-${row.lapId}`}
+                      key={`${row.userId || row.username}-${row.sessionId}-${row.lapId}`}
                       style={{ borderBottom: "1px solid var(--color-bg-light-grey)" }}
                     >
                       <td
