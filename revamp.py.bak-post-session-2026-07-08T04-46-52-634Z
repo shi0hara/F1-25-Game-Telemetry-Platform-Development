@@ -530,27 +530,7 @@ def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
         return True
     try:
-        res = http.post(f"{API_BASE}/sessions/{SESSION_ID}/end", timeout=(5.0, 60.0))
-        res.raise_for_status()
-
-        try:
-            payload = res.json()
-        except Exception:
-            payload = {}
-
-        report = payload.get("postSessionReport") or {}
-        status = report.get("status")
-
-        if status == "ready":
-            print("Post-session AI report saved in Firebase.")
-            print("Report path:", report.get("reportPath"))
-            print("Samples:", report.get("sampleCount"), "| Laps:", report.get("lapCount"), "| Coach signals:", report.get("coachSignalCount"))
-        elif status == "empty":
-            print("Session ended. No post-session report data was available yet.")
-        elif status == "failed":
-            print("Session ended, but post-session report failed:", report.get("error"))
-        else:
-            print("Session ended.")
+        http.post(f"{API_BASE}/sessions/{SESSION_ID}/end", timeout=REQUEST_TIMEOUT)
     except Exception as e:
         print("Session end API error:", e)
     return True

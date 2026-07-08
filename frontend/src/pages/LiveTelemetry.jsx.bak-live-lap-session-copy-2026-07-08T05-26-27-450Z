@@ -385,7 +385,7 @@ export default function LiveTelemetry() {
 
       {!activeUsername && (
         <p style={{ color: "#aaa" }}>
-          Showing latest active session across all users.
+          Showing latest available session across all users.
         </p>
       )}
 

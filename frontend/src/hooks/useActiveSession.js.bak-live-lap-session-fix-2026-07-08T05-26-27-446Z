@@ -54,16 +54,8 @@ function hasLiveTelemetry(session) {
   );
 }
 
-function hasEndedAt(value) {
-  if (!value) return false;
-  if (typeof value.toMillis === "function") return true;
-  if (typeof value.seconds === "number") return true;
-  if (typeof value === "string") return value.trim() !== "";
-  return true;
-}
-
 function isActiveSession(session) {
-  return Boolean(session) && !hasEndedAt(session.endedAt);
+  return !session?.endedAt;
 }
 
 function pickBestSession(sessions) {
@@ -203,10 +195,9 @@ export default function useActiveSession(username) {
           ...docSnap.data(),
         }));
 
-        const activeDocs = docs.filter(isActiveSession);
-        const bestSession = pickBestSession(activeDocs);
+        const bestSession = pickBestSession(docs);
 
-        setSessions(activeDocs);
+        setSessions(docs);
         setSessionId(bestSession?.id || null);
         setSessionData(bestSession || null);
       },
