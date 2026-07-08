@@ -122,7 +122,7 @@ export default function App() {
               path="/live"
               element={
                 <ProtectedRoute user={user}>
-                  <LiveTelemetry currentUser={user} sessionId={sessionId} />
+                  <LiveTelemetry sessionId={sessionId} />
                 </ProtectedRoute>
               }
             />

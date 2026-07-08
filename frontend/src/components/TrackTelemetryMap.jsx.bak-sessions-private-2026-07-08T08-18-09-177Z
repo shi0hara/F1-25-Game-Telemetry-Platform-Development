@@ -21,11 +21,6 @@ function num(value) {
   return Number(value);
 }
 
-function getAuthHeaders() {
-  const token = window.localStorage.getItem("f1AuthToken");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 function getTelemetryColor(sample) {
   const brake = clamp(sample?.brake, 0, 1);
   const throttle = clamp(sample?.throttle, 0, 1);
@@ -714,7 +709,7 @@ export default function TrackTelemetryMap({
           try {
             const res = await fetch(
               `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`,
-              { headers: getAuthHeaders(), signal: abortController.signal }
+              { signal: abortController.signal }
             );
 
             if (!res.ok) {
@@ -784,7 +779,6 @@ export default function TrackTelemetryMap({
 
       try {
         const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map`, {
-          headers: getAuthHeaders(),
           signal: abortController.signal,
         });
 

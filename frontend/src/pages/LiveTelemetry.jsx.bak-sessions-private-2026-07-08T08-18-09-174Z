@@ -135,13 +135,9 @@ function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
   );
 }
 
-export default function LiveTelemetry({ currentUser }) {
-  const isAdmin =
-    currentUser?.isAdmin === true || currentUser?.role === "admin";
-  const ownUsername = currentUser?.username || "";
-  const [sessionScope, setSessionScope] = useState("mine");
-  const activeUsername =
-    isAdmin && sessionScope === "all" ? "" : ownUsername;
+export default function LiveTelemetry() {
+  const [usernameInput, setUsernameInput] = useState("");
+  const [activeUsername, setActiveUsername] = useState("");
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
@@ -242,8 +238,8 @@ export default function LiveTelemetry({ currentUser }) {
     setMapTrailState(createEmptyMapTrailState());
   }
 
-  function switchSessionScope(nextScope) {
-    if (nextScope === "all" && !isAdmin) return;
+  function handleSubmit(e) {
+    e.preventDefault();
 
     setLocalError("");
     setSpeedPoints([]);
@@ -251,7 +247,18 @@ export default function LiveTelemetry({ currentUser }) {
     setSelectedSession(null);
     setSelectedTelemetry(null);
     resetLapSelection();
-    setSessionScope(nextScope);
+
+    setActiveUsername(usernameInput.trim().toLowerCase());
+  }
+
+  function clearUserFilter() {
+    setUsernameInput("");
+    setActiveUsername("");
+    setSpeedPoints([]);
+    setSelectedSessionId(null);
+    setSelectedSession(null);
+    setSelectedTelemetry(null);
+    resetLapSelection();
   }
 
   const activeTrackKey = useMemo(() => {
@@ -344,70 +351,41 @@ export default function LiveTelemetry({ currentUser }) {
         Live <span className="text-blue">Telemetry</span>
       </h1>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          alignItems: "center",
-          marginBottom: 16,
-        }}
-      >
+      <form onSubmit={handleSubmit} style={{ marginBottom: 16 }}>
+        <input
+          value={usernameInput}
+          onChange={(e) => setUsernameInput(e.target.value)}
+          placeholder="Enter username, or leave empty for latest session"
+          style={{
+            padding: 8,
+            width: 320,
+            marginRight: 8,
+            borderRadius: 8,
+            border: "1px solid rgba(255,255,255,0.2)",
+          }}
+        />
+        <button type="submit">Load</button>
         <button
           type="button"
-          onClick={() => switchSessionScope("mine")}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border:
-              sessionScope === "mine"
-                ? "1px solid var(--color-accent-green)"
-                : "1px solid rgba(255,255,255,0.18)",
-            background:
-              sessionScope === "mine"
-                ? "rgba(34,197,94,0.16)"
-                : "rgba(255,255,255,0.05)",
-            color: "white",
-            cursor: "pointer",
-          }}
+          onClick={clearUserFilter}
+          style={{ marginLeft: 8 }}
         >
-          My sessions
+          Latest Session
         </button>
-
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => switchSessionScope("all")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 8,
-              border:
-                sessionScope === "all"
-                  ? "1px solid var(--color-accent-yellow)"
-                  : "1px solid rgba(255,255,255,0.18)",
-              background:
-                sessionScope === "all"
-                  ? "rgba(250,204,21,0.14)"
-                  : "rgba(255,255,255,0.05)",
-              color: "white",
-              cursor: "pointer",
-            }}
-          >
-            All sessions
-          </button>
-        )}
-      </div>
+      </form>
 
       {loading && <p>Loading active session...</p>}
 
-      {sessionScope === "all" && isAdmin ? (
-        <p style={{ color: "#aaa" }}>
-          Admin view: showing sessions across all users.
-        </p>
-      ) : (
+      {userData && (
         <p>
-          Viewing your sessions: <strong>{userData?.username || ownUsername}</strong>
-          {userData?.email ? ` (${userData.email})` : ""}
+          Viewing user: <strong>{userData.username}</strong>
+          {userData.email ? ` (${userData.email})` : ""}
+        </p>
+      )}
+
+      {!activeUsername && (
+        <p style={{ color: "#aaa" }}>
+          Showing latest active session across all users.
         </p>
       )}
 
