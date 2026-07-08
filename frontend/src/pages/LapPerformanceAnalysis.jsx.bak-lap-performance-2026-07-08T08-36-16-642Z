@@ -94,118 +94,25 @@ function StatBox({ label, value, subvalue, color }) {
   );
 }
 
-const GRAPH_METRICS = [
-  {
-    key: "speed",
-    label: "Speed",
-    unit: "km/h",
-    color: "#38bdf8",
-    max: 360,
-    defaultVisible: true,
-  },
-  {
-    key: "throttle",
-    label: "Throttle",
-    unit: "%",
-    color: "#22c55e",
-    max: 100,
-    defaultVisible: true,
-  },
-  {
-    key: "brake",
-    label: "Brake",
-    unit: "%",
-    color: "#f87171",
-    max: 100,
-    defaultVisible: true,
-  },
-  {
-    key: "rpm",
-    label: "RPM",
-    unit: "rpm",
-    color: "#facc15",
-    max: 13000,
-    defaultVisible: true,
-  },
-  {
-    key: "gear",
-    label: "Gear",
-    unit: "",
-    color: "#a78bfa",
-    max: 8,
-    defaultVisible: true,
-    stepped: true,
-  },
-  {
-    key: "drs",
-    label: "DRS",
-    unit: "",
-    color: "#fb7185",
-    max: 1,
-    defaultVisible: false,
-    stepped: true,
-  },
-];
-
-function graphRawValue(metricKey, sample) {
-  if (metricKey === "speed") return sample.speedKph ?? null;
-  if (metricKey === "throttle") return sample.throttlePct ?? null;
-  if (metricKey === "brake") return sample.brakePct ?? null;
-  if (metricKey === "rpm") return sample.rpm ?? null;
-  if (metricKey === "gear") return sample.gear ?? null;
-  if (metricKey === "drs") return sample.drs ? 1 : 0;
-  return null;
-}
-
-function graphValueLabel(metric, raw) {
-  if (raw === null || raw === undefined) return "-";
-
-  if (metric.key === "drs") {
-    return raw ? "On" : "Off";
-  }
-
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return "-";
-
-  if (metric.key === "rpm" || metric.key === "gear") {
-    return Math.round(value).toString() + (metric.unit ? " " + metric.unit : "");
-  }
-
-  return value.toFixed(1) + (metric.unit ? " " + metric.unit : "");
-}
-
-function graphScaledValue(metric, sample) {
-  const raw = graphRawValue(metric.key, sample);
-  if (raw === null || raw === undefined) return null;
-
-  if (metric.key === "drs") {
-    return raw ? 100 : 0;
-  }
-
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return null;
-
-  return Math.max(0, Math.min(100, (value / metric.max) * 100));
-}
-
-function CombinedTelemetryGraph({ labels, traces, visibleMetrics, onToggle }) {
+function MetricChart({ title, unit, color, labels, values, yMax, stepped = false }) {
   const chartData = useMemo(
     () => ({
       labels,
-      datasets: GRAPH_METRICS.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
-        label: metric.label,
-        data: traces.map((sample) => graphScaledValue(metric, sample)),
-        borderColor: metric.color,
-        backgroundColor: metric.color,
-        borderWidth: metric.key === "drs" ? 1.5 : 2,
-        pointRadius: 0,
-        tension: metric.stepped ? 0 : 0.22,
-        stepped: metric.stepped || false,
-        spanGaps: true,
-        metricKey: metric.key,
-      })),
+      datasets: [
+        {
+          label: title + (unit ? " (" + unit + ")" : ""),
+          data: values,
+          borderColor: color,
+          backgroundColor: color,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: stepped ? 0 : 0.25,
+          stepped,
+          spanGaps: true,
+        },
+      ],
     }),
-    [labels, traces, visibleMetrics]
+    [color, labels, stepped, title, unit, values]
   );
 
   const options = useMemo(
@@ -229,10 +136,9 @@ function CombinedTelemetryGraph({ labels, traces, visibleMetrics, onToggle }) {
         },
         y: {
           beginAtZero: true,
-          max: 100,
+          suggestedMax: yMax,
           ticks: {
             color: "#cbd5e1",
-            callback: (value) => value + "%",
           },
           grid: {
             color: "rgba(255,255,255,0.08)",
@@ -241,88 +147,28 @@ function CombinedTelemetryGraph({ labels, traces, visibleMetrics, onToggle }) {
       },
       plugins: {
         legend: {
-          display: true,
-          labels: {
-            color: "#cbd5e1",
-            usePointStyle: true,
-            boxWidth: 8,
-          },
+          display: false,
         },
         tooltip: {
           callbacks: {
             label: (context) => {
-              const metric = GRAPH_METRICS.find((item) => item.key === context.dataset.metricKey);
-              const sample = traces[context.dataIndex] || {};
-              if (!metric) return context.dataset.label + ": -";
-              return metric.label + ": " + graphValueLabel(metric, graphRawValue(metric.key, sample));
+              const raw = context.raw;
+              if (raw === null || raw === undefined) return title + ": -";
+              const value = Number(raw);
+              return title + ": " + (Number.isFinite(value) ? value.toFixed(1) : raw) + (unit ? " " + unit : "");
             },
           },
         },
       },
     }),
-    [traces]
+    [title, unit, yMax]
   );
-
-  const chartMinWidth = Math.max(1080, labels.length * 5);
 
   return (
     <div className="card">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {GRAPH_METRICS.map((metric) => (
-            <label
-              key={metric.key}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "7px 9px",
-                borderRadius: 8,
-                border: visibleMetrics[metric.key]
-                  ? "1px solid " + metric.color
-                  : "1px solid rgba(255,255,255,0.14)",
-                background: visibleMetrics[metric.key]
-                  ? "rgba(255,255,255,0.07)"
-                  : "rgba(255,255,255,0.03)",
-                color: "white",
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={visibleMetrics[metric.key] === true}
-                onChange={() => onToggle(metric.key)}
-              />
-              <span
-                style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: 9,
-                  background: metric.color,
-                  display: "inline-block",
-                }}
-              />
-              {metric.label}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ overflowX: "auto" }}>
-        <div style={{ minWidth: chartMinWidth, height: 430 }}>
-          <Line data={chartData} options={options} />
-        </div>
+      <h2 style={{ marginBottom: 10 }}>{title}</h2>
+      <div style={{ height: 240 }}>
+        <Line data={chartData} options={options} />
       </div>
     </div>
   );
@@ -388,19 +234,11 @@ export default function LapPerformanceAnalysis() {
     });
   }, [traces]);
 
-  const [visibleMetrics, setVisibleMetrics] = useState(() => {
-    return GRAPH_METRICS.reduce((next, metric) => {
-      next[metric.key] = metric.defaultVisible;
-      return next;
-    }, {});
-  });
-
-  function toggleMetric(metricKey) {
-    setVisibleMetrics((current) => ({
-      ...current,
-      [metricKey]: current[metricKey] !== true,
-    }));
-  }
+  const speedValues = useMemo(() => traces.map((sample) => sample.speedKph ?? null), [traces]);
+  const throttleValues = useMemo(() => traces.map((sample) => sample.throttlePct ?? null), [traces]);
+  const brakeValues = useMemo(() => traces.map((sample) => sample.brakePct ?? null), [traces]);
+  const rpmValues = useMemo(() => traces.map((sample) => sample.rpm ?? null), [traces]);
+  const gearValues = useMemo(() => traces.map((sample) => sample.gear ?? null), [traces]);
 
   const lap = data?.lap || {};
   const session = data?.session || {};
@@ -573,12 +411,19 @@ export default function LapPerformanceAnalysis() {
               </p>
             </div>
           ) : (
-            <CombinedTelemetryGraph
-              labels={labels}
-              traces={traces}
-              visibleMetrics={visibleMetrics}
-              onToggle={toggleMetric}
-            />
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                gap: 16,
+              }}
+            >
+              <MetricChart title="Speed" unit="km/h" color="#38bdf8" labels={labels} values={speedValues} yMax={360} />
+              <MetricChart title="Throttle" unit="%" color="#22c55e" labels={labels} values={throttleValues} yMax={100} />
+              <MetricChart title="Brake" unit="%" color="#f87171" labels={labels} values={brakeValues} yMax={100} />
+              <MetricChart title="RPM" unit="rpm" color="#facc15" labels={labels} values={rpmValues} yMax={13000} />
+              <MetricChart title="Gear" unit="" color="#a78bfa" labels={labels} values={gearValues} yMax={8} stepped />
+            </div>
           )}
         </>
       )}
