@@ -85,6 +85,7 @@ SESSION_TYPE = None
 CURRENT_LAP_DISTANCE_M = None
 CURRENT_TOTAL_DISTANCE_M = None
 CURRENT_SECTOR = None
+CURRENT_PIT_STATUS = None
 
 CORNER_ACTIVE = False
 CORNER_START = None
@@ -654,7 +655,7 @@ def handle_final_class_packet(pid, race_active, race_started_at):
 
 def update_lap_state_from_packet(header, pkt):
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
-    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR
+    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR, CURRENT_PIT_STATUS
 
     def is_plausible_lap_time_ms(ms):
         return ms is not None and 10000 <= ms <= 600000  # 10s to 10min
@@ -680,6 +681,13 @@ def update_lap_state_from_packet(header, pkt):
     current_sector = parse_int(get_attr(lap, "sector", "m_sector", default=None), None)
     if current_sector is not None:
         CURRENT_SECTOR = current_sector
+
+    pit_status = parse_int(
+        get_attr(lap, "pit_status", "mPitStatus", "m_pitStatus", default=None),
+        None,
+    )
+    if pit_status is not None:
+        CURRENT_PIT_STATUS = pit_status
 
     if current_lap is not None:
         if CURRENT_LAP_NUM is not None and current_lap > CURRENT_LAP_NUM:
@@ -902,6 +910,7 @@ def post_telemetry_sample(header, pkt):
         "drs": drs,
         "playerCarIndex": player_idx,
         "currentSector": CURRENT_SECTOR,
+        "pitStatus": CURRENT_PIT_STATUS,
     }
 
     update_corner_state_from_sample(sample_body)
