@@ -556,16 +556,12 @@ export default function TrackTelemetryMap({
     if (!apiBase || !sessionId) return undefined;
 
     let cancelled = false;
-    let loadingSavedLapTrails = false;
     setHistoryLoading(true);
 
     async function loadSavedLapTrails() {
-      if (loadingSavedLapTrails) return;
-      loadingSavedLapTrails = true;
-
       try {
         const res = await fetch(
-          `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`
+          `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=1200`
         );
 
         if (!res.ok) {
@@ -594,13 +590,11 @@ export default function TrackTelemetryMap({
         console.error("Lap trail history load error:", err);
         setHistoryLoading(false);
         setError(err.message || "Failed to load saved lap trails.");
-      } finally {
-        loadingSavedLapTrails = false;
       }
     }
 
     loadSavedLapTrails();
-    const interval = setInterval(loadSavedLapTrails, 5000);
+    const interval = setInterval(loadSavedLapTrails, 2500);
 
     return () => {
       cancelled = true;
