@@ -237,48 +237,6 @@ function drawTextBadge(ctx, text, x, y) {
   ctx.fillText(text, x + paddingX, y - paddingY);
 }
 
-const MAP_TELEPORT_JUMP_METERS = 180;
-
-function worldDistanceMeters(a, b) {
-  if (!a || !b || !hasNumber(a.worldX) || !hasNumber(a.worldZ) || !hasNumber(b.worldX) || !hasNumber(b.worldZ)) {
-    return 0;
-  }
-
-  const dx = Number(a.worldX) - Number(b.worldX);
-  const dz = Number(a.worldZ) - Number(b.worldZ);
-  return Math.sqrt(dx * dx + dz * dz);
-}
-
-function isPitMapSample(sample) {
-  return hasNumber(sample?.pitStatus) && Number(sample.pitStatus) > 0;
-}
-
-function isTeleportJump(previous, current) {
-  if (!previous || !current) return false;
-  if (isPitMapSample(previous) || isPitMapSample(current)) return true;
-
-  const previousLap = getLapNumber(previous, null);
-  const currentLap = getLapNumber(current, null);
-  if (previousLap !== null && currentLap !== null && previousLap !== currentLap) {
-    return false;
-  }
-
-  if (worldDistanceMeters(previous, current) >= MAP_TELEPORT_JUMP_METERS) {
-    return true;
-  }
-
-  if (
-    hasNumber(previous.lapDistance) &&
-    hasNumber(current.lapDistance) &&
-    Number(current.lapDistance) + 25 < Number(previous.lapDistance)
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-
 function getTrailPoints(trail, transform) {
   return trail
     .filter((sample) => hasNumber(sample.worldX) && hasNumber(sample.worldZ))
@@ -315,10 +273,7 @@ function drawTrailSegment(ctx, previous, current, next, color) {
 }
 
 function drawSmoothTelemetryTrail(ctx, trail, transform) {
-  const points = getTrailPoints(
-    trail.filter((sample) => !isPitMapSample(sample)),
-    transform
-  );
+  const points = getTrailPoints(trail, transform);
 
   if (points.length < 2) return;
 
@@ -332,10 +287,6 @@ function drawSmoothTelemetryTrail(ctx, trail, transform) {
   for (let i = 1; i < points.length; i++) {
     const previous = points[i - 1];
     const current = points[i];
-
-    if (isTeleportJump(previous.sample, current.sample)) {
-      continue;
-    }
 
     ctx.beginPath();
     ctx.moveTo(previous.x, previous.y);
@@ -419,9 +370,6 @@ function readStoredMapPoint(sample) {
     steering: hasNumber(sample.steering ?? sample.st)
       ? Number(sample.steering ?? sample.st)
       : null,
-    pitStatus: hasNumber(sample.pitStatus ?? sample.pit)
-      ? Number(sample.pitStatus ?? sample.pit)
-      : null,
   };
 }
 
@@ -503,16 +451,6 @@ export default function TrackTelemetryMap({
     const last = old[old.length - 1];
 
     if (isSameMapPosition(last, latest)) {
-      return;
-    }
-
-    if (isPitMapSample(latest)) {
-      return;
-    }
-
-    if (last && isTeleportJump(last, latest)) {
-      currentLapTrailRef.current = [latest];
-      setCurrentLapTrail([latest]);
       return;
     }
 
