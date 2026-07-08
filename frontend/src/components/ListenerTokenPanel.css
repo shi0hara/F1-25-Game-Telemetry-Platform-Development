@@ -1,0 +1,84 @@
+.listener-token-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.listener-token-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.listener-token-create input {
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  padding: 0 10px;
+}
+
+.listener-token-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.listener-token-result code {
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #bbf7d0;
+  padding: 10px;
+}
+
+.listener-token-message {
+  margin: 0;
+  color: #93c5fd;
+}
+
+.listener-token-list {
+  display: grid;
+  gap: 8px;
+}
+
+.listener-token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px;
+}
+
+.listener-token-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.listener-token-row span {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.listener-token-row button,
+.listener-token-result button {
+  border: 0;
+  border-radius: 6px;
+  background: #374151;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+@media (max-width: 640px) {
+  .listener-token-create,
+  .listener-token-result,
+  .listener-token-row {
+    grid-template-columns: 1fr;
+  }
+}
