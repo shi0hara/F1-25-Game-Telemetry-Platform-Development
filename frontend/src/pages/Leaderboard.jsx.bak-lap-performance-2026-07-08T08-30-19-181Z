@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   collection,
   getDocs,
@@ -457,22 +456,7 @@ export default function Leaderboard() {
                         #{row.rank}
                       </td>
                       <td style={{ fontWeight: "bold" }}>{row.username || "Unknown Driver"}</td>
-                      <td>
-                        {row.sessionId && row.lapId ? (
-                          <Link
-                            to={"/analysis/" + row.sessionId + "/lap/" + row.lapId}
-                            style={{
-                              color: "var(--color-accent-blue)",
-                              fontWeight: 700,
-                              textDecoration: "none",
-                            }}
-                          >
-                            Lap {row.lapNumber ?? "-"}
-                          </Link>
-                        ) : (
-                          <>Lap {row.lapNumber ?? "-"}</>
-                        )}
-                      </td>
+                      <td>Lap {row.lapNumber ?? "-"}</td>
                       <td style={{ color: "var(--color-accent-green)", fontWeight: "bold" }}>
                         {row.lapTime || formatLapTime(row.lapTimeMs)}
                       </td>

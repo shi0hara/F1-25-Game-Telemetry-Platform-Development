@@ -6,7 +6,6 @@ import Footer from "./components/layout/Footer";
 import Dashboard from "./pages/Dashboard";
 import LiveTelemetry from "./pages/LiveTelemetry";
 import Leaderboard from "./pages/Leaderboard";
-import LapPerformanceAnalysis from "./pages/LapPerformanceAnalysis";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Contact from "./pages/Contact";
@@ -132,14 +131,6 @@ export default function App() {
               element={
                 <ProtectedRoute user={user}>
                   <Leaderboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/analysis/:sessionId/lap/:lapId"
-              element={
-                <ProtectedRoute user={user}>
-                  <LapPerformanceAnalysis />
                 </ProtectedRoute>
               }
             />
