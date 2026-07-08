@@ -1,13 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  collection,
-  documentId,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-} from "firebase/firestore";
-import { db } from "../firebase";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -458,97 +449,6 @@ function normalizeLapTrailsFromApi(lapTrails) {
     .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
-function compareMapPoints(a, b) {
-  const aLap = getLapNumber(a, 0) || 0;
-  const bLap = getLapNumber(b, 0) || 0;
-  if (aLap !== bLap) return aLap - bLap;
-
-  if (hasNumber(a.lapDistance) && hasNumber(b.lapDistance)) {
-    const diff = Number(a.lapDistance) - Number(b.lapDistance);
-    if (diff !== 0) return diff;
-  }
-
-  if (hasNumber(a.sampleIndex) && hasNumber(b.sampleIndex)) {
-    return Number(a.sampleIndex) - Number(b.sampleIndex);
-  }
-
-  return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
-}
-
-function downsampleTrailPoints(points, maxPoints = 400) {
-  if (!Array.isArray(points) || points.length <= maxPoints) return points;
-  if (maxPoints <= 2) return points.slice(0, maxPoints);
-
-  const out = [];
-  const step = (points.length - 1) / (maxPoints - 1);
-
-  for (let i = 0; i < maxPoints; i += 1) {
-    out.push(points[Math.round(i * step)]);
-  }
-
-  return out;
-}
-
-function buildLapTrailsFromStoredPoints(points, maxPointsPerLap = 400) {
-  const grouped = new Map();
-
-  for (const point of [...points].sort(compareMapPoints)) {
-    if (point.lapNumber == null || isPitMapSample(point)) continue;
-
-    const key = getLapTrailKey(point.lapNumber);
-    if (!grouped.has(key)) {
-      grouped.set(key, []);
-    }
-
-    grouped.get(key).push(point);
-  }
-
-  return [...grouped.entries()]
-    .map(([key, lapPoints]) => {
-      const pointsForLap = downsampleTrailPoints(lapPoints, maxPointsPerLap);
-      const lapNumber = getLapNumber(pointsForLap[0], null);
-
-      return {
-        key,
-        lapNumber,
-        label: getLapTrailLabel(lapNumber),
-        pointCount: pointsForLap.length,
-        originalPointCount: lapPoints.length,
-        points: pointsForLap,
-        startedAt: pointsForLap[0]?.timestamp || null,
-        endedAt: pointsForLap[pointsForLap.length - 1]?.timestamp || null,
-      };
-    })
-    .filter((trail) => trail.lapNumber != null && trail.points.length >= 2)
-    .sort((a, b) => a.lapNumber - b.lapNumber);
-}
-
-async function loadLapTrailsFromFirestore(sessionId, maxPointsPerLap = 400) {
-  const chunksRef = collection(db, "sessions", sessionId, "telemetryChunks");
-  const chunksQuery = query(chunksRef, orderBy(documentId()), limit(200));
-  const snapshot = await getDocs(chunksQuery);
-  const points = [];
-
-  snapshot.forEach((docSnap) => {
-    const data = docSnap.data() || {};
-    const rawPoints =
-      Array.isArray(data.mapPreviewPoints) && data.mapPreviewPoints.length > 0
-        ? data.mapPreviewPoints
-        : Array.isArray(data.samples)
-          ? data.samples
-          : [];
-
-    for (const raw of rawPoints) {
-      const point = readStoredMapPoint(raw);
-      if (!point || point.lapNumber == null) continue;
-      if (!hasNumber(point.worldX) || !hasNumber(point.worldZ)) continue;
-      points.push(point);
-    }
-  });
-
-  return buildLapTrailsFromStoredPoints(points, maxPointsPerLap);
-}
-
 export default function TrackTelemetryMap({
   apiBase,
   sessionId,
@@ -653,63 +553,41 @@ export default function TrackTelemetryMap({
   }, [apiBase, trackKey]);
 
   useEffect(() => {
-    if (!sessionId) return undefined;
+    if (!apiBase || !sessionId) return undefined;
 
     let cancelled = false;
     let loadingSavedLapTrails = false;
     setHistoryLoading(true);
-
-    function applyTrails(trails) {
-      setCompletedLapTrails(trails);
-
-      if (trails.length > 0) {
-        const latestTrail = trails[trails.length - 1];
-        currentLapNumberRef.current = latestTrail.lapNumber;
-        currentLapTrailRef.current = latestTrail.points;
-        setCurrentLapNumber(latestTrail.lapNumber);
-        setCurrentLapTrail(latestTrail.points);
-      }
-    }
 
     async function loadSavedLapTrails() {
       if (loadingSavedLapTrails) return;
       loadingSavedLapTrails = true;
 
       try {
-        let trails = [];
-        let apiError = null;
+        const res = await fetch(
+          `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`
+        );
 
-        if (apiBase) {
-          try {
-            const res = await fetch(
-              `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`
-            );
-
-            if (!res.ok) {
-              throw new Error("Failed to load saved lap trails from backend.");
-            }
-
-            const data = await res.json();
-            trails = normalizeLapTrailsFromApi(data.lapTrails);
-          } catch (err) {
-            apiError = err;
-            console.warn("Backend lap trail load failed, using Firestore fallback:", err);
-          }
+        if (!res.ok) {
+          throw new Error("Failed to load saved lap trails.");
         }
 
-        if (trails.length === 0) {
-          trails = await loadLapTrailsFromFirestore(sessionId, 400);
-        }
+        const data = await res.json();
+        const trails = normalizeLapTrailsFromApi(data.lapTrails);
 
         if (cancelled) return;
 
-        applyTrails(trails);
-        setHistoryLoading(false);
-        setError(null);
+        setCompletedLapTrails(trails);
 
-        if (trails.length === 0 && apiError) {
-          console.warn("No Firestore lap trails found after backend failure:", apiError);
+        if (trails.length > 0) {
+          const latestTrail = trails[trails.length - 1];
+          currentLapNumberRef.current = latestTrail.lapNumber;
+          currentLapTrailRef.current = latestTrail.points;
+          setCurrentLapNumber(latestTrail.lapNumber);
+          setCurrentLapTrail(latestTrail.points);
         }
+
+        setHistoryLoading(false);
       } catch (err) {
         if (cancelled) return;
 
