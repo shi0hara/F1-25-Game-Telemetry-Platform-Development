@@ -12,6 +12,7 @@ export const generateRacingSuit = onRequest(
     timeoutSeconds: 120,
     memory: "512MiB",
     invoker: "public",
+    secrets: ["OPENROUTER_API_KEY", "OPENROUTER_MODEL"],
   },
   handleGenerateRacingSuit
 );
