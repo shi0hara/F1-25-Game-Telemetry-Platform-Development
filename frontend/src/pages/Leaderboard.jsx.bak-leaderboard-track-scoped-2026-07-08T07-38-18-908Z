@@ -11,7 +11,7 @@ import { db } from "../firebase";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-const FALLBACK_SESSION_LIMIT = 120;
+const FALLBACK_SESSION_LIMIT = 100;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
 
@@ -64,16 +64,7 @@ function normalizeKey(value) {
   return String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function trackKeyFrom(trackId, trackName) {
-  if (trackId !== null && trackId !== undefined && trackId !== "") {
-    return `track_${Number(trackId)}`;
-  }
-
-  return `track_${normalizeKey(trackName || "unknown_track") || "unknown_track"}`;
+    .replace(/[^a-z0-9._-]+/g, "_");
 }
 
 function isValidLap(lap) {
@@ -88,9 +79,6 @@ function isValidLap(lap) {
 
 function buildFallbackEntry(session, lap) {
   const lapTimeMs = Number(lap.lapTimeMs);
-  const trackId = lap.trackId ?? session.trackId ?? null;
-  const trackName = lap.trackName || session.trackName || "Unknown Track";
-  const trackKey = session.trackKey || trackKeyFrom(trackId, trackName);
   const userKey =
     session.userId ||
     normalizeKey(session.username) ||
@@ -110,13 +98,12 @@ function buildFallbackEntry(session, lap) {
     sector2Ms: lap.sector2Ms ?? null,
     sector3Ms: lap.sector3Ms ?? null,
     valid: true,
-    trackName,
-    trackId,
-    trackKey,
+    trackName: lap.trackName || session.trackName || null,
+    trackId: lap.trackId ?? session.trackId ?? null,
+    trackKey: session.trackKey || null,
     sessionStartedAt: session.startedAt || null,
     recordedAt: lap.recordedAt || null,
     sortRecordedAtMs: toMillis(lap.recordedAt),
-    sortStartedAtMs: toMillis(session.startedAt),
   };
 }
 
@@ -135,103 +122,16 @@ function rankEntries(entries) {
   }));
 }
 
-function buildTrackScopedPayload(entries, selectedTrackKey = null) {
-  const trackStats = new Map();
-  const bestByTrackAndUser = new Map();
-
-  for (const entry of entries) {
-    if (!entry.trackKey) continue;
-
-    if (!trackStats.has(entry.trackKey)) {
-      trackStats.set(entry.trackKey, {
-        trackKey: entry.trackKey,
-        trackName: entry.trackName || entry.trackKey,
-        trackId: entry.trackId ?? null,
-        validLaps: 0,
-        userKeys: new Set(),
-        bestLapTimeMs: null,
-        latestActivityMs: 0,
-      });
-    }
-
-    const stats = trackStats.get(entry.trackKey);
-    stats.validLaps += 1;
-    stats.userKeys.add(entry.userKey);
-    stats.latestActivityMs = Math.max(
-      stats.latestActivityMs,
-      entry.sortRecordedAtMs || entry.sortStartedAtMs || 0
-    );
-    if (stats.bestLapTimeMs === null || entry.lapTimeMs < stats.bestLapTimeMs) {
-      stats.bestLapTimeMs = entry.lapTimeMs;
-    }
-
-    if (!bestByTrackAndUser.has(entry.trackKey)) {
-      bestByTrackAndUser.set(entry.trackKey, new Map());
-    }
-
-    const bestByUser = bestByTrackAndUser.get(entry.trackKey);
-    const existing = bestByUser.get(entry.userKey);
-    if (
-      !existing ||
-      entry.lapTimeMs < existing.lapTimeMs ||
-      (entry.lapTimeMs === existing.lapTimeMs &&
-        entry.sortRecordedAtMs > existing.sortRecordedAtMs)
-    ) {
-      bestByUser.set(entry.userKey, entry);
-    }
-  }
-
-  const tracks = [...trackStats.values()]
-    .map((track) => ({
-      trackKey: track.trackKey,
-      trackName: track.trackName,
-      trackId: track.trackId,
-      validLaps: track.validLaps,
-      userCount: track.userKeys.size,
-      bestLapTimeMs: track.bestLapTimeMs,
-      bestLapTime: formatLapTime(track.bestLapTimeMs),
-      latestActivityMs: track.latestActivityMs,
-    }))
-    .sort((a, b) => {
-      if (b.latestActivityMs !== a.latestActivityMs) return b.latestActivityMs - a.latestActivityMs;
-      return String(a.trackName || "").localeCompare(String(b.trackName || ""));
-    });
-
-  const activeTrack =
-    tracks.find((track) => track.trackKey === selectedTrackKey) ||
-    tracks[0] ||
-    null;
-  const activeTrackKey = activeTrack?.trackKey || null;
-  const activeBestByUser = activeTrackKey
-    ? bestByTrackAndUser.get(activeTrackKey) || new Map()
-    : new Map();
-  const rows = rankEntries([...activeBestByUser.values()]).slice(0, 50);
-
-  return {
-    rows,
-    tracks,
-    activeTrack,
-    activeTrackKey,
-    meta: {
-      source: "firestore_fallback",
-      leaderboardType: "best_valid_actual_lap_per_user_per_track",
-      trackScoped: true,
-      trackCount: tracks.length,
-      validLaps: activeTrack?.validLaps ?? 0,
-      userCount: activeBestByUser.size,
-    },
-  };
-}
-
-async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
+async function loadLeaderboardFromFirestore() {
   const sessionsQuery = query(
     collection(db, "sessions"),
     orderBy("startedAt", "desc"),
     limit(FALLBACK_SESSION_LIMIT)
   );
   const sessionsSnap = await getDocs(sessionsQuery);
-  const entries = [];
+  const bestByUser = new Map();
   let scannedLaps = 0;
+  let validLaps = 0;
 
   for (const sessionDoc of sessionsSnap.docs) {
     const session = { id: sessionDoc.id, ...sessionDoc.data() };
@@ -241,34 +141,39 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
       scannedLaps += 1;
       const lap = { id: lapDoc.id, ...lapDoc.data() };
       if (!isValidLap(lap)) return;
-      entries.push(buildFallbackEntry(session, lap));
+
+      validLaps += 1;
+      const entry = buildFallbackEntry(session, lap);
+      const existing = bestByUser.get(entry.userKey);
+
+      if (
+        !existing ||
+        entry.lapTimeMs < existing.lapTimeMs ||
+        (entry.lapTimeMs === existing.lapTimeMs &&
+          entry.sortRecordedAtMs > existing.sortRecordedAtMs)
+      ) {
+        bestByUser.set(entry.userKey, entry);
+      }
     });
   }
 
-  const payload = buildTrackScopedPayload(entries, selectedTrackKey);
+  const rows = rankEntries([...bestByUser.values()]).slice(0, 50);
+
   return {
-    ...payload,
+    rows,
     meta: {
-      ...payload.meta,
+      source: "firestore_fallback",
+      leaderboardType: "best_valid_actual_lap_per_user",
       scannedSessions: sessionsSnap.size,
       scannedLaps,
+      validLaps,
+      userCount: bestByUser.size,
     },
   };
 }
 
-function isTrackScopedPayload(data) {
-  return (
-    data?.meta?.trackScoped === true &&
-    data?.meta?.leaderboardType === "best_valid_actual_lap_per_user_per_track" &&
-    Array.isArray(data.tracks)
-  );
-}
-
 export default function Leaderboard() {
   const [rows, setRows] = useState([]);
-  const [tracks, setTracks] = useState([]);
-  const [selectedTrackKey, setSelectedTrackKey] = useState("");
-  const [activeTrack, setActiveTrack] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -286,10 +191,7 @@ export default function Leaderboard() {
         let payload = null;
 
         try {
-          const url = selectedTrackKey
-            ? `${API_BASE}/leaderboard?limit=50&trackKey=${encodeURIComponent(selectedTrackKey)}`
-            : `${API_BASE}/leaderboard?limit=50`;
-          const res = await fetch(url);
+          const res = await fetch(`${API_BASE}/leaderboard?limit=50`);
           const contentType = res.headers.get("content-type") || "";
           const data = contentType.includes("application/json")
             ? await res.json()
@@ -301,26 +203,16 @@ export default function Leaderboard() {
             );
           }
 
-          if (!isTrackScopedPayload(data)) {
-            throw new Error("Backend leaderboard is not track-scoped yet.");
-          }
-
           payload = data;
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(selectedTrackKey);
+          payload = await loadLeaderboardFromFirestore();
           setNotice("Backend leaderboard unavailable, showing Firestore fallback.");
         }
 
         if (cancelled) return;
         setRows(Array.isArray(payload.rows) ? payload.rows : []);
-        setTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
-        setActiveTrack(payload.activeTrack || null);
         setMeta(payload.meta || null);
-
-        if (!selectedTrackKey && payload.activeTrackKey) {
-          setSelectedTrackKey(payload.activeTrackKey);
-        }
       } catch (err) {
         if (cancelled) return;
         console.error("Leaderboard load error:", err);
@@ -335,14 +227,14 @@ export default function Leaderboard() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTrackKey]);
+  }, []);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
 
   return (
     <div className="page-container">
       <h1>
-        Track <span className="text-primary">Leaderboards</span>
+        Global <span className="text-primary">Leaderboards</span>
       </h1>
 
       <div className="card" style={{ marginBottom: "20px" }}>
@@ -356,9 +248,9 @@ export default function Leaderboard() {
           }}
         >
           <div>
-            <h2>{activeTrack?.trackName || "Fastest Valid Laps"}</h2>
+            <h2>Fastest Valid Laps</h2>
             <p style={{ marginTop: 4, color: "#aaa" }}>
-              Rankings are separated by track. One placement per driver, using their best real valid lap.
+              One placement per driver, using their best real valid lap.
             </p>
           </div>
 
@@ -369,49 +261,12 @@ export default function Leaderboard() {
           )}
         </div>
 
-        {tracks.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              marginTop: 14,
-              marginBottom: 8,
-            }}
-          >
-            {tracks.map((track) => {
-              const selected = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
-              return (
-                <button
-                  key={track.trackKey}
-                  type="button"
-                  onClick={() => setSelectedTrackKey(track.trackKey)}
-                  style={{
-                    border: selected
-                      ? "1px solid var(--color-accent-green)"
-                      : "1px solid rgba(255,255,255,0.18)",
-                    background: selected
-                      ? "rgba(34,197,94,0.16)"
-                      : "rgba(255,255,255,0.05)",
-                    color: "white",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  {track.trackName || track.trackKey} ({track.userCount})
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {loading && <p>Loading leaderboard...</p>}
         {notice && !error && <p style={{ color: "#facc15" }}>{notice}</p>}
         {error && <p style={{ color: "var(--color-accent-red, #f87171)" }}>{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p>No valid lap times found for this track yet.</p>
+          <p>No valid lap times found yet.</p>
         )}
 
         {!loading && !error && rows.length > 0 && (
@@ -421,13 +276,14 @@ export default function Leaderboard() {
                 width: "100%",
                 textAlign: "left",
                 borderCollapse: "collapse",
-                minWidth: 780,
+                minWidth: 860,
               }}
             >
               <thead>
                 <tr style={{ borderBottom: "2px solid var(--color-bg-light-grey)" }}>
                   <th style={{ padding: "10px" }}>Rank</th>
                   <th>Driver</th>
+                  <th>Track</th>
                   <th>Lap</th>
                   <th>Lap Time</th>
                   <th>Gap</th>
@@ -456,6 +312,7 @@ export default function Leaderboard() {
                         #{row.rank}
                       </td>
                       <td style={{ fontWeight: "bold" }}>{row.username || "Unknown Driver"}</td>
+                      <td>{row.trackName || row.trackKey || "-"}</td>
                       <td>Lap {row.lapNumber ?? "-"}</td>
                       <td style={{ color: "var(--color-accent-green)", fontWeight: "bold" }}>
                         {row.lapTime || formatLapTime(row.lapTimeMs)}
