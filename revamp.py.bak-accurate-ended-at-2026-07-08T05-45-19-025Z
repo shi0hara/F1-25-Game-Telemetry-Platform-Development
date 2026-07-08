@@ -31,7 +31,6 @@ SESSION_HISTORY_PACKET_ID = 11
 
 RACE_SESSION_TYPES = {15, 16, 17}
 MIN_EVENT_END_AFTER_START_SEC = 10.0
-SESSION_END_GRACE_PERIOD_SEC = float(os.getenv("SESSION_END_GRACE_PERIOD_SEC", "3.0"))
 
 REQUEST_TIMEOUT = (5.0, 10.0)
 SOCKET_TIMEOUT_SEC = 1.0
@@ -389,11 +388,6 @@ http.headers.update({"Content-Type": "application/json"})
 
 SESSION_ID = None
 USER_ID = None
-SESSION_END_DETECTED_AT = None
-SESSION_END_DETECTED_MONO = None
-SESSION_END_REASON = None
-SESSION_END_PACKET_TYPE = None
-LAST_SAMPLE_TIMESTAMP = None
 
 STOP_EVENT = threading.Event()
 
@@ -532,49 +526,11 @@ def create_user_and_session():
             print(f"API not ready, retrying in 5s... ({e})")
             time.sleep(5)
 
-def mark_session_end(reason, packet_type=None):
-    global SESSION_END_DETECTED_AT, SESSION_END_DETECTED_MONO
-    global SESSION_END_REASON, SESSION_END_PACKET_TYPE
-
-    if SESSION_END_DETECTED_AT is not None:
-        return False
-
-    SESSION_END_DETECTED_AT = iso_now()
-    SESSION_END_DETECTED_MONO = time.time()
-    SESSION_END_REASON = reason
-    SESSION_END_PACKET_TYPE = packet_type
-    print(f"Grand Prix session ended. Detected at {SESSION_END_DETECTED_AT} ({reason})")
-    return True
-
-
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
         return True
-
-    ended_at = SESSION_END_DETECTED_AT or LAST_SAMPLE_TIMESTAMP or iso_now()
-    end_source = (
-        "game_packet"
-        if SESSION_END_DETECTED_AT
-        else "last_telemetry_sample"
-        if LAST_SAMPLE_TIMESTAMP
-        else "listener_shutdown"
-    )
-    end_reason = SESSION_END_REASON or (
-        "manual_or_listener_shutdown" if not SESSION_END_DETECTED_AT else None
-    )
-
     try:
-        res = http.post(
-            f"{API_BASE}/sessions/{SESSION_ID}/end",
-            json={
-                "endedAt": ended_at,
-                "endedAtSource": end_source,
-                "endReason": end_reason,
-                "endPacketType": SESSION_END_PACKET_TYPE,
-                "listenerClosedAt": iso_now(),
-            },
-            timeout=(5.0, 60.0),
-        )
+        res = http.post(f"{API_BASE}/sessions/{SESSION_ID}/end", timeout=(5.0, 60.0))
         res.raise_for_status()
 
         try:
@@ -595,7 +551,6 @@ def end_session_once(session_closed):
             print("Session ended, but post-session report failed:", report.get("error"))
         else:
             print("Session ended.")
-        print("Ended at:", ended_at, "| Source:", end_source)
     except Exception as e:
         print("Session end API error:", e)
     return True
@@ -626,7 +581,7 @@ def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
         return True, time.time()
 
     if not is_race_session and race_active:
-        mark_session_end("session_type_changed", "session_packet")
+        print("Grand Prix session ended.")
         return False, None
 
     return race_active, race_started_at
@@ -641,14 +596,14 @@ def handle_event_packet(pid, data, pkt_cls, race_active, race_started_at):
     if code == "SEND" and race_active:
         if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
             return race_active, race_started_at
-        mark_session_end("session_end_event", "event_SEND")
+        print("Grand Prix session ended.")
         return False, None
 
     return race_active, race_started_at
 
 def handle_final_class_packet(pid, race_active, race_started_at):
     if pid == FINAL_CLASS_PACKET_ID and race_active:
-        mark_session_end("final_classification_packet", "final_classification")
+        print("Grand Prix session ended.")
         return False, None
     return race_active, race_started_at
 
@@ -831,7 +786,7 @@ def post_latest_telemetry(sample_body):
     ))
 
 def post_telemetry_sample(header, pkt):
-    global LAST_SAMPLE_SENT_AT, LAST_SAMPLE_TIMESTAMP
+    global LAST_SAMPLE_SENT_AT
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
 
     if not SESSION_ID or pkt is None:
@@ -880,11 +835,8 @@ def post_telemetry_sample(header, pkt):
     LAST_BRAKE_SAMPLE_TIME = now
     LAST_SAMPLE_SENT_AT = now
 
-    sample_timestamp = iso_now()
-    LAST_SAMPLE_TIMESTAMP = sample_timestamp
-
     sample_body = {
-        "timestamp": sample_timestamp,
+        "timestamp": iso_now(),
         "sampleIndex": get_frame_identifier(header, pkt),
         "gameTimeMs": get_attr(header, "session_time", "mSessionTime", "m_sessionTime", default=None),
         "lapNumber": CURRENT_LAP_NUM,
@@ -1047,13 +999,6 @@ def main():
                             w.writerows(rows_buffer)
                             f.flush()
                             rows_buffer.clear()
-
-                if (
-                    SESSION_END_DETECTED_MONO is not None
-                    and time.time() - SESSION_END_DETECTED_MONO >= SESSION_END_GRACE_PERIOD_SEC
-                ):
-                    print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing listener session.")
-                    STOP_EVENT.set()
 
     except KeyboardInterrupt:
         print("\nStopped. Saving resources...")
