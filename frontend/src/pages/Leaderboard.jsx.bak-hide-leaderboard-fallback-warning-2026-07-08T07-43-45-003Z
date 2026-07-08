@@ -309,7 +309,7 @@ export default function Leaderboard() {
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
           payload = await loadLeaderboardFromFirestore(selectedTrackKey);
-          setNotice("");
+          setNotice("Backend leaderboard unavailable, showing Firestore fallback.");
         }
 
         if (cancelled) return;
