@@ -560,9 +560,6 @@ export default function TrackTelemetryMap({
   const canvasRef = useRef(null);
   const currentLapTrailRef = useRef([]);
   const currentLapNumberRef = useRef(null);
-  const trackMapLoadSeqRef = useRef(0);
-  const lapTrailLoadSeqRef = useRef(0);
-  const livePositionLoadSeqRef = useRef(0);
 
   const [trackMap, setTrackMap] = useState(null);
   const [sessionMap, setSessionMap] = useState(null);
@@ -630,22 +627,14 @@ export default function TrackTelemetryMap({
   }, [sessionId]);
 
   useEffect(() => {
-    const requestId = trackMapLoadSeqRef.current + 1;
-    trackMapLoadSeqRef.current = requestId;
-    const abortController = new AbortController();
-
     async function loadTrackMap() {
       try {
         setError(null);
 
-        if (!apiBase || !trackKey) {
-          setTrackMap(null);
-          return;
-        }
+        if (!apiBase || !trackKey) return;
 
         const res = await fetch(
-          `${apiBase}/track-maps/${trackKey}?includeCenterline=true`,
-          { signal: abortController.signal }
+          `${apiBase}/track-maps/${trackKey}?includeCenterline=true`
         );
 
         if (!res.ok) {
@@ -653,39 +642,24 @@ export default function TrackTelemetryMap({
         }
 
         const data = await res.json();
-        if (trackMapLoadSeqRef.current !== requestId) return;
         setTrackMap(data);
       } catch (err) {
-        if (err?.name === "AbortError" || trackMapLoadSeqRef.current !== requestId) return;
         console.error(err);
         setError(err.message);
       }
     }
 
     loadTrackMap();
-
-    return () => {
-      abortController.abort();
-    };
   }, [apiBase, trackKey]);
 
   useEffect(() => {
     if (!sessionId) return undefined;
 
-    const requestId = lapTrailLoadSeqRef.current + 1;
-    lapTrailLoadSeqRef.current = requestId;
-    const abortController = new AbortController();
     let cancelled = false;
     let loadingSavedLapTrails = false;
     setHistoryLoading(true);
 
-    function isCurrentRequest() {
-      return !cancelled && lapTrailLoadSeqRef.current === requestId;
-    }
-
     function applyTrails(trails) {
-      if (!isCurrentRequest()) return;
-
       setCompletedLapTrails(trails);
 
       if (trails.length > 0) {
@@ -698,7 +672,7 @@ export default function TrackTelemetryMap({
     }
 
     async function loadSavedLapTrails() {
-      if (loadingSavedLapTrails || !isCurrentRequest()) return;
+      if (loadingSavedLapTrails) return;
       loadingSavedLapTrails = true;
 
       try {
@@ -708,8 +682,7 @@ export default function TrackTelemetryMap({
         if (apiBase) {
           try {
             const res = await fetch(
-              `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`,
-              { signal: abortController.signal }
+              `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`
             );
 
             if (!res.ok) {
@@ -717,10 +690,8 @@ export default function TrackTelemetryMap({
             }
 
             const data = await res.json();
-            if (!isCurrentRequest()) return;
             trails = normalizeLapTrailsFromApi(data.lapTrails);
           } catch (err) {
-            if (err?.name === "AbortError" || !isCurrentRequest()) return;
             apiError = err;
             console.warn("Backend lap trail load failed, using Firestore fallback:", err);
           }
@@ -730,7 +701,7 @@ export default function TrackTelemetryMap({
           trails = await loadLapTrailsFromFirestore(sessionId, 400);
         }
 
-        if (!isCurrentRequest()) return;
+        if (cancelled) return;
 
         applyTrails(trails);
         setHistoryLoading(false);
@@ -740,7 +711,7 @@ export default function TrackTelemetryMap({
           console.warn("No Firestore lap trails found after backend failure:", apiError);
         }
       } catch (err) {
-        if (err?.name === "AbortError" || !isCurrentRequest()) return;
+        if (cancelled) return;
 
         console.error("Lap trail history load error:", err);
         setHistoryLoading(false);
@@ -755,39 +726,22 @@ export default function TrackTelemetryMap({
 
     return () => {
       cancelled = true;
-      abortController.abort();
       clearInterval(interval);
     };
   }, [apiBase, sessionId]);
 
   useEffect(() => {
-    if (!apiBase || !sessionId) return undefined;
-
-    const requestId = livePositionLoadSeqRef.current + 1;
-    livePositionLoadSeqRef.current = requestId;
-    const abortController = new AbortController();
-    let cancelled = false;
-    let liveFetchInFlight = false;
-
-    function isCurrentRequest() {
-      return !cancelled && livePositionLoadSeqRef.current === requestId;
-    }
-
     async function fetchLivePosition() {
-      if (liveFetchInFlight || !isCurrentRequest()) return;
-      liveFetchInFlight = true;
-
       try {
-        const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map`, {
-          signal: abortController.signal,
-        });
+        if (!apiBase || !sessionId) return;
+
+        const res = await fetch(`${apiBase}/sessions/${sessionId}/track-map`);
 
         if (!res.ok) {
           throw new Error("Failed to load live session map data.");
         }
 
         const data = await res.json();
-        if (!isCurrentRequest()) return;
         setSessionMap(data);
 
         const latest = data.latestMapPosition;
@@ -821,22 +775,15 @@ export default function TrackTelemetryMap({
           appendToCurrentLapTrail(latest);
         }
       } catch (err) {
-        if (err?.name === "AbortError" || !isCurrentRequest()) return;
         console.error(err);
         setError(err.message);
-      } finally {
-        liveFetchInFlight = false;
       }
     }
 
     fetchLivePosition();
-    const interval = setInterval(fetchLivePosition, 250);
+    const interval = setInterval(fetchLivePosition, 200);
 
-    return () => {
-      cancelled = true;
-      abortController.abort();
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [apiBase, sessionId]);
 
   const imageUrl = trackMap?.imageCalibration?.imageUrl || mapImageUrl;
