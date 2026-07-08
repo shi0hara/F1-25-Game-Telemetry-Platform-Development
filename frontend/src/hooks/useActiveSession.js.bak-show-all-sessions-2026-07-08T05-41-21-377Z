@@ -206,8 +206,7 @@ export default function useActiveSession(username) {
         const activeDocs = docs.filter(isActiveSession);
         const bestSession = pickBestSession(activeDocs);
 
-        // Show full session history in the picker, but only auto-select active sessions.
-        setSessions(docs);
+        setSessions(activeDocs);
         setSessionId(bestSession?.id || null);
         setSessionData(bestSession || null);
       },
