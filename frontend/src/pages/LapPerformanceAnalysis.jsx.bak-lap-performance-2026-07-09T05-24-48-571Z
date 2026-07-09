@@ -10,7 +10,6 @@ import {
   Legend,
 } from "chart.js";
 import { Line } from "react-chartjs-2";
-import PostLapTelemetryMap from "../components/PostLapTelemetryMap";
 
 ChartJS.register(
   CategoryScale,
@@ -189,124 +188,7 @@ function graphScaledValue(metric, sample) {
   return Math.max(0, Math.min(100, (value / metric.max) * 100));
 }
 
-function buildSectorBoundaries(traces, lap) {
-  const sectors = traces
-    .map((sample) => Number(sample.sector))
-    .filter(Number.isFinite);
-  const zeroBased = sectors.includes(0);
-  const boundaries = [];
-  let previousSector = null;
-
-  traces.forEach((sample, index) => {
-    const sector = Number(sample.sector);
-    if (!Number.isFinite(sector)) return;
-
-    if (previousSector !== null && sector !== previousSector) {
-      const sectorNumber = zeroBased ? sector + 1 : sector;
-      if (sectorNumber >= 2 && sectorNumber <= 3) {
-        boundaries.push({
-          index,
-          label: "S" + sectorNumber,
-          color: sectorNumber === 2 ? "#facc15" : "#fb7185",
-          approximate: false,
-        });
-      }
-    }
-    previousSector = sector;
-  });
-
-  if (boundaries.length >= 2 || traces.length < 3) {
-    return boundaries.slice(0, 2);
-  }
-
-  const lapTime = Number(lap?.lapTimeMs);
-  const sector1 = Number(lap?.sector1Ms);
-  const sector2 = Number(lap?.sector2Ms);
-  if (
-    !Number.isFinite(lapTime) ||
-    lapTime <= 0 ||
-    !Number.isFinite(sector1) ||
-    !Number.isFinite(sector2)
-  ) {
-    return boundaries;
-  }
-
-  const fallback = [
-    {
-      index: Math.round((sector1 / lapTime) * (traces.length - 1)),
-      label: "S2",
-      color: "#facc15",
-      approximate: true,
-    },
-    {
-      index: Math.round(((sector1 + sector2) / lapTime) * (traces.length - 1)),
-      label: "S3",
-      color: "#fb7185",
-      approximate: true,
-    },
-  ];
-
-  return fallback.map((item) => {
-    return boundaries.find((boundary) => boundary.label === item.label) || item;
-  });
-}
-
-const telemetryGuidesPlugin = {
-  id: "telemetryGuides",
-  afterDatasetsDraw(chart, _args, options) {
-    const xScale = chart.scales.x;
-    const chartArea = chart.chartArea;
-    if (!xScale || !chartArea) return;
-    const ctx = chart.ctx;
-
-    for (const boundary of options.boundaries || []) {
-      const x = xScale.getPixelForValue(boundary.index);
-      if (!Number.isFinite(x)) continue;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.setLineDash([7, 6]);
-      ctx.moveTo(x, chartArea.top);
-      ctx.lineTo(x, chartArea.bottom);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = boundary.color;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = boundary.color;
-      ctx.font = "700 12px Arial";
-      ctx.fillText(
-        boundary.label + (boundary.approximate ? " ~" : ""),
-        x + 5,
-        chartArea.top + 15
-      );
-      ctx.restore();
-    }
-
-    if (Number.isInteger(options.activeIndex)) {
-      const x = xScale.getPixelForValue(options.activeIndex);
-      if (Number.isFinite(x)) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x, chartArea.top);
-        ctx.lineTo(x, chartArea.bottom);
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "rgba(255,255,255,0.8)";
-        ctx.stroke();
-        ctx.restore();
-      }
-    }
-  },
-};
-
-function CombinedTelemetryGraph({
-  labels,
-  traces,
-  visibleMetrics,
-  onToggle,
-  activeIndex,
-  onHoverIndex,
-  sectorBoundaries,
-}) {
+function CombinedTelemetryGraph({ labels, traces, visibleMetrics, onToggle }) {
   const chartData = useMemo(
     () => ({
       labels,
@@ -334,12 +216,6 @@ function CombinedTelemetryGraph({
       interaction: {
         intersect: false,
         mode: "index",
-      },
-      onHover: (event, _elements, chart) => {
-        const index = Math.round(chart.scales.x.getValueForPixel(event.x));
-        if (Number.isFinite(index)) {
-          onHoverIndex(Math.max(0, Math.min(traces.length - 1, index)));
-        }
       },
       scales: {
         x: {
@@ -382,13 +258,9 @@ function CombinedTelemetryGraph({
             },
           },
         },
-        telemetryGuides: {
-          activeIndex,
-          boundaries: sectorBoundaries,
-        },
       },
     }),
-    [activeIndex, onHoverIndex, sectorBoundaries, traces]
+    [traces]
   );
 
   const chartMinWidth = Math.max(1080, labels.length * 5);
@@ -447,13 +319,9 @@ function CombinedTelemetryGraph({
         </div>
       </div>
 
-      <div style={{ overflowX: "auto" }} onMouseLeave={() => onHoverIndex(null)}>
+      <div style={{ overflowX: "auto" }}>
         <div style={{ minWidth: chartMinWidth, height: 430 }}>
-          <Line
-            data={chartData}
-            options={options}
-            plugins={[telemetryGuidesPlugin]}
-          />
+          <Line data={chartData} options={options} />
         </div>
       </div>
     </div>
@@ -465,7 +333,6 @@ export default function LapPerformanceAnalysis() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [hoveredSampleIndex, setHoveredSampleIndex] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -541,10 +408,6 @@ export default function LapPerformanceAnalysis() {
   const deltas = data?.deltas || {};
   const personalBest = data?.personalBest || null;
   const sectorDeltas = deltas.sectors || {};
-  const sectorBoundaries = useMemo(
-    () => buildSectorBoundaries(traces, lap),
-    [lap.lapTimeMs, lap.sector1Ms, lap.sector2Ms, traces]
-  );
 
   return (
     <div className="page-container">
@@ -586,129 +449,6 @@ export default function LapPerformanceAnalysis() {
 
       {!loading && !error && data && (
         <>
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <h2>
-                  {session.trackName || "Unknown Track"} | Lap {lap.lapNumber ?? "-"}
-                </h2>
-                <p style={{ color: "#94a3b8", marginTop: 4 }}>
-                  {session.username || "Unknown Driver"} | {formatDateTime(lap.recordedAt || session.startedAt)}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                disabled
-                style={{
-                  padding: "9px 13px",
-                  borderRadius: 8,
-                  border: stats.drs?.used
-                    ? "1px solid var(--color-accent-green)"
-                    : "1px solid rgba(255,255,255,0.16)",
-                  background: stats.drs?.used
-                    ? "rgba(34,197,94,0.16)"
-                    : "rgba(255,255,255,0.05)",
-                  color: stats.drs?.used ? "#86efac" : "#cbd5e1",
-                  cursor: "default",
-                }}
-              >
-                DRS {stats.drs?.used ? "Used" : "Not Used"}
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                gap: 10,
-                marginTop: 16,
-              }}
-            >
-              <StatBox label="Lap Time" value={formatLapTime(lap.lapTimeMs)} color="#22c55e" />
-              <StatBox
-                label="Delta to PB"
-                value={formatDelta(deltas.toPersonalBestMs)}
-                color={deltaColor(deltas.toPersonalBestMs)}
-                subvalue={
-                  personalBest
-                    ? "PB: " + formatLapTime(personalBest.lapTimeMs) + " on lap " + (personalBest.lapNumber ?? "-")
-                    : "No valid personal best found"
-                }
-              />
-              <StatBox
-                label="Validity"
-                value={lap.valid ? "Valid" : "Invalid"}
-                color={lap.valid ? "#22c55e" : "#f87171"}
-              />
-              <StatBox label="Track" value={session.trackName || "-"} subvalue={session.trackKey || ""} />
-              <StatBox
-                label="Cornering Speed"
-                value={formatNumber(stats.cornering?.averageSpeedKph, 1, " km/h")}
-                subvalue={
-                  stats.cornering?.cornerCount
-                    ? stats.cornering.cornerCount + " detected corner zones"
-                    : "Estimated from steering samples"
-                }
-              />
-              <StatBox
-                label="Braking Distance"
-                value={formatNumber(stats.braking?.longestDistanceM, 1, " m")}
-                subvalue={
-                  stats.braking?.zoneCount
-                    ? stats.braking.zoneCount + " braking zones"
-                    : "Estimated from brake trace"
-                }
-              />
-            </div>
-          </div>
-
-          <div className="card" style={{ marginBottom: 20 }}>
-            <h2>Sectors</h2>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: 10,
-                marginTop: 12,
-              }}
-            >
-              <StatBox
-                label="Sector 1"
-                value={formatLapTime(lap.sector1Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector1Ms)}
-                color={deltaColor(sectorDeltas.sector1Ms)}
-              />
-              <StatBox
-                label="Sector 2"
-                value={formatLapTime(lap.sector2Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector2Ms)}
-                color={deltaColor(sectorDeltas.sector2Ms)}
-              />
-              <StatBox
-                label="Sector 3"
-                value={formatLapTime(lap.sector3Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector3Ms)}
-                color={deltaColor(sectorDeltas.sector3Ms)}
-              />
-            </div>
-          </div>
-
-          <PostLapTelemetryMap
-            apiBase={API_BASE}
-            trackKey={session.trackKey}
-            traces={traces}
-            activeIndex={hoveredSampleIndex}
-            sectorBoundaries={sectorBoundaries}
-          />
 
           {traces.length === 0 ? (
             <div className="card">
@@ -723,9 +463,6 @@ export default function LapPerformanceAnalysis() {
               traces={traces}
               visibleMetrics={visibleMetrics}
               onToggle={toggleMetric}
-              activeIndex={hoveredSampleIndex}
-              onHoverIndex={setHoveredSampleIndex}
-              sectorBoundaries={sectorBoundaries}
             />
           )}
         </>
