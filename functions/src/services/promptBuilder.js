@@ -34,13 +34,15 @@ export function buildPrompt(teamKey, teamColours) {
     teamKey.charAt(0).toUpperCase() + teamKey.slice(1);
 
   const prompt = [
-    `Generate a photorealistic F1 racing suit styled to the ${teamLabel} team on the person in this photo.`,
-    `Use the team colour scheme: primary colour ${teamColours.primary}, secondary colour ${teamColours.secondary}, accent colour ${teamColours.accent}.`,
-    `Keep the person's face, head, and hair completely unchanged and unmodified.`,
-    `Replace only the clothing on the torso and arms with the team racing suit.`,
-    `Apply a soft gaussian blur to the entire background behind the person, creating a professional portrait-style depth of field effect.`,
-    `Use the additional reference images provided to match the exact style, design, and sponsor placement of the real ${teamLabel} racing suit.`,
-    `Include team branding elements: sponsor logos area, team branding zones, and stitching lines matching the ${teamLabel} colour scheme.`,
+    `Edit this photo to create an official F1 driver portrait of the person wearing a ${teamLabel} racing suit.`,
+    `MOST CRITICAL INSTRUCTION: The person's FACE in the output MUST be identical to the face in the input photo (the user's photo). Do NOT use any face from the other reference images. The other reference images are ONLY for the suit design. If a reference image shows a different person, IGNORE their face entirely and ONLY copy the suit pattern from it.`,
+    `Preserve the user's exact face, head, hair, skin tone, facial features, and expression from the first reference image.`,
+    `POSE: Repose the person to face directly forward, looking straight at the camera, with arms relaxed at their sides. Frame as a chest-up portrait — crop at mid-chest level. Leave at least 15% empty space above the top of the head. The person's eyes should be positioned at approximately the vertical centre of the image. Ensure the ENTIRE head including all hair is fully visible within the frame.`,
+    `SUIT COLOURS: Match the suit colours and colour distribution EXACTLY as shown in the suit reference images. Do NOT invent new colour placements or add colours not visible in the references.`,
+    `The team colours are: ${teamColours.primary}, ${teamColours.secondary}, and ${teamColours.accent} — but use the reference images to determine exactly where each colour appears and how much of the suit each colour covers.`,
+    `Replace ONLY the clothing with the team racing suit.`,
+    `BACKGROUND: Keep the original background from the input photo but apply a strong Gaussian blur so it appears heavily out-of-focus. Remove any other people or figures visible in the background, filling those areas seamlessly with the surrounding blurred environment. The subject should be the only person in the final image.`,
+    `Copy the exact sponsor logo placements and branding layout from the suit reference images.`,
   ].join(" ");
 
   return prompt;
