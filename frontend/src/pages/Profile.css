@@ -354,3 +354,33 @@
 .edit-profile-header h1 {
   margin: 0;
 }
+
+.profile-user-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.profile-user-avatar {
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid color-mix(in srgb, var(--profile-team-primary) 50%, #ffffff 50%);
+  flex-shrink: 0;
+}
+
+.profile-user-info h2 {
+  margin: 0 0 8px;
+}
+
+.profile-user-info p {
+  margin: 4px 0;
+}
+
+@media (max-width: 500px) {
+  .profile-user-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -222,19 +222,23 @@ export default function Profile({ username }) {
 
       <div className="grid-2">
         <div className="card">
-          <h2>{username}</h2>
-          {profilePhoto && (
-            <img src={profilePhoto} alt="Profile" className="profile-photo" style={{ maxWidth: 180, marginBottom: 12 }} />
-          )}
-          <p>
-            Status: <span className="text-green">Active</span>
-          </p>
-          <p>Academy: Republic Poly Sim Racing</p>
+          <div className="profile-user-header">
+            {profilePhoto && (
+              <img src={profilePhoto} alt="Profile" className="profile-user-avatar" />
+            )}
+            <div className="profile-user-info">
+              <h2>{username}</h2>
+              <p>
+                Status: <span className="text-green">Active</span>
+              </p>
+              <p>Academy: Republic Poly Sim Racing</p>
+            </div>
+          </div>
           <button
             type="button"
             className="btn-primary"
             onClick={() => navigate("/edit-profile")}
-            style={{ marginTop: 12 }}
+            style={{ marginTop: 16 }}
           >
             Edit Profile
           </button>
