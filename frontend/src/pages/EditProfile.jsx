@@ -185,6 +185,7 @@ export default function EditProfile({ username }) {
   const [favoriteTeam, setFavoriteTeam] = useState("ferrari");
   const [profilePhoto, setProfilePhoto] = useState("");
   const [aiProfilePhoto, setAiProfilePhoto] = useState("");
+  const [displayPhoto, setDisplayPhoto] = useState("original");
   const [cameraError, setCameraError] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -261,10 +262,12 @@ export default function EditProfile({ username }) {
         const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
         const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
         const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
+        const resolvedDisplayPhoto = nextResolvedUser.displayPhoto || localProfile?.displayPhoto || "original";
 
         setFavoriteTeam(resolvedTeam);
         setProfilePhoto(resolvedPhoto);
         setAiProfilePhoto(resolvedAiPhoto);
+        setDisplayPhoto(resolvedDisplayPhoto);
       } catch (err) {
         console.error("User resolve error:", err);
         setError(err.message || "Failed to resolve user.");
@@ -290,6 +293,7 @@ export default function EditProfile({ username }) {
         favoriteTeam: nextPayload.favoriteTeam,
         profilePhoto: downscaledPhoto,
         aiProfilePhoto: downscaledAiPhoto,
+        displayPhoto: nextPayload.displayPhoto,
       };
 
       try {
@@ -308,6 +312,7 @@ export default function EditProfile({ username }) {
         favoriteTeam: nextPayload.favoriteTeam,
         profilePhoto: nextPayload.profilePhoto,
         aiProfilePhoto: nextPayload.aiProfilePhoto,
+        displayPhoto: nextPayload.displayPhoto,
       };
       saveLocalProfile(username, fallbackPayload);
       setError("Saved locally. Cloud sync failed.");
@@ -368,6 +373,7 @@ export default function EditProfile({ username }) {
         favoriteTeam,
         profilePhoto: imageDataUrl,
         aiProfilePhoto,
+        displayPhoto,
       });
     } catch (err) {
       console.error("Failed to process profile image:", err);
@@ -378,10 +384,12 @@ export default function EditProfile({ username }) {
   async function removeProfilePhoto() {
     setProfilePhoto("");
     setAiProfilePhoto("");
+    setDisplayPhoto("original");
     await persistProfile({
       favoriteTeam,
       profilePhoto: "",
       aiProfilePhoto: "",
+      displayPhoto: "original",
     });
   }
 
@@ -403,6 +411,7 @@ export default function EditProfile({ username }) {
         favoriteTeam,
         profilePhoto,
         aiProfilePhoto: finalAiImage,
+        displayPhoto,
       });
     } catch (err) {
       console.error("Failed to generate AI racing suit:", err);
@@ -452,10 +461,46 @@ export default function EditProfile({ username }) {
     setFavoriteTeam(nextTeam);
     setAskTeamAfterPhoto(false);
 
+    const nextTheme = TEAM_THEMES[nextTeam] || getDefaultTheme();
+    let nextAiPhoto = aiProfilePhoto;
+
+    // Regenerate AI suit if a profile photo exists
+    if (profilePhoto) {
+      try {
+        const aiImage = await aiSuit.generate(profilePhoto, nextTeam, {
+          primary: nextTheme.primary,
+          secondary: nextTheme.secondary,
+          accent: nextTheme.accent,
+        });
+
+        nextAiPhoto = aiImage || await buildAiOutfitImage(profilePhoto, nextTeam);
+        setAiProfilePhoto(nextAiPhoto);
+      } catch {
+        // Fall back to local canvas generation
+        try {
+          nextAiPhoto = await buildAiOutfitImage(profilePhoto, nextTeam);
+          setAiProfilePhoto(nextAiPhoto);
+        } catch {
+          // Keep previous AI photo if generation fails entirely
+        }
+      }
+    }
+
     await persistProfile({
       favoriteTeam: nextTeam,
       profilePhoto,
+      aiProfilePhoto: nextAiPhoto,
+      displayPhoto,
+    });
+  }
+
+  async function handleSetDisplayPhoto(choice) {
+    setDisplayPhoto(choice);
+    await persistProfile({
+      favoriteTeam,
+      profilePhoto,
       aiProfilePhoto,
+      displayPhoto: choice,
     });
   }
 
@@ -496,9 +541,19 @@ export default function EditProfile({ username }) {
           <div className="profile-photo-slot">
             <h3>Original</h3>
             {hasProfilePhoto ? (
-              <img src={profilePhoto} alt="Original profile" className="profile-photo" />
+              <img src={profilePhoto} alt="Original profile" className={`profile-photo${displayPhoto === "original" ? " photo-active" : ""}`} />
             ) : (
               <div className="profile-placeholder">No profile image yet.</div>
+            )}
+            {hasProfilePhoto && (
+              <button
+                type="button"
+                className={`btn-secondary btn-set-display${displayPhoto === "original" ? " active" : ""}`}
+                onClick={() => handleSetDisplayPhoto("original")}
+                disabled={displayPhoto === "original"}
+              >
+                {displayPhoto === "original" ? "✓ Active Profile Photo" : "Set as Profile Photo"}
+              </button>
             )}
           </div>
 
@@ -514,7 +569,7 @@ export default function EditProfile({ username }) {
               <img
                 src={aiProfilePhoto}
                 alt="AI-styled racing suit profile"
-                className="profile-photo"
+                className={`profile-photo${displayPhoto === "ai" ? " photo-active" : ""}`}
               />
             ) : !aiSuit.isGenerating ? (
               <div className="profile-placeholder">
@@ -523,6 +578,16 @@ export default function EditProfile({ username }) {
                   : "Upload or capture a photo first."}
               </div>
             ) : null}
+            {aiProfilePhoto && !aiSuit.isGenerating && (
+              <button
+                type="button"
+                className={`btn-secondary btn-set-display${displayPhoto === "ai" ? " active" : ""}`}
+                onClick={() => handleSetDisplayPhoto("ai")}
+                disabled={displayPhoto === "ai"}
+              >
+                {displayPhoto === "ai" ? "✓ Active Profile Photo" : "Set as Profile Photo"}
+              </button>
+            )}
           </div>
         </div>
 
@@ -551,7 +616,7 @@ export default function EditProfile({ username }) {
           </div>
         )}
 
-        <div ref={cameraSectionRef}>
+        <div ref={cameraSectionRef} className="camera-section">
           {cameraActive ? (
             <div className="camera-panel">
               <div className="camera-frame-wrap">

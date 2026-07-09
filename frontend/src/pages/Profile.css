@@ -83,7 +83,7 @@
 }
 
 .camera-panel {
-  margin-top: 16px;
+  margin-top: 10px;
   display: grid;
   gap: 12px;
 }
@@ -154,6 +154,10 @@
   flex: 1 1 0;
 }
 
+.camera-controls .btn-secondary {
+  flex: 1 1 0;
+}
+
 .camera-controls + .camera-controls {
   margin-top: 10px;
 }
@@ -162,11 +166,14 @@
   background: transparent;
   color: var(--profile-team-accent);
   border: 1px solid color-mix(in srgb, var(--profile-team-accent) 45%, #ffffff 55%);
-  border-radius: 6px;
+  border-radius: 4px;
   padding: 10px 14px;
   cursor: pointer;
   font-weight: 700;
+  font-style: normal;
+  font-size: inherit;
   text-transform: uppercase;
+  text-align: center;
 }
 
 .btn-secondary:hover {
@@ -177,6 +184,8 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .upload-trigger input {
@@ -383,4 +392,27 @@
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+.profile-photo.photo-active {
+  border-color: var(--color-accent-green, #4ade80);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-green, #4ade80) 30%, transparent 70%);
+}
+
+.btn-set-display {
+  margin-top: 10px;
+  width: 100%;
+  text-align: center;
+  padding: 8px 10px;
+}
+
+.btn-set-display.active {
+  color: var(--color-accent-green, #4ade80);
+  border-color: var(--color-accent-green, #4ade80);
+  opacity: 0.8;
+  cursor: default;
+}
+
+.camera-section {
+  margin-top: 10px;
 }

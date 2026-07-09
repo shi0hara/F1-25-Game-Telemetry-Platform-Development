@@ -126,6 +126,7 @@ export default function Profile({ username }) {
   const [selectedSession, setSelectedSession] = useState(null);
   const [favoriteTeam, setFavoriteTeam] = useState("ferrari");
   const [profilePhoto, setProfilePhoto] = useState("");
+  const [displayPhoto, setDisplayPhoto] = useState("original");
 
   const activeTeamTheme = useMemo(() => {
     return TEAM_THEMES[favoriteTeam] || getDefaultTheme();
@@ -160,12 +161,23 @@ export default function Profile({ username }) {
         const localProfile = loadLocalProfile(username);
         const teamFromDb = nextResolvedUser.favoriteTeam || nextResolvedUser.favouriteTeam;
         const photoFromDb = nextResolvedUser.profilePhoto || nextResolvedUser.profileImageOriginal;
+        const aiPhotoFromDb = nextResolvedUser.aiProfilePhoto || nextResolvedUser.profileImageAi;
+        const displayPhotoFromDb = nextResolvedUser.displayPhoto;
 
         const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
         const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
+        const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
+        const resolvedDisplayPhoto = displayPhotoFromDb || localProfile?.displayPhoto || "original";
 
         setFavoriteTeam(resolvedTeam);
-        setProfilePhoto(resolvedPhoto);
+
+        // Set the profile photo based on display preference
+        if (resolvedDisplayPhoto === "ai" && resolvedAiPhoto) {
+          setProfilePhoto(resolvedAiPhoto);
+        } else {
+          setProfilePhoto(resolvedPhoto);
+        }
+        setDisplayPhoto(resolvedDisplayPhoto);
       } catch (err) {
         console.error("User resolve error:", err);
         setError(err.message || "Failed to resolve user.");

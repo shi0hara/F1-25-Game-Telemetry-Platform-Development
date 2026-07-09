@@ -51,7 +51,7 @@ input:focus { border-color: var(--color-primary); }
   padding: 10px 20px;
   text-transform: uppercase;
   font-weight: bold;
-  font-style: italic;
+  font-style: normal;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
   border-radius: 4px;
