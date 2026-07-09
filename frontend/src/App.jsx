@@ -8,6 +8,7 @@ import LiveTelemetry from "./pages/LiveTelemetry";
 import Leaderboard from "./pages/Leaderboard";
 import LapPerformanceAnalysis from "./pages/LapPerformanceAnalysis";
 import Profile from "./pages/Profile";
+import EditProfile from "./pages/EditProfile";
 import Login from "./pages/Login";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
@@ -148,6 +149,14 @@ export default function App() {
               element={
                 <ProtectedRoute user={user}>
                   <Profile username={username} sessionId={sessionId} />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/edit-profile"
+              element={
+                <ProtectedRoute user={user}>
+                  <EditProfile username={username} />
                 </ProtectedRoute>
               }
             />

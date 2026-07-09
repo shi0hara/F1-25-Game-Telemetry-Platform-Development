@@ -149,6 +149,15 @@
   flex-wrap: wrap;
 }
 
+.camera-controls .btn-primary {
+  width: auto;
+  flex: 1 1 0;
+}
+
+.camera-controls + .camera-controls {
+  margin-top: 10px;
+}
+
 .btn-secondary {
   background: transparent;
   color: var(--profile-team-accent);
@@ -322,4 +331,26 @@
 
 .btn-text:hover {
   color: rgba(255, 255, 255, 0.8);
+}
+
+.btn-danger {
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.5);
+}
+
+.btn-danger:hover {
+  background: rgba(220, 38, 38, 0.15);
+}
+
+.edit-profile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.edit-profile-header h1 {
+  margin: 0;
 }
