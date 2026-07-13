@@ -17,20 +17,25 @@
 }
 
 .admin-users-link {
-  border-radius: 6px;
-  background: #2563eb;
+  border: 1px solid rgba(225, 6, 0, 0.5);
+  border-radius: 8px;
+  background: rgba(225, 6, 0, 0.2);
   color: #fff;
   padding: 10px 14px;
   text-decoration: none;
   white-space: nowrap;
 }
 
+.admin-users-link:hover {
+  background: rgba(225, 6, 0, 0.34);
+}
+
 .admin-users-message {
   margin: 0;
-  border: 1px solid rgba(147, 197, 253, 0.35);
+  border: 1px solid rgba(225, 6, 0, 0.4);
   border-radius: 6px;
-  background: rgba(37, 99, 235, 0.12);
-  color: #bfdbfe;
+  background: rgba(225, 6, 0, 0.12);
+  color: #ffc8c5;
   padding: 10px 12px;
 }
 
@@ -76,8 +81,8 @@
   gap: 3px;
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: #111;
+  border-radius: 8px;
+  background: #0f1422;
   color: #fff;
   cursor: pointer;
   padding: 10px;
@@ -85,8 +90,8 @@
 }
 
 .admin-user-row.active {
-  border-color: #60a5fa;
-  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(225, 6, 0, 0.65);
+  background: rgba(225, 6, 0, 0.18);
 }
 
 .admin-user-row span,
@@ -109,8 +114,8 @@
 .admin-account-editor select {
   min-height: 40px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  background: #111;
+  border-radius: 8px;
+  background: #0f1422;
   color: #fff;
   padding: 0 10px;
 }
@@ -125,11 +130,17 @@
 .admin-editor-actions button,
 .admin-session-row button {
   border: 0;
-  border-radius: 6px;
-  background: #374151;
+  border-radius: 8px;
+  background: #1d2436;
   color: #fff;
   cursor: pointer;
   padding: 9px 12px;
+}
+
+.admin-section-title button:hover,
+.admin-editor-actions button:hover,
+.admin-session-row button:hover {
+  background: #2a334a;
 }
 
 .admin-section-title button:disabled,
@@ -141,7 +152,7 @@
 
 .admin-section-title .danger,
 .admin-session-row .danger {
-  background: #991b1b;
+  background: #8e0d0b;
 }
 
 .admin-session-row {
@@ -150,8 +161,8 @@
   gap: 12px;
   align-items: center;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: #111;
+  border-radius: 8px;
+  background: #0f1422;
   padding: 12px;
 }
 

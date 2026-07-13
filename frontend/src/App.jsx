@@ -92,7 +92,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <div className="app-shell">
         <Navbar
           username={username}
           isAdmin={isAdminUser(user)}
@@ -101,18 +101,18 @@ export default function App() {
         />
 
         {user && sessionLoading && (
-          <div style={{ textAlign: "center", padding: "8px", background: "#1a1a2e", color: "#aaa" }}>
+          <div className="session-banner loading">
             Loading session...
           </div>
         )}
 
         {user && sessionError && (
-          <div style={{ textAlign: "center", padding: "8px", background: "#2a1a1a", color: "#f87171" }}>
+          <div className="session-banner error">
             Session error: {sessionError}
           </div>
         )}
 
-        <main style={{ flex: 1 }}>
+        <main className="app-main">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route

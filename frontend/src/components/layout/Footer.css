@@ -1,8 +1,10 @@
 .footer {
-  background-color: var(--color-bg-grey);
-  border-top: 4px solid var(--color-primary);
+  background:
+    linear-gradient(105deg, rgba(10, 14, 23, 0.96) 0%, rgba(15, 21, 34, 0.96) 72%, rgba(25, 35, 55, 0.96) 100%),
+    linear-gradient(180deg, rgba(225, 6, 0, 0.14), transparent 42%);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
   margin-top: 60px;
-  padding-top: 40px;
+  padding-top: 34px;
   color: var(--color-text-white);
   font-family: var(--font-family);
 }
@@ -20,16 +22,24 @@
 .footer-section h2, .footer-section h3 {
   margin-top: 0;
   margin-bottom: 15px;
+  font-family: var(--font-family-display);
+  letter-spacing: 0.05em;
 }
 
 .brand-section {
   max-width: 400px;
 }
 
+.brand-section h2 {
+  font-size: 2rem;
+  font-weight: 600;
+}
+
 .slogan {
   color: var(--color-text-muted);
-  font-style: italic;
-  line-height: 1.5;
+  font-style: normal;
+  line-height: 1.45;
+  font-size: 1.08rem;
 }
 
 .links-section {
@@ -45,21 +55,37 @@
 
 .footer-link {
   color: var(--color-text-muted);
-  transition: color 0.2s, transform 0.2s;
-  font-size: 14px;
+  transition: color 0.2s, transform 0.2s, text-shadow 0.2s;
+  font-size: 1rem;
   text-transform: uppercase;
-  font-weight: bold;
+  font-family: var(--font-family-display);
+  letter-spacing: 0.04em;
+  font-weight: 500;
 }
 
 .footer-link:hover {
-  color: var(--color-primary);
+  color: #ffffff;
+  text-shadow: 0 0 12px rgba(225, 6, 0, 0.55);
   transform: translateX(3px);
 }
 
 .footer-bottom {
-  background-color: var(--color-bg-dark);
+  background-color: rgba(8, 12, 20, 0.85);
   text-align: center;
   padding: 15px;
-  font-size: 12px;
+  font-size: 0.95rem;
   color: var(--color-text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 820px) {
+  .footer-content {
+    padding: 0 16px 24px;
+    gap: 26px;
+  }
+
+  .footer-links {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 }
