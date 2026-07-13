@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -27,60 +25,9 @@ function formatPercent(value) {
   return Math.round(value * 100) + "%";
 }
 
-function useSmoothedValue(targetValue, responseMs = 85) {
-  const [displayedValue, setDisplayedValue] = useState(targetValue);
-  const displayedRef = useRef(targetValue);
-  const targetRef = useRef(targetValue);
-  const frameRef = useRef(null);
-
-  useEffect(() => {
-    targetRef.current = targetValue;
-
-    if (frameRef.current !== null) return;
-
-    let previousTime = window.performance.now();
-
-    function tick(frameTime) {
-      const dt = Math.min(50, Math.max(0, frameTime - previousTime));
-      previousTime = frameTime;
-
-      const current = displayedRef.current;
-      const target = targetRef.current;
-      const response = 1 - Math.pow(0.001, dt / responseMs);
-      let next = current + (target - current) * response;
-
-      if (Math.abs(target - next) < 0.0008) {
-        next = target;
-      }
-
-      displayedRef.current = next;
-      setDisplayedValue(next);
-
-      if (Math.abs(targetRef.current - next) > 0.0008) {
-        frameRef.current = window.requestAnimationFrame(tick);
-      } else {
-        frameRef.current = null;
-      }
-    }
-
-    frameRef.current = window.requestAnimationFrame(tick);
-  }, [responseMs, targetValue]);
-
-  useEffect(() => {
-    return () => {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-      }
-    };
-  }, []);
-
-  return displayedValue;
-}
-
 function PedalBar({ label, value, color }) {
-  const targetValue = readControlValue(value) ?? 0;
-  const displayedValue = useSmoothedValue(targetValue, 95);
-  const percent = clamp(displayedValue, 0, 1) * 100;
+  const controlValue = readControlValue(value);
+  const percent = (controlValue ?? 0) * 100;
 
   return (
     <div
@@ -109,8 +56,10 @@ function PedalBar({ label, value, color }) {
             right: 0,
             bottom: 0,
             height: percent + "%",
+            minHeight: percent > 0 ? 3 : 0,
             background: color,
-            boxShadow: "0 0 16px " + color,
+            boxShadow: percent > 0 ? "0 0 16px " + color : "none",
+            transition: "height 40ms linear",
           }}
         />
       </div>
@@ -118,7 +67,7 @@ function PedalBar({ label, value, color }) {
         {label}
       </div>
       <div style={{ color: "#e5e7eb", fontSize: 11 }}>
-        {formatPercent(readControlValue(value))}
+        {formatPercent(controlValue)}
       </div>
     </div>
   );
@@ -133,16 +82,15 @@ export default function SteeringWheel({
   maxRotationDeg = 220,
 }) {
   const value = readSteeringValue(steering);
-  const targetValue = value ?? 0;
-  const displayedValue = useSmoothedValue(targetValue, 75);
-  const rotation = displayedValue * maxRotationDeg;
-  const absValue = Math.abs(displayedValue);
+  const safeValue = value ?? 0;
+  const rotation = safeValue * maxRotationDeg;
+  const absValue = Math.abs(safeValue);
   const turnLabel =
     value === null
       ? "No data"
       : absValue < 0.035
         ? "Straight"
-        : displayedValue < 0
+        : safeValue < 0
           ? "Left"
           : "Right";
   const turnPercent = value === null ? "-" : Math.round(absValue * 100) + "%";
@@ -151,7 +99,7 @@ export default function SteeringWheel({
       ? "#64748b"
       : absValue < 0.035
         ? "#22c55e"
-        : displayedValue < 0
+        : safeValue < 0
           ? "#38bdf8"
           : "#facc15";
 
@@ -212,6 +160,7 @@ export default function SteeringWheel({
               height: "92%",
               transform: "rotate(" + rotation + "deg)",
               transformOrigin: "50% 50%",
+              transition: "transform 35ms linear",
               willChange: "transform",
             }}
           >
@@ -295,13 +244,13 @@ export default function SteeringWheel({
             style={{
               position: "absolute",
               bottom: -9,
-              left: displayedValue < 0 ? 18 : "auto",
-              right: displayedValue >= 0 ? 18 : "auto",
+              left: safeValue < 0 ? 18 : "auto",
+              right: safeValue >= 0 ? 18 : "auto",
               color: accent,
               fontSize: 28,
               lineHeight: 1,
               opacity: value === null || absValue < 0.035 ? 0.16 : 0.95,
-              transform: displayedValue < 0 ? "rotate(180deg)" : "none",
+              transform: safeValue < 0 ? "rotate(180deg)" : "none",
             }}
           >
             &#8250;
