@@ -11,6 +11,7 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import PostLapTelemetryMap from "../components/PostLapTelemetryMap";
+import SteeringWheel from "../components/SteeringWheel";
 
 ChartJS.register(
   CategoryScale,
@@ -598,19 +599,37 @@ function ReplayControls({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))",
-          gap: 8,
-          marginTop: 12,
-          color: "#cbd5e1",
-          fontSize: 13,
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 16,
+          marginTop: 14,
+          alignItems: "center",
         }}
       >
-        <div>Sample: <strong>{formatNumber(activeSample?.index, 1, "")}</strong></div>
-        <div>Distance: <strong>{formatNumber(activeSample?.distanceM, 1, " m")}</strong></div>
-        <div>Speed: <strong>{formatNumber(activeSample?.speedKph, 1, " km/h")}</strong></div>
-        <div>Gear: <strong>{activeSample?.gear ?? "-"}</strong></div>
-        <div>Brake: <strong>{formatNumber(activeSample?.brakePct, 0, "%")}</strong></div>
-        <div>Throttle: <strong>{formatNumber(activeSample?.throttlePct, 0, "%")}</strong></div>
+        <SteeringWheel
+          steering={activeSample?.steering}
+          throttle={activeSample?.throttlePct}
+          brake={activeSample?.brakePct}
+          label="Replay Steering"
+          size={152}
+          maxRotationDeg={240}
+        />
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))",
+            gap: 8,
+            color: "#cbd5e1",
+            fontSize: 13,
+          }}
+        >
+          <div>Sample: <strong>{formatNumber(activeSample?.index, 1, "")}</strong></div>
+          <div>Distance: <strong>{formatNumber(activeSample?.distanceM, 1, " m")}</strong></div>
+          <div>Speed: <strong>{formatNumber(activeSample?.speedKph, 1, " km/h")}</strong></div>
+          <div>Gear: <strong>{activeSample?.gear ?? "-"}</strong></div>
+          <div>Brake: <strong>{formatNumber(activeSample?.brakePct, 0, "%")}</strong></div>
+          <div>Throttle: <strong>{formatNumber(activeSample?.throttlePct, 0, "%")}</strong></div>
+        </div>
       </div>
     </div>
   );
