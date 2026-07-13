@@ -22,6 +22,7 @@ CSV_PATH = "telemetry_live.csv"
 PRINT_HEADERS = False
 HEADER_PRINT_EVERY_SEC = 0.5
 
+MOTION_PACKET_ID = 0
 SESSION_PACKET_ID = 1
 LAP_DATA_PACKET_ID = 2
 EVENT_PACKET_ID = 3
@@ -87,6 +88,19 @@ CURRENT_TOTAL_DISTANCE_M = None
 CURRENT_SECTOR = None
 CURRENT_PIT_STATUS = None
 
+# Latest world-space car position from Motion packet 0.
+# The website uses worldX/worldZ to draw the live telemetry map trail.
+CURRENT_WORLD_X = None
+CURRENT_WORLD_Y = None
+CURRENT_WORLD_Z = None
+CURRENT_YAW = None
+CURRENT_PITCH = None
+CURRENT_ROLL = None
+LAST_MOTION_PACKET_AT = None
+LAST_VALID_MOTION_AT = None
+LAST_MOTION_DEBUG_AT = 0.0
+LAST_TELEMETRY_NO_MOTION_WARN_AT = 0.0
+
 CORNER_ACTIVE = False
 CORNER_START = None
 CORNER_COUNTER = 0
@@ -141,6 +155,53 @@ def parse_int(value, fallback=None):
         return int(n)
     except Exception:
         return fallback
+
+def normalize_field_name(name):
+    return "".join(ch.lower() for ch in str(name) if ch.isalnum())
+
+def iter_field_names(obj):
+    seen = set()
+
+    for field in getattr(obj, "_fields_", []) or []:
+        name = field[0] if isinstance(field, (tuple, list)) and field else field
+        if isinstance(name, str) and name not in seen:
+            seen.add(name)
+            yield name
+
+    for name in getattr(obj, "__dict__", {}).keys():
+        if isinstance(name, str) and name not in seen:
+            seen.add(name)
+            yield name
+
+    for name in dir(obj):
+        if name.startswith("_") or name in seen:
+            continue
+        seen.add(name)
+        yield name
+
+def get_attr_loose(obj, *names, default=None):
+    exact = get_attr(obj, *names, default=None)
+    if exact is not None:
+        return exact
+
+    targets = {normalize_field_name(name) for name in names}
+    for field_name in iter_field_names(obj):
+        if normalize_field_name(field_name) in targets:
+            try:
+                return getattr(obj, field_name)
+            except Exception:
+                pass
+
+    return default
+
+def parse_number_attr(obj, names, fallback=None):
+    return parse_number(get_attr_loose(obj, *names, default=None), fallback)
+
+def summarize_field_names(obj, limit=24):
+    names = list(iter_field_names(obj))
+    if len(names) > limit:
+        return ", ".join(names[:limit]) + ", ..."
+    return ", ".join(names)
 
 def safe_enqueue(qobj, item):
     try:
@@ -255,12 +316,115 @@ def sync_session_metadata():
     except Exception as e:
         print("Session metadata sync error:", e)
 
+def get_player_car_index(header, fallback=0):
+    return int(get_attr_loose(
+        header,
+        "player_car_index",
+        "playerCarIndex",
+        "m_playerCarIndex",
+        "mPlayerCarIndex",
+        default=fallback,
+    ) or fallback)
+
+def get_motion_array(pkt):
+    return get_attr_loose(
+        pkt,
+        "car_motion_data",
+        "carMotionData",
+        "m_carMotionData",
+        "m_car_motion_data",
+        default=None,
+    )
+
+def warn_motion_decode(message, pkt=None, car=None):
+    global LAST_MOTION_DEBUG_AT
+
+    now = time.time()
+    if now - LAST_MOTION_DEBUG_AT < 8.0:
+        return
+
+    LAST_MOTION_DEBUG_AT = now
+    print("Map warning:", message)
+    if pkt is not None:
+        print("  Motion packet fields:", summarize_field_names(pkt))
+    if car is not None:
+        print("  Car motion fields:", summarize_field_names(car))
+
+def update_motion_state_from_packet(header, pkt):
+    """
+    Reads Motion packet 0 and stores the player's latest world-space position.
+    Without these fields, Firebase cannot store lap trails for the telemetry map.
+    """
+    global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z
+    global CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
+    global LAST_MOTION_PACKET_AT, LAST_VALID_MOTION_AT
+
+    LAST_MOTION_PACKET_AT = time.time()
+
+    arr = get_motion_array(pkt)
+    if arr is None or len(arr) == 0:
+        warn_motion_decode("Motion packet arrived, but no car motion array was found.", pkt=pkt)
+        return
+
+    player_idx = get_player_car_index(header)
+    if not (0 <= player_idx < len(arr)):
+        player_idx = 0
+
+    car = arr[player_idx]
+
+    world_x = parse_number_attr(car, (
+        "world_position_x",
+        "worldPositionX",
+        "m_worldPositionX",
+        "m_world_position_x",
+    ), None)
+    world_y = parse_number_attr(car, (
+        "world_position_y",
+        "worldPositionY",
+        "m_worldPositionY",
+        "m_world_position_y",
+    ), None)
+    world_z = parse_number_attr(car, (
+        "world_position_z",
+        "worldPositionZ",
+        "m_worldPositionZ",
+        "m_world_position_z",
+    ), None)
+
+    if world_x is None or world_z is None:
+        warn_motion_decode("Motion packet arrived, but world position fields could not be decoded.", pkt=pkt, car=car)
+        return
+
+    CURRENT_WORLD_X = world_x
+    CURRENT_WORLD_Y = world_y
+    CURRENT_WORLD_Z = world_z
+    CURRENT_YAW = parse_number_attr(car, ("yaw", "m_yaw", "mYaw"), None)
+    CURRENT_PITCH = parse_number_attr(car, ("pitch", "m_pitch", "mPitch"), None)
+    CURRENT_ROLL = parse_number_attr(car, ("roll", "m_roll", "mRoll"), None)
+    LAST_VALID_MOTION_AT = LAST_MOTION_PACKET_AT
+
+def warn_if_telemetry_has_no_map_position():
+    global LAST_TELEMETRY_NO_MOTION_WARN_AT
+
+    if CURRENT_WORLD_X is not None and CURRENT_WORLD_Z is not None:
+        return
+
+    now = time.time()
+    if now - LAST_TELEMETRY_NO_MOTION_WARN_AT < 10.0:
+        return
+
+    LAST_TELEMETRY_NO_MOTION_WARN_AT = now
+    if LAST_MOTION_PACKET_AT is None:
+        print("Map warning: telemetry is arriving, but no Motion packet 0 has arrived yet. Check F1 25 UDP settings.")
+    else:
+        print("Map warning: telemetry is arriving, but Motion packet 0 has not produced worldX/worldZ yet.")
+
 def extract_player_name_from_participants(header, pkt):
     arr = get_attr(pkt, "participants", "m_participants")
     if arr is None or len(arr) == 0:
         return None
 
-    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    player_idx = get_player_car_index(header)
     if not (0 <= player_idx < len(arr)):
         player_idx = 0
 
@@ -290,10 +454,10 @@ def is_fake_name(name):
     return name.startswith("Room-") or name.startswith("User-")
 
 def pick_packet_class(header):
-    fmt = int(get_attr(header, "packet_format", "m_packetFormat", default=0) or 0)
-    ver = int(get_attr(header, "packet_version", "m_packetVersion", default=0) or 0)
-    pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
-    year = int(get_attr(header, "game_year", "m_gameYear", default=0) or 0)
+    fmt = int(get_attr_loose(header, "packet_format", "packetFormat", "m_packetFormat", "mPacketFormat", default=0) or 0)
+    ver = int(get_attr_loose(header, "packet_version", "packetVersion", "m_packetVersion", "mPacketVersion", default=0) or 0)
+    pid = int(get_attr_loose(header, "packet_id", "packetId", "m_packetId", "mPacketId", default=0) or 0)
+    year = int(get_attr_loose(header, "game_year", "gameYear", "m_gameYear", "mGameYear", default=0) or 0)
 
     m = HEADER_FIELD_TO_PACKET_TYPE
 
@@ -448,7 +612,7 @@ def sniff_player_name(sock, timeout_sec=10.0):
             except Exception:
                 continue
 
-            pid = int(get_attr(header, "packet_id", "m_packetId", default=0) or 0)
+            pid = int(get_attr_loose(header, "packet_id", "packetId", "mPacketId", "m_packetId", default=0) or 0)
             if pid != PARTICIPANTS_PACKET_ID:
                 continue
 
@@ -664,7 +828,7 @@ def update_lap_state_from_packet(header, pkt):
     if arr is None or len(arr) == 0:
         return
 
-    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
+    player_idx = get_player_car_index(header)
     if not (0 <= player_idx < len(arr)):
         player_idx = 0
 
@@ -744,7 +908,7 @@ def handle_session_history_packet(header, pkt):
         return
 
     car_idx = parse_int(get_attr(pkt, "car_idx", "m_carIdx", default=None), None)
-    player_idx = int(get_attr(header, "player_car_index", "m_playerCarIndex", default=0) or 0)
+    player_idx = get_player_car_index(header)
 
     # Only process the player's own history packet
     if car_idx is not None and car_idx != player_idx:
@@ -841,6 +1005,7 @@ def post_latest_telemetry(sample_body):
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT, LAST_SAMPLE_TIMESTAMP
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
+    global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z, CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
 
     if not SESSION_ID or pkt is None:
         return
@@ -853,7 +1018,7 @@ def post_telemetry_sample(header, pkt):
     if arr is None or len(arr) == 0:
         return
 
-    player_idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
+    player_idx = get_player_car_index(header)
     if not (0 <= player_idx < len(arr)):
         player_idx = 0
 
@@ -890,6 +1055,7 @@ def post_telemetry_sample(header, pkt):
 
     sample_timestamp = iso_now()
     LAST_SAMPLE_TIMESTAMP = sample_timestamp
+    warn_if_telemetry_has_no_map_position()
 
     sample_body = {
         "timestamp": sample_timestamp,
@@ -898,6 +1064,12 @@ def post_telemetry_sample(header, pkt):
         "lapNumber": CURRENT_LAP_NUM,
         "lapDistance": CURRENT_LAP_DISTANCE_M,
         "totalDistance": CURRENT_TOTAL_DISTANCE_M,
+        "worldX": CURRENT_WORLD_X,
+        "worldY": CURRENT_WORLD_Y,
+        "worldZ": CURRENT_WORLD_Z,
+        "yaw": CURRENT_YAW,
+        "pitch": CURRENT_PITCH,
+        "roll": CURRENT_ROLL,
         "speedKph": speed,
         "throttle": throttle,
         "brake": brake,
@@ -968,6 +1140,12 @@ def main():
                 "lap_number",
                 "lap_distance",
                 "total_distance",
+                "world_x",
+                "world_y",
+                "world_z",
+                "yaw",
+                "pitch",
+                "roll",
                 "speed_kph",
                 "throttle",
                 "brake",
@@ -997,7 +1175,7 @@ def main():
                 except Exception:
                     continue
 
-                pid = int(get_attr(header, "packet_id", "mPacketId", "m_packetId", default=0) or 0)
+                pid = int(get_attr_loose(header, "packet_id", "packetId", "mPacketId", "m_packetId", default=0) or 0)
                 pkt_cls = pick_packet_class(header)
 
                 pkt = None
@@ -1011,6 +1189,9 @@ def main():
                 race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_final_class_packet(pid, race_active, race_started_at)
 
+                if pid == MOTION_PACKET_ID and pkt is not None:
+                    update_motion_state_from_packet(header, pkt)
+
                 if pid == LAP_DATA_PACKET_ID and pkt is not None:
                     update_lap_state_from_packet(header, pkt)
 
@@ -1022,7 +1203,7 @@ def main():
 
                     arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData")
                     if arr is not None and len(arr) > 0:
-                        idx = int(get_attr(header, "player_car_index", "mPlayerCarIndex", "m_playerCarIndex", default=0) or 0)
+                        idx = get_player_car_index(header)
                         if not (0 <= idx < len(arr)):
                             idx = 0
 
@@ -1040,6 +1221,12 @@ def main():
                             CURRENT_LAP_NUM,
                             CURRENT_LAP_DISTANCE_M,
                             CURRENT_TOTAL_DISTANCE_M,
+                            CURRENT_WORLD_X,
+                            CURRENT_WORLD_Y,
+                            CURRENT_WORLD_Z,
+                            CURRENT_YAW,
+                            CURRENT_PITCH,
+                            CURRENT_ROLL,
                             speed,
                             throttle,
                             brake,
