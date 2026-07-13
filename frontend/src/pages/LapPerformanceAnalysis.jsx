@@ -691,13 +691,14 @@ function CombinedTelemetryGraph({
   onHoverIndex,
   sectorBoundaries,
   autoScroll = false,
+  metrics = GRAPH_METRICS,
 }) {
   const scrollRef = useRef(null);
 
   const chartData = useMemo(
     () => ({
       labels,
-      datasets: GRAPH_METRICS.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
+      datasets: metrics.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
         label: metric.label,
         data: traces.map((sample) => graphScaledValue(metric, sample)),
         borderColor: metric.color,
@@ -710,7 +711,7 @@ function CombinedTelemetryGraph({
         metricKey: metric.key,
       })),
     }),
-    [labels, traces, visibleMetrics]
+    [labels, metrics, traces, visibleMetrics]
   );
 
   const options = useMemo(
@@ -762,7 +763,7 @@ function CombinedTelemetryGraph({
         tooltip: {
           callbacks: {
             label: (context) => {
-              const metric = GRAPH_METRICS.find((item) => item.key === context.dataset.metricKey);
+              const metric = metrics.find((item) => item.key === context.dataset.metricKey);
               const sample = traces[context.dataIndex] || {};
               if (!metric) return context.dataset.label + ": -";
               return metric.label + ": " + graphValueLabel(metric, graphRawValue(metric.key, sample));
@@ -775,7 +776,7 @@ function CombinedTelemetryGraph({
         },
       },
     }),
-    [activeIndex, onHoverIndex, sectorBoundaries, traces]
+    [activeIndex, metrics, onHoverIndex, sectorBoundaries, traces]
   );
 
   const chartMinWidth = Math.max(1080, labels.length * 5);
@@ -807,7 +808,7 @@ function CombinedTelemetryGraph({
       >
         <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {GRAPH_METRICS.map((metric) => (
+          {metrics.map((metric) => (
             <label
               key={metric.key}
               style={{
@@ -866,6 +867,7 @@ export default function LapPerformanceAnalysis() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [analysisView, setAnalysisView] = useState("beginner");
+  const [extrasExpanded, setExtrasExpanded] = useState(false);
   const [hoveredSampleIndex, setHoveredSampleIndex] = useState(null);
   const [isReplaying, setIsReplaying] = useState(false);
   const [replayTimeMs, setReplayTimeMs] = useState(0);
@@ -932,8 +934,25 @@ export default function LapPerformanceAnalysis() {
     }, {});
   });
 
+  const beginnerMetrics = useMemo(() => {
+    return GRAPH_METRICS.filter((metric) =>
+      metric.key === "speed" || metric.key === "throttle" || metric.key === "brake"
+    );
+  }, []);
+
+  const [beginnerVisibleMetrics, setBeginnerVisibleMetrics] = useState(() => {
+    return { speed: true, throttle: true, brake: true };
+  });
+
   function toggleMetric(metricKey) {
     setVisibleMetrics((current) => ({
+      ...current,
+      [metricKey]: current[metricKey] !== true,
+    }));
+  }
+
+  function toggleBeginnerMetric(metricKey) {
+    setBeginnerVisibleMetrics((current) => ({
       ...current,
       [metricKey]: current[metricKey] !== true,
     }));
@@ -1109,7 +1128,7 @@ export default function LapPerformanceAnalysis() {
                 </p>
                 {isBeginnerView && (
                   <p style={{ color: "#a8b2c8", marginTop: 8, marginBottom: 0 }}>
-                    Beginner mode shows essential lap insights. Switch to Advanced for full replay, map, and telemetry overlays.
+                    Beginner mode shows essential lap insights. Open Extras only when you want replay, map, or telemetry details.
                   </p>
                 )}
               </div>
@@ -1195,6 +1214,69 @@ export default function LapPerformanceAnalysis() {
               />
             </div>
           </div>
+
+          {isBeginnerView && (
+            <div className="card lap-extras-card" style={{ marginBottom: 20 }}>
+              <button
+                type="button"
+                className="lap-extras-toggle"
+                onClick={() => setExtrasExpanded((current) => !current)}
+                aria-expanded={extrasExpanded}
+              >
+                <span>Extras</span>
+                <span className={`lap-extras-chevron ${extrasExpanded ? "open" : ""}`}>▾</span>
+              </button>
+
+              {extrasExpanded && (
+                <div className="lap-extras-body">
+                  <ReplayControls
+                    traces={traces}
+                    replayTimeMs={replayTimeMs}
+                    replayDurationMs={replayDurationMs}
+                    replaySpeed={replaySpeed}
+                    isReplaying={isReplaying}
+                    activeSample={activeSample}
+                    onPlayPause={handleReplayPlayPause}
+                    onRestart={handleReplayRestart}
+                    onSeekBy={handleReplaySeekBy}
+                    onSeekTo={handleReplaySeekTo}
+                    onSpeedStep={handleReplaySpeedStep}
+                  />
+
+                  <PostLapTelemetryMap
+                    apiBase={API_BASE}
+                    trackKey={session.trackKey}
+                    traces={traces}
+                    activeIndex={activeSampleIndex}
+                    sectorBoundaries={sectorBoundaries}
+                  />
+
+                  {traces.length === 0 ? (
+                    <div className="card">
+                      <h2>Telemetry Overview</h2>
+                      <p style={{ color: "#94a3b8" }}>
+                        No raw telemetry samples were saved for this lap, so only timing data is available.
+                      </p>
+                    </div>
+                  ) : (
+                    <CombinedTelemetryGraph
+                      labels={labels}
+                      traces={traces}
+                      metrics={beginnerMetrics}
+                      visibleMetrics={beginnerVisibleMetrics}
+                      onToggle={toggleBeginnerMetric}
+                      activeIndex={activeSampleIndex}
+                      onHoverIndex={(index) => {
+                        if (!isReplaying) setHoveredSampleIndex(index);
+                      }}
+                      sectorBoundaries={sectorBoundaries}
+                      autoScroll={hoveredSampleIndex === null}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {!isBeginnerView && (
             <ReplayControls
