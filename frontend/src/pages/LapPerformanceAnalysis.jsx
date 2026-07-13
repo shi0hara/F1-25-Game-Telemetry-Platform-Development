@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Chart as ChartJS,
@@ -251,6 +251,286 @@ function buildSectorBoundaries(traces, lap) {
   });
 }
 
+
+const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4];
+const REPLAY_SEEK_MS = 5000;
+
+function sampleTimestampMs(sample) {
+  const value = sample?.timestamp;
+  if (!value) return null;
+
+  if (typeof value === "number") {
+    return value > 100000000000 ? value : value * 1000;
+  }
+
+  if (typeof value === "string") {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (typeof value?.toMillis === "function") return value.toMillis();
+  if (typeof value?.toDate === "function") return value.toDate().getTime();
+  if (Number.isFinite(Number(value.seconds))) return Number(value.seconds) * 1000;
+  if (Number.isFinite(Number(value._seconds))) return Number(value._seconds) * 1000;
+
+  return null;
+}
+
+function buildReplayTimeline(traces, lap) {
+  if (!Array.isArray(traces) || traces.length === 0) return [];
+  if (traces.length === 1) return [0];
+
+  const timestamps = traces.map(sampleTimestampMs);
+  const firstTimestamp = timestamps[0];
+  const lastTimestamp = timestamps[timestamps.length - 1];
+
+  if (
+    timestamps.every((value) => Number.isFinite(value)) &&
+    Number.isFinite(firstTimestamp) &&
+    Number.isFinite(lastTimestamp) &&
+    lastTimestamp > firstTimestamp
+  ) {
+    let previous = 0;
+    return timestamps.map((value) => {
+      const next = Math.max(previous, value - firstTimestamp);
+      previous = next;
+      return next;
+    });
+  }
+
+  const lapTime = Number(lap?.lapTimeMs);
+  const duration = Number.isFinite(lapTime) && lapTime > 0
+    ? lapTime
+    : Math.max(1000, (traces.length - 1) * 100);
+
+  return traces.map((_, index) => (duration * index) / (traces.length - 1));
+}
+
+function replayIndexForTime(timeline, timeMs) {
+  if (!Array.isArray(timeline) || timeline.length === 0) return null;
+
+  const target = Math.max(0, Number(timeMs) || 0);
+  let low = 0;
+  let high = timeline.length - 1;
+
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (timeline[mid] <= target) {
+      low = mid;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return low;
+}
+
+function clampReplayTime(value, duration) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return 0;
+  return Math.max(0, Math.min(next, Math.max(0, duration || 0)));
+}
+
+function formatReplayClock(ms) {
+  const value = Math.max(0, Number(ms) || 0);
+  const minutes = Math.floor(value / 60000);
+  const seconds = Math.floor((value % 60000) / 1000);
+  const fraction = Math.floor(value % 1000);
+  return (
+    minutes +
+    ":" +
+    seconds.toString().padStart(2, "0") +
+    "." +
+    fraction.toString().padStart(3, "0")
+  );
+}
+
+function speedStep(currentSpeed, direction) {
+  const index = REPLAY_SPEEDS.findIndex((speed) => speed === currentSpeed);
+  const currentIndex = index >= 0 ? index : REPLAY_SPEEDS.indexOf(1);
+  const nextIndex = Math.max(0, Math.min(REPLAY_SPEEDS.length - 1, currentIndex + direction));
+  return REPLAY_SPEEDS[nextIndex];
+}
+
+function replayButtonStyle({ primary = false, disabled = false } = {}) {
+  return {
+    border: primary
+      ? "1px solid var(--color-accent-green)"
+      : "1px solid rgba(255,255,255,0.16)",
+    background: primary
+      ? "rgba(34,197,94,0.16)"
+      : "rgba(255,255,255,0.05)",
+    color: disabled ? "#64748b" : primary ? "#bbf7d0" : "white",
+    padding: "8px 11px",
+    borderRadius: 8,
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: primary ? 800 : 650,
+  };
+}
+
+function ReplayControls({
+  traces,
+  replayTimeMs,
+  replayDurationMs,
+  replaySpeed,
+  isReplaying,
+  activeSample,
+  onPlayPause,
+  onRestart,
+  onSeekBy,
+  onSeekTo,
+  onSpeedStep,
+}) {
+  const disabled = traces.length < 2 || replayDurationMs <= 0;
+  const progress = disabled
+    ? 0
+    : Math.min(100, Math.max(0, (replayTimeMs / replayDurationMs) * 100));
+  const playLabel = isReplaying
+    ? "Pause"
+    : replayTimeMs > 0 && replayTimeMs < replayDurationMs
+      ? "Resume"
+      : "Replay Lap";
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        <div>
+          <h2 style={{ margin: 0 }}>Lap Replay</h2>
+          <p style={{ color: "#94a3b8", margin: "4px 0 0" }}>
+            {disabled
+              ? "Replay needs at least two saved telemetry samples."
+              : formatReplayClock(replayTimeMs) + " / " + formatReplayClock(replayDurationMs)}
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={onRestart}
+            disabled={disabled}
+            style={replayButtonStyle({ disabled })}
+          >
+            Restart
+          </button>
+          <button
+            type="button"
+            onClick={() => onSeekBy(-REPLAY_SEEK_MS)}
+            disabled={disabled}
+            style={replayButtonStyle({ disabled })}
+          >
+            &lt;&lt; 5s
+          </button>
+          <button
+            type="button"
+            onClick={onPlayPause}
+            disabled={disabled}
+            style={replayButtonStyle({ primary: true, disabled })}
+          >
+            {playLabel}
+          </button>
+          <button
+            type="button"
+            onClick={() => onSeekBy(REPLAY_SEEK_MS)}
+            disabled={disabled}
+            style={replayButtonStyle({ disabled })}
+          >
+            5s &gt;&gt;
+          </button>
+          <button
+            type="button"
+            onClick={() => onSpeedStep(-1)}
+            disabled={disabled || replaySpeed <= REPLAY_SPEEDS[0]}
+            style={replayButtonStyle({ disabled: disabled || replaySpeed <= REPLAY_SPEEDS[0] })}
+          >
+            Slower
+          </button>
+          <div
+            style={{
+              minWidth: 54,
+              textAlign: "center",
+              padding: "8px 10px",
+              borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.16)",
+              color: "#c4b5fd",
+              fontWeight: 800,
+            }}
+          >
+            {replaySpeed}x
+          </div>
+          <button
+            type="button"
+            onClick={() => onSpeedStep(1)}
+            disabled={disabled || replaySpeed >= REPLAY_SPEEDS[REPLAY_SPEEDS.length - 1]}
+            style={replayButtonStyle({ disabled: disabled || replaySpeed >= REPLAY_SPEEDS[REPLAY_SPEEDS.length - 1] })}
+          >
+            Faster
+          </button>
+        </div>
+      </div>
+
+      <input
+        type="range"
+        min="0"
+        max={Math.max(1, replayDurationMs)}
+        step="25"
+        value={clampReplayTime(replayTimeMs, replayDurationMs)}
+        disabled={disabled}
+        onChange={(event) => onSeekTo(Number(event.target.value))}
+        style={{
+          width: "100%",
+          accentColor: "#a855f7",
+          cursor: disabled ? "not-allowed" : "pointer",
+        }}
+      />
+
+      <div
+        style={{
+          height: 5,
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.08)",
+          overflow: "hidden",
+          marginTop: 8,
+        }}
+      >
+        <div
+          style={{
+            width: progress + "%",
+            height: "100%",
+            background: "linear-gradient(90deg, #22c55e, #a855f7)",
+          }}
+        />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))",
+          gap: 8,
+          marginTop: 12,
+          color: "#cbd5e1",
+          fontSize: 13,
+        }}
+      >
+        <div>Sample: <strong>{activeSample?.index ?? "-"}</strong></div>
+        <div>Distance: <strong>{formatNumber(activeSample?.distanceM, 1, " m")}</strong></div>
+        <div>Speed: <strong>{formatNumber(activeSample?.speedKph, 1, " km/h")}</strong></div>
+        <div>Gear: <strong>{activeSample?.gear ?? "-"}</strong></div>
+        <div>Brake: <strong>{formatNumber(activeSample?.brakePct, 0, "%")}</strong></div>
+        <div>Throttle: <strong>{formatNumber(activeSample?.throttlePct, 0, "%")}</strong></div>
+      </div>
+    </div>
+  );
+}
+
 const telemetryGuidesPlugin = {
   id: "telemetryGuides",
   afterDatasetsDraw(chart, _args, options) {
@@ -306,7 +586,10 @@ function CombinedTelemetryGraph({
   activeIndex,
   onHoverIndex,
   sectorBoundaries,
+  autoScroll = false,
 }) {
+  const scrollRef = useRef(null);
+
   const chartData = useMemo(
     () => ({
       labels,
@@ -393,6 +676,19 @@ function CombinedTelemetryGraph({
 
   const chartMinWidth = Math.max(1080, labels.length * 5);
 
+  useEffect(() => {
+    if (!autoScroll || !Number.isInteger(activeIndex) || !scrollRef.current || labels.length < 2) {
+      return;
+    }
+
+    const container = scrollRef.current;
+    const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth);
+    const ratio = activeIndex / Math.max(1, labels.length - 1);
+    const centeredLeft = ratio * container.scrollWidth - container.clientWidth * 0.45;
+    const nextLeft = Math.max(0, Math.min(maxScroll, centeredLeft));
+    container.scrollTo({ left: nextLeft, behavior: "auto" });
+  }, [activeIndex, autoScroll, labels.length]);
+
   return (
     <div className="card">
       <div
@@ -447,7 +743,7 @@ function CombinedTelemetryGraph({
         </div>
       </div>
 
-      <div style={{ overflowX: "auto" }} onMouseLeave={() => onHoverIndex(null)}>
+      <div ref={scrollRef} style={{ overflowX: "auto" }} onMouseLeave={() => onHoverIndex(null)}>
         <div style={{ minWidth: chartMinWidth, height: 430 }}>
           <Line
             data={chartData}
@@ -466,6 +762,9 @@ export default function LapPerformanceAnalysis() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [hoveredSampleIndex, setHoveredSampleIndex] = useState(null);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const [replayTimeMs, setReplayTimeMs] = useState(0);
+  const [replaySpeed, setReplaySpeed] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -545,6 +844,81 @@ export default function LapPerformanceAnalysis() {
     () => buildSectorBoundaries(traces, lap),
     [lap.lapTimeMs, lap.sector1Ms, lap.sector2Ms, traces]
   );
+  const replayTimeline = useMemo(
+    () => buildReplayTimeline(traces, lap),
+    [lap.lapTimeMs, traces]
+  );
+  const replayDurationMs = replayTimeline[replayTimeline.length - 1] || 0;
+  const replayIndex = replayIndexForTime(replayTimeline, replayTimeMs);
+  const activeSampleIndex = isReplaying
+    ? replayIndex
+    : hoveredSampleIndex ?? replayIndex;
+  const activeSample =
+    Number.isInteger(activeSampleIndex) && activeSampleIndex >= 0
+      ? traces[activeSampleIndex] || null
+      : null;
+
+  useEffect(() => {
+    setIsReplaying(false);
+    setReplayTimeMs(0);
+    setReplaySpeed(1);
+    setHoveredSampleIndex(null);
+  }, [lapId, sessionId, traces.length]);
+
+  useEffect(() => {
+    if (!isReplaying || replayDurationMs <= 0 || traces.length < 2) return undefined;
+
+    let frameId = 0;
+    let previousFrameTime = window.performance.now();
+
+    function tick(frameTime) {
+      const frameDelta = Math.max(0, frameTime - previousFrameTime);
+      previousFrameTime = frameTime;
+
+      setReplayTimeMs((current) => {
+        const next = clampReplayTime(current + frameDelta * replaySpeed, replayDurationMs);
+        if (next >= replayDurationMs) {
+          window.setTimeout(() => setIsReplaying(false), 0);
+        }
+        return next;
+      });
+
+      frameId = window.requestAnimationFrame(tick);
+    }
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [isReplaying, replayDurationMs, replaySpeed, traces.length]);
+
+  function handleReplayPlayPause() {
+    if (traces.length < 2 || replayDurationMs <= 0) return;
+
+    setHoveredSampleIndex(null);
+    if (!isReplaying && replayTimeMs >= replayDurationMs - 25) {
+      setReplayTimeMs(0);
+    }
+    setIsReplaying((current) => !current);
+  }
+
+  function handleReplayRestart() {
+    setHoveredSampleIndex(null);
+    setReplayTimeMs(0);
+    setIsReplaying(true);
+  }
+
+  function handleReplaySeekBy(deltaMs) {
+    setHoveredSampleIndex(null);
+    setReplayTimeMs((current) => clampReplayTime(current + deltaMs, replayDurationMs));
+  }
+
+  function handleReplaySeekTo(nextTimeMs) {
+    setHoveredSampleIndex(null);
+    setReplayTimeMs(clampReplayTime(nextTimeMs, replayDurationMs));
+  }
+
+  function handleReplaySpeedStep(direction) {
+    setReplaySpeed((current) => speedStep(current, direction));
+  }
 
   return (
     <div className="page-container">
@@ -702,11 +1076,25 @@ export default function LapPerformanceAnalysis() {
             </div>
           </div>
 
+          <ReplayControls
+            traces={traces}
+            replayTimeMs={replayTimeMs}
+            replayDurationMs={replayDurationMs}
+            replaySpeed={replaySpeed}
+            isReplaying={isReplaying}
+            activeSample={activeSample}
+            onPlayPause={handleReplayPlayPause}
+            onRestart={handleReplayRestart}
+            onSeekBy={handleReplaySeekBy}
+            onSeekTo={handleReplaySeekTo}
+            onSpeedStep={handleReplaySpeedStep}
+          />
+
           <PostLapTelemetryMap
             apiBase={API_BASE}
             trackKey={session.trackKey}
             traces={traces}
-            activeIndex={hoveredSampleIndex}
+            activeIndex={activeSampleIndex}
             sectorBoundaries={sectorBoundaries}
           />
 
@@ -723,9 +1111,12 @@ export default function LapPerformanceAnalysis() {
               traces={traces}
               visibleMetrics={visibleMetrics}
               onToggle={toggleMetric}
-              activeIndex={hoveredSampleIndex}
-              onHoverIndex={setHoveredSampleIndex}
+              activeIndex={activeSampleIndex}
+              onHoverIndex={(index) => {
+                if (!isReplaying) setHoveredSampleIndex(index);
+              }}
               sectorBoundaries={sectorBoundaries}
+              autoScroll={hoveredSampleIndex === null}
             />
           )}
         </>
