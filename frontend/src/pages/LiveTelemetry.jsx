@@ -508,6 +508,8 @@ export default function LiveTelemetry({ currentUser }) {
                 >
                   <SteeringWheel
                     steering={selectedTelemetry.steering}
+                    throttle={selectedTelemetry.throttle}
+                    brake={selectedTelemetry.brake}
                     label="Live Steering"
                     size={152}
                   />
