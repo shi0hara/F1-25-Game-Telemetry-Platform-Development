@@ -13,6 +13,7 @@ import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
 import TrackTelemetryMap from "../components/TrackTelemetryMap";
 import TelemetryChart from "../components/TelemetryChart";
+import SteeringWheel from "../components/SteeringWheel";
 import useActiveSession from "../hooks/useActiveSession";
 
 ChartJS.register(
@@ -500,10 +501,23 @@ export default function LiveTelemetry({ currentUser }) {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 8,
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 16,
+                    alignItems: "center",
                   }}
                 >
+                  <SteeringWheel
+                    steering={selectedTelemetry.steering}
+                    label="Live Steering"
+                    size={152}
+                  />
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                      gap: 8,
+                    }}
+                  >
                   <p>
                     <strong>Speed:</strong> {selectedTelemetry.speedKph ?? 0}{" "}
                     km/h
@@ -562,6 +576,7 @@ export default function LiveTelemetry({ currentUser }) {
                       selectedTelemetry.worldZ?.toFixed?.(2) ??
                       "-"}
                   </p>
+                  </div>
                 </div>
               ) : (
                 <p>No latest telemetry for this session yet.</p>
