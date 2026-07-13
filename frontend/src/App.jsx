@@ -128,21 +128,10 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/leaderboard"
-              element={
-                <ProtectedRoute user={user}>
-                  <Leaderboard />
-                </ProtectedRoute>
-              }
-            />
+            <Route path="/leaderboard" element={<Leaderboard />} />
             <Route
               path="/analysis/:sessionId/lap/:lapId"
-              element={
-                <ProtectedRoute user={user}>
-                  <LapPerformanceAnalysis />
-                </ProtectedRoute>
-              }
+              element={<LapPerformanceAnalysis />}
             />
             <Route
               path="/profile"

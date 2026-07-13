@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   collection,
   getDocs,
@@ -15,6 +15,7 @@ const API_BASE =
 const FALLBACK_SESSION_LIMIT = 120;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
+const SECTOR_BEST_PURPLE = "#a855f7";
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -40,6 +41,56 @@ function formatSector(ms) {
     : "-";
 }
 
+function leaderboardRowKey(row) {
+  return [
+    row.userKey || row.userId || row.username || "driver",
+    row.sessionId || "session",
+    row.lapId || row.lapNumber || "lap",
+  ].join("|");
+}
+
+function findBestSectorCells(rows) {
+  const best = {
+    sector1Ms: null,
+    sector2Ms: null,
+    sector3Ms: null,
+  };
+
+  for (const row of rows) {
+    for (const sectorKey of Object.keys(best)) {
+      const value = Number(row[sectorKey]);
+      if (!Number.isFinite(value) || value <= 0) continue;
+
+      if (!best[sectorKey] || value < best[sectorKey].value) {
+        best[sectorKey] = {
+          value,
+          cellKey: leaderboardRowKey(row) + "|" + sectorKey,
+        };
+      }
+    }
+  }
+
+  return {
+    sector1Ms: best.sector1Ms?.cellKey || null,
+    sector2Ms: best.sector2Ms?.cellKey || null,
+    sector3Ms: best.sector3Ms?.cellKey || null,
+  };
+}
+
+function isBestSectorCell(row, sectorKey, bestSectorCells) {
+  return bestSectorCells[sectorKey] === leaderboardRowKey(row) + "|" + sectorKey;
+}
+
+function bestSectorStyle(row, sectorKey, bestSectorCells) {
+  if (!isBestSectorCell(row, sectorKey, bestSectorCells)) return undefined;
+
+  return {
+    color: SECTOR_BEST_PURPLE,
+    fontWeight: 800,
+    textShadow: "0 0 10px rgba(168, 85, 247, 0.5)",
+  };
+}
+
 function toMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();
@@ -59,6 +110,16 @@ function formatDate(value) {
 
 function shortSessionId(value) {
   return value ? String(value).slice(0, 8) : "-";
+}
+
+function lapAnalysisPath(row) {
+  if (!row?.sessionId || !row?.lapId) return "";
+  return (
+    "/analysis/" +
+    encodeURIComponent(row.sessionId) +
+    "/lap/" +
+    encodeURIComponent(row.lapId)
+  );
 }
 
 function normalizeKey(value) {
@@ -274,6 +335,7 @@ export default function Leaderboard() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [meta, setMeta] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -339,6 +401,7 @@ export default function Leaderboard() {
   }, [selectedTrackKey]);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
+  const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
 
   return (
     <div className="page-container">
@@ -440,12 +503,29 @@ export default function Leaderboard() {
               </thead>
               <tbody>
                 {rows.map((row) => {
+                  const lapPath = lapAnalysisPath(row);
                   const isLeader = leader?.sessionId === row.sessionId && leader?.lapId === row.lapId;
 
                   return (
                     <tr
                       key={`${row.userKey || row.userId || row.username}-${row.sessionId}-${row.lapId}`}
-                      style={{ borderBottom: "1px solid var(--color-bg-light-grey)" }}
+                      onClick={() => {
+                        if (lapPath) navigate(lapPath);
+                      }}
+                      onKeyDown={(event) => {
+                        if (!lapPath) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          navigate(lapPath);
+                        }
+                      }}
+                      role={lapPath ? "button" : undefined}
+                      tabIndex={lapPath ? 0 : undefined}
+                      title={lapPath ? "Open lap performance analysis" : undefined}
+                      style={{
+                        borderBottom: "1px solid var(--color-bg-light-grey)",
+                        cursor: lapPath ? "pointer" : "default",
+                      }}
                     >
                       <td
                         style={{
@@ -460,7 +540,8 @@ export default function Leaderboard() {
                       <td>
                         {row.sessionId && row.lapId ? (
                           <Link
-                            to={"/analysis/" + row.sessionId + "/lap/" + row.lapId}
+                            to={lapPath}
+                            onClick={(event) => event.stopPropagation()}
                             style={{
                               color: "var(--color-accent-blue)",
                               fontWeight: 700,
@@ -477,9 +558,15 @@ export default function Leaderboard() {
                         {row.lapTime || formatLapTime(row.lapTimeMs)}
                       </td>
                       <td>{isLeader ? "-" : formatGap(row.gapToLeaderMs)}</td>
-                      <td>{formatSector(row.sector1Ms)}</td>
-                      <td>{formatSector(row.sector2Ms)}</td>
-                      <td>{formatSector(row.sector3Ms)}</td>
+                      <td style={bestSectorStyle(row, "sector1Ms", bestSectorCells)}>
+                        {formatSector(row.sector1Ms)}
+                      </td>
+                      <td style={bestSectorStyle(row, "sector2Ms", bestSectorCells)}>
+                        {formatSector(row.sector2Ms)}
+                      </td>
+                      <td style={bestSectorStyle(row, "sector3Ms", bestSectorCells)}>
+                        {formatSector(row.sector3Ms)}
+                      </td>
                       <td title={row.sessionId}>
                         {shortSessionId(row.sessionId)} | {formatDate(row.sessionStartedAt)}
                       </td>

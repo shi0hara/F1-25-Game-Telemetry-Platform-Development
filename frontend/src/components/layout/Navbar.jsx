@@ -32,7 +32,6 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
         </Link>
         <Link
           to="/leaderboard"
-          onClick={handleProtectedNavigation}
           className={location.pathname === "/leaderboard" ? "active" : ""}
         >
           Leaderboards

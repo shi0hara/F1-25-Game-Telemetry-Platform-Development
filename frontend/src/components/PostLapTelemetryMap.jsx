@@ -193,6 +193,65 @@ function drawBadge(ctx, text, x, y) {
   ctx.fillText(text, x + 8, y - 4);
 }
 
+const MAP_NUMERIC_FIELDS = [
+  "index",
+  "sampleIndex",
+  "lapDistance",
+  "distanceM",
+  "worldX",
+  "worldY",
+  "worldZ",
+  "steering",
+  "speedKph",
+  "throttlePct",
+  "brakePct",
+  "rpm",
+  "gear",
+  "corneringSpeedKph",
+  "brakingDistanceM",
+];
+
+function lerpNumber(a, b, amount) {
+  const from = Number(a);
+  const to = Number(b);
+  if (Number.isFinite(from) && Number.isFinite(to)) {
+    return from + (to - from) * amount;
+  }
+  if (Number.isFinite(from)) return from;
+  if (Number.isFinite(to)) return to;
+  return null;
+}
+
+function interpolateMapSample(samples, position) {
+  if (!Array.isArray(samples) || samples.length === 0) return null;
+
+  const rawPosition = Number(position);
+  const clamped = Number.isFinite(rawPosition)
+    ? Math.max(0, Math.min(rawPosition, samples.length - 1))
+    : samples.length - 1;
+  const leftIndex = Math.floor(clamped);
+  const rightIndex = Math.min(leftIndex + 1, samples.length - 1);
+  const amount = rightIndex === leftIndex ? 0 : clamped - leftIndex;
+  const left = samples[leftIndex] || {};
+  const right = samples[rightIndex] || left;
+  const next = {
+    ...left,
+    index: clamped,
+  };
+
+  for (const key of MAP_NUMERIC_FIELDS) {
+    const value = lerpNumber(left[key], right[key], amount);
+    if (value !== null) next[key] = value;
+  }
+
+  if (amount >= 0.5) {
+    next.drs = right.drs;
+    next.sector = right.sector;
+  }
+
+  return next;
+}
+
 export default function PostLapTelemetryMap({
   apiBase,
   trackKey,
@@ -202,6 +261,7 @@ export default function PostLapTelemetryMap({
 }) {
   const canvasRef = useRef(null);
   const [trackMap, setTrackMap] = useState(null);
+  const [mapImage, setMapImage] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -239,6 +299,28 @@ export default function PostLapTelemetryMap({
   const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
   const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
   const imageUrl = trackMap?.imageCalibration?.imageUrl || "/maps/default-track.png";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMapImage() {
+      const image = new Image();
+      image.onload = () => {
+        if (!cancelled) setMapImage(image);
+      };
+      image.onerror = () => {
+        if (!cancelled) setMapImage(null);
+      };
+      image.src = imageUrl;
+    }
+
+    setMapImage(null);
+    loadMapImage();
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrl]);
+
   const transform = useMemo(() => {
     return (
       solveAffine(trackMap?.imageCalibration?.anchorPoints) ||
@@ -327,19 +409,22 @@ export default function PostLapTelemetryMap({
       }
 
       const fallbackIndex = positionedSamples[positionedSamples.length - 1]?.index;
-      const markerIndex = Number.isInteger(activeIndex) ? activeIndex : fallbackIndex;
-      const markerSample = traces[markerIndex];
+      const activePosition = Number.isFinite(Number(activeIndex))
+        ? Math.max(0, Math.min(Number(activeIndex), traces.length - 1))
+        : fallbackIndex;
+      const markerSample = interpolateMapSample(traces, activePosition);
       if (
         markerSample &&
         hasNumber(markerSample.worldX) &&
         hasNumber(markerSample.worldZ)
       ) {
         const pos = transform.worldToImage(markerSample.worldX, markerSample.worldZ);
-        const next =
-          traces[Math.min(markerIndex + 1, traces.length - 1)] || markerSample;
+        const headingSample =
+          interpolateMapSample(traces, Math.min(Number(activePosition) + 0.85, traces.length - 1)) ||
+          markerSample;
         const nextPos =
-          hasNumber(next.worldX) && hasNumber(next.worldZ)
-            ? transform.worldToImage(next.worldX, next.worldZ)
+          hasNumber(headingSample.worldX) && hasNumber(headingSample.worldZ)
+            ? transform.worldToImage(headingSample.worldX, headingSample.worldZ)
             : pos;
         const angle = Math.atan2(nextPos.y - pos.y, nextPos.x - pos.x);
 
@@ -375,10 +460,7 @@ export default function PostLapTelemetryMap({
       );
     }
 
-    const image = new Image();
-    image.onload = () => drawScene(image);
-    image.onerror = () => drawScene(null);
-    image.src = imageUrl;
+    drawScene(mapImage);
 
     return () => {
       cancelled = true;
@@ -386,8 +468,8 @@ export default function PostLapTelemetryMap({
   }, [
     activeIndex,
     imageHeight,
-    imageUrl,
     imageWidth,
+    mapImage,
     positionedSamples,
     sectorBoundaries,
     traces,
