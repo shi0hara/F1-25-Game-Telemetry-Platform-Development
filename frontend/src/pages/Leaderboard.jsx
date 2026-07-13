@@ -409,40 +409,24 @@ export default function Leaderboard() {
         Track <span className="text-primary">Leaderboards</span>
       </h1>
 
-      <div className="card" style={{ marginBottom: "20px" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "flex-start",
-            flexWrap: "wrap",
-          }}
-        >
+      <div className="card card-tight">
+        <div className="split-head">
           <div>
             <h2>{activeTrack?.trackName || "Fastest Valid Laps"}</h2>
-            <p style={{ marginTop: 4, color: "#aaa" }}>
+            <p className="muted-copy">
               Rankings are separated by track. One placement per driver, using their best real valid lap.
             </p>
           </div>
 
           {meta && (
-            <div style={{ color: "#aaa", fontSize: 13, textAlign: "right" }}>
+            <div className="meta-copy">
               {meta.userCount ?? rows.length} drivers | {meta.validLaps ?? 0} valid laps
             </div>
           )}
         </div>
 
         {tracks.length > 0 && (
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              marginTop: 14,
-              marginBottom: 8,
-            }}
-          >
+          <div className="chip-row">
             {tracks.map((track) => {
               const selected = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
               return (
@@ -450,18 +434,7 @@ export default function Leaderboard() {
                   key={track.trackKey}
                   type="button"
                   onClick={() => setSelectedTrackKey(track.trackKey)}
-                  style={{
-                    border: selected
-                      ? "1px solid var(--color-accent-green)"
-                      : "1px solid rgba(255,255,255,0.18)",
-                    background: selected
-                      ? "rgba(34,197,94,0.16)"
-                      : "rgba(255,255,255,0.05)",
-                    color: "white",
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
+                  className={selected ? "chip-btn active" : "chip-btn"}
                 >
                   {track.trackName || track.trackKey} ({track.userCount})
                 </button>
@@ -471,26 +444,19 @@ export default function Leaderboard() {
         )}
 
         {loading && <p>Loading leaderboard...</p>}
-        {notice && !error && <p style={{ color: "#facc15" }}>{notice}</p>}
-        {error && <p style={{ color: "var(--color-accent-red, #f87171)" }}>{error}</p>}
+        {notice && !error && <p className="notice-message">{notice}</p>}
+        {error && <p className="error-message">{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p>No valid lap times found for this track yet.</p>
+          <p className="empty-state">No valid lap times found for this track yet.</p>
         )}
 
         {!loading && !error && rows.length > 0 && (
-          <div style={{ overflowX: "auto", marginTop: "10px" }}>
-            <table
-              style={{
-                width: "100%",
-                textAlign: "left",
-                borderCollapse: "collapse",
-                minWidth: 780,
-              }}
-            >
+          <div className="table-wrap">
+            <table className="f1-table">
               <thead>
-                <tr style={{ borderBottom: "2px solid var(--color-bg-light-grey)" }}>
-                  <th style={{ padding: "10px" }}>Rank</th>
+                <tr>
+                  <th>Rank</th>
                   <th>Driver</th>
                   <th>Lap</th>
                   <th>Lap Time</th>
@@ -522,31 +488,26 @@ export default function Leaderboard() {
                       role={lapPath ? "button" : undefined}
                       tabIndex={lapPath ? 0 : undefined}
                       title={lapPath ? "Open lap performance analysis" : undefined}
-                      style={{
-                        borderBottom: "1px solid var(--color-bg-light-grey)",
-                        cursor: lapPath ? "pointer" : "default",
-                      }}
+                      className={lapPath ? "clickable-row" : ""}
                     >
                       <td
-                        style={{
-                          padding: "10px",
-                          color: row.rank === 1 ? "var(--color-accent-yellow)" : "inherit",
-                          fontWeight: row.rank <= 3 ? "bold" : "normal",
-                        }}
+                        className={
+                          row.rank === 1
+                            ? "rank-cell top-rank"
+                            : row.rank <= 3
+                              ? "rank-cell podium"
+                              : "rank-cell"
+                        }
                       >
                         #{row.rank}
                       </td>
-                      <td style={{ fontWeight: "bold" }}>{row.username || "Unknown Driver"}</td>
+                      <td><strong>{row.username || "Unknown Driver"}</strong></td>
                       <td>
                         {row.sessionId && row.lapId ? (
                           <Link
                             to={lapPath}
                             onClick={(event) => event.stopPropagation()}
-                            style={{
-                              color: "var(--color-accent-blue)",
-                              fontWeight: 700,
-                              textDecoration: "none",
-                            }}
+                            className="lap-link"
                           >
                             Lap {row.lapNumber ?? "-"}
                           </Link>
@@ -554,7 +515,7 @@ export default function Leaderboard() {
                           <>Lap {row.lapNumber ?? "-"}</>
                         )}
                       </td>
-                      <td style={{ color: "var(--color-accent-green)", fontWeight: "bold" }}>
+                      <td className="lap-time">
                         {row.lapTime || formatLapTime(row.lapTimeMs)}
                       </td>
                       <td>{isLeader ? "-" : formatGap(row.gapToLeaderMs)}</td>

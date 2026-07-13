@@ -4,6 +4,16 @@ import "./Navbar.css";
 export default function Navbar({ username, isAdmin = false, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const currentDate = new Date().toLocaleDateString(undefined, {
+    month: "short",
+    day: "2-digit",
+  });
+  const navTabs = [
+    { to: "/", label: "Dashboard" },
+    { to: "/live", label: "Live", protected: true },
+    { to: "/leaderboard", label: "Leaderboards" },
+    { to: "/profile", label: "Profile", protected: true },
+  ];
 
   const handleProtectedNavigation = (e) => {
     if (!username) {
@@ -13,69 +23,72 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
   };
 
   return (
-    <nav className="navbar">
-      <div className="navbar-brand">
-        <span className="brand-f1">F1</span>{" "}
-        <span className="brand-text">Telemetry</span>
-      </div>
+    <header className="nav-shell">
+      <nav className="navbar" aria-label="Primary">
+        <div className="navbar-brand">
+          <span className="brand-f1">F1</span>{" "}
+          <span className="brand-text">Telemetry</span>
+        </div>
 
-      <div className="navbar-links">
-        <Link to="/" className={location.pathname === "/" ? "active" : ""}>
-          Dashboard
-        </Link>
-        <Link
-          to="/live"
-          onClick={handleProtectedNavigation}
-          className={location.pathname === "/live" ? "active" : ""}
-        >
-          Live
-        </Link>
-        <Link
-          to="/leaderboard"
-          className={location.pathname === "/leaderboard" ? "active" : ""}
-        >
-          Leaderboards
-        </Link>
-        <Link
-          to="/profile"
-          onClick={handleProtectedNavigation}
-          className={location.pathname === "/profile" ? "active" : ""}
-        >
-          Profile
-        </Link>
-      </div>
-
-      <div className="navbar-user">
-        {username ? (
-          <>
-            <span className="username">Driver: {username}</span>
-
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => navigate("/admin")}
-                className="btn-admin"
-              >
-                Admin
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                onLogout();
-                navigate("/");
-              }}
-              className="btn-logout"
+        <div className="navbar-links">
+          {navTabs.map((tab) => (
+            <Link
+              key={tab.to}
+              to={tab.to}
+              onClick={tab.protected ? handleProtectedNavigation : undefined}
+              className={location.pathname === tab.to ? "active" : ""}
             >
-              Pit Stop (Logout)
-            </button>
-          </>
-        ) : (
-          <Link to="/login" className="login-trigger">
-            Login
-          </Link>
-        )}
+              {tab.label}
+            </Link>
+          ))}
+        </div>
+
+        <div className="navbar-user">
+          {username ? (
+            <>
+              <span className="username">Driver: {username}</span>
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => navigate("/admin")}
+                  className="btn-admin"
+                >
+                  Admin
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  onLogout();
+                  navigate("/");
+                }}
+                className="btn-logout"
+              >
+                Pit Stop (Logout)
+              </button>
+            </>
+          ) : (
+            <Link to="/login" className="login-trigger">
+              Login
+            </Link>
+          )}
+        </div>
+      </nav>
+
+      <div className="nav-subbar" aria-label="Race Utility">
+        <div className="nav-event">
+          <span className="event-round">R10</span>
+          <span className="event-date">17 - 19 JUL</span>
+          <strong className="event-track">Belgium</strong>
+        </div>
+
+        <div className="nav-utility-pills">
+          <span className="utility-pill">Race Week</span>
+          <span className="utility-pill">Session: {currentDate}</span>
+          <span className="utility-pill muted">Track Time 07:54</span>
+        </div>
       </div>
-    </nav>
+    </header>
   );
 }

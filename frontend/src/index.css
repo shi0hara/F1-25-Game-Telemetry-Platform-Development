@@ -140,6 +140,135 @@ textarea:focus {
   flex: 1;
 }
 
+.page-kicker {
+  margin: 0 0 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-display);
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.muted-copy {
+  margin: 0;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+.card-accent-blue {
+  border-left-color: var(--color-accent-blue);
+}
+
+.card-tight {
+  margin-bottom: 16px;
+}
+
+.split-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.meta-copy {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+  text-align: right;
+}
+
+.chip-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  margin-bottom: 8px;
+}
+
+.chip-btn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-family);
+}
+
+.chip-btn.active {
+  border-color: rgba(0, 166, 81, 0.9);
+  background: rgba(0, 166, 81, 0.18);
+}
+
+.notice-message {
+  color: #facc15;
+}
+
+.error-message {
+  color: #f87171;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.f1-table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  min-width: 780px;
+}
+
+.f1-table thead tr {
+  border-bottom: 2px solid var(--color-bg-light-grey);
+}
+
+.f1-table th,
+.f1-table td {
+  padding: 10px;
+}
+
+.f1-table tbody tr {
+  border-bottom: 1px solid var(--color-bg-light-grey);
+}
+
+.f1-table tbody tr.clickable-row {
+  cursor: pointer;
+}
+
+.f1-table tbody tr.clickable-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rank-cell.top-rank {
+  color: var(--color-accent-yellow);
+  font-weight: 700;
+}
+
+.rank-cell.podium {
+  font-weight: 700;
+}
+
+.lap-link {
+  color: var(--color-accent-blue);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.lap-time {
+  color: var(--color-accent-green);
+  font-weight: 700;
+}
+
+.info-card {
+  max-width: 760px;
+}
+
+.empty-state {
+  color: var(--color-text-muted);
+}
+
 .session-banner {
   text-align: center;
   padding: 10px;
@@ -179,6 +308,10 @@ th {
 
   .grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .meta-copy {
+    text-align: left;
   }
 }
 
