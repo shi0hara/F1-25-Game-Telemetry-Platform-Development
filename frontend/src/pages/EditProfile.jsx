@@ -569,7 +569,7 @@ export default function EditProfile({ username }) {
               <img
                 src={aiProfilePhoto}
                 alt="AI-styled racing suit profile"
-                className={`profile-photo${displayPhoto === "ai" ? " photo-active" : ""}`}
+                className={`profile-photo ai-racing-suit-photo${displayPhoto === "ai" ? " photo-active" : ""}`}
               />
             ) : !aiSuit.isGenerating ? (
               <div className="profile-placeholder">

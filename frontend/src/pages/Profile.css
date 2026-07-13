@@ -104,6 +104,12 @@
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.ai-racing-suit-photo {
+  object-fit: contain;
+  object-position: center top;
+  background: color-mix(in srgb, var(--profile-team-secondary) 88%, #000000 12%);
+}
+
 .profile-placeholder {
   border-radius: 11px;
   border: 2px dashed color-mix(in srgb, var(--profile-team-primary) 35%, #ffffff 65%);

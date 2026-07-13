@@ -4,10 +4,6 @@ import "./Navbar.css";
 export default function Navbar({ username, isAdmin = false, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const currentDate = new Date().toLocaleDateString(undefined, {
-    month: "short",
-    day: "2-digit",
-  });
   const navTabs = [
     { to: "/", label: "Dashboard" },
     { to: "/live", label: "Live", protected: true },
@@ -76,13 +72,6 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
         </div>
       </nav>
 
-      <div className="nav-subbar" aria-label="Utility">
-        <div className="nav-utility-pills">
-          <span className="utility-pill">Race Week</span>
-          <span className="utility-pill">Session: {currentDate}</span>
-          <span className="utility-pill muted">Track Time 07:54</span>
-        </div>
-      </div>
     </header>
   );
 }
