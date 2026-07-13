@@ -552,7 +552,7 @@ export default function EditProfile({ username }) {
                 onClick={() => handleSetDisplayPhoto("original")}
                 disabled={displayPhoto === "original"}
               >
-                {displayPhoto === "original" ? "✓ Active Profile Photo" : "Set as Profile Photo"}
+                {displayPhoto === "original" ? "✓ Current Profile Photo" : "Use as Profile Photo"}
               </button>
             )}
           </div>
@@ -585,7 +585,7 @@ export default function EditProfile({ username }) {
                 onClick={() => handleSetDisplayPhoto("ai")}
                 disabled={displayPhoto === "ai"}
               >
-                {displayPhoto === "ai" ? "✓ Active Profile Photo" : "Set as Profile Photo"}
+                {displayPhoto === "ai" ? "✓ Current Profile Photo" : "Use as Profile Photo"}
               </button>
             )}
           </div>
