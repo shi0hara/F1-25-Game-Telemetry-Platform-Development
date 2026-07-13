@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -20,7 +22,54 @@ export default function SteeringWheel({
   maxRotationDeg = 180,
 }) {
   const value = readSteeringValue(steering);
-  const safeValue = value ?? 0;
+  const targetValue = value ?? 0;
+  const [displayedValue, setDisplayedValue] = useState(targetValue);
+  const displayedRef = useRef(targetValue);
+  const targetRef = useRef(targetValue);
+  const frameRef = useRef(null);
+
+  useEffect(() => {
+    targetRef.current = targetValue;
+
+    if (frameRef.current !== null) return;
+
+    let previousTime = window.performance.now();
+
+    function tick(frameTime) {
+      const dt = Math.min(50, Math.max(0, frameTime - previousTime));
+      previousTime = frameTime;
+
+      const current = displayedRef.current;
+      const target = targetRef.current;
+      const response = 1 - Math.pow(0.001, dt / 140);
+      let next = current + (target - current) * response;
+
+      if (Math.abs(target - next) < 0.0008) {
+        next = target;
+      }
+
+      displayedRef.current = next;
+      setDisplayedValue(next);
+
+      if (Math.abs(targetRef.current - next) > 0.0008) {
+        frameRef.current = window.requestAnimationFrame(tick);
+      } else {
+        frameRef.current = null;
+      }
+    }
+
+    frameRef.current = window.requestAnimationFrame(tick);
+  }, [targetValue]);
+
+  useEffect(() => {
+    return () => {
+      if (frameRef.current !== null) {
+        window.cancelAnimationFrame(frameRef.current);
+      }
+    };
+  }, []);
+
+  const safeValue = displayedValue;
   const rotation = safeValue * maxRotationDeg;
   const absValue = Math.abs(safeValue);
   const turnLabel =
@@ -103,12 +152,7 @@ export default function SteeringWheel({
             strokeWidth="4"
             strokeLinecap="round"
           />
-          <g
-            transform={"rotate(" + rotation + " 110 110)"}
-            style={{
-              transition: "transform 80ms linear",
-            }}
-          >
+          <g transform={"rotate(" + rotation + " 110 110)"}>
             <circle
               cx="110"
               cy="110"
