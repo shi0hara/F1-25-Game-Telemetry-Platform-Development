@@ -54,7 +54,7 @@ h6 {
 }
 
 h1 {
-  font-size: clamp(2.1rem, 3.6vw, 3.1rem);
+  font-size: clamp(2.4rem, 4vw, 3.6rem);
 }
 
 h2 {
@@ -122,6 +122,10 @@ textarea:focus {
   padding: 34px;
   max-width: 1240px;
   margin: 0 auto;
+}
+
+.page-container > h1 {
+  margin-bottom: 16px;
 }
 
 .grid-2 {
@@ -329,25 +333,30 @@ th {
 }
 
 .login-card {
-  background-color: var(--color-bg-grey);
+  background: linear-gradient(165deg, rgba(16, 24, 39, 0.96), rgba(10, 15, 28, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-top: 4px solid var(--color-primary);
   padding: 40px;
-  border-radius: 8px;
+  border-radius: 12px;
   width: 100%;
-  max-width: 400px;
+  max-width: 430px;
   text-align: left;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.38);
 }
 
 .login-title {
   margin-top: 0;
-  margin-bottom: 5px;
+  margin-bottom: 8px;
   color: var(--color-text-white);
-  font-size: 24px;
+  font-family: var(--font-family-display);
+  font-size: clamp(2rem, 4vw, 2.4rem);
+  letter-spacing: 0.05em;
 }
 
 .login-subtitle {
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: 1.12rem;
+  line-height: 1.35;
   margin-bottom: 25px;
 }
 
@@ -398,9 +407,12 @@ th {
   padding: 9px 14px;
   background: transparent;
   color: rgba(255, 255, 255, 0.78);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.35px;
+  font-family: var(--font-family-display);
+  font-size: 1.45rem;
+  line-height: 1;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
   cursor: pointer;
   transition: color 0.2s ease;
 }
@@ -505,9 +517,22 @@ th {
 }
 
 .form-group label {
-  font-size: 14px;
-  font-weight: bold;
+  font-family: var(--font-family-display);
+  font-size: 1.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
   color: var(--color-text-muted);
+}
+
+.form-error {
+  margin: 2px 0 0;
+  color: #ff9f98;
+  border: 1px solid rgba(225, 6, 0, 0.45);
+  background: rgba(225, 6, 0, 0.13);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-weight: 600;
 }
 
 /* Contact Page Poster Styles */

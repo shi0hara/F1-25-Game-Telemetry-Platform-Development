@@ -248,18 +248,14 @@ export default function Profile({ username }) {
           </div>
           <button
             type="button"
-            className="btn-primary"
+            className="btn-primary profile-edit-btn"
             onClick={() => navigate("/edit-profile")}
-            style={{ marginTop: 16 }}
           >
             Edit Profile
           </button>
         </div>
 
-        <div
-          className="card"
-          style={{ borderLeftColor: "var(--color-accent-yellow)" }}
-        >
+        <div className="card career-card">
           <h2>Career Stats</h2>
           <p>Total Laps Recorded: 1,204</p>
           <p>Weekly Leaderboard Appearances: 4</p>
@@ -267,17 +263,17 @@ export default function Profile({ username }) {
         </div>
       </div>
 
-      <div style={{ marginTop: "20px" }}>
+      <div className="profile-listener-wrap">
         <ListenerTokenPanel />
       </div>
 
-      <div className="card" style={{ marginTop: "20px" }}>
+      <div className="card sessions-card">
         <h2>Your Sessions</h2>
-        {error && <p style={{ color: "red" }}>{error}</p>}
+        {error && <p className="profile-error-inline">{error}</p>}
         {sessions.length === 0 && !error ? (
           <p>No sessions found.</p>
         ) : (
-          <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+          <div className="session-list">
             {sessions.map((session) => {
               const isSelected = selectedSession?.id === session.id;
               const summary = session.processedSummary || {};
@@ -286,17 +282,9 @@ export default function Profile({ username }) {
                 <button
                   key={session.id}
                   onClick={() => setSelectedSession(session)}
-                  style={{
-                    textAlign: "left",
-                    padding: 12,
-                    border: isSelected ? "2px solid #555" : "1px solid #333",
-                    borderRadius: 8,
-                    background: isSelected ? "#2a2a2a" : "#1a1a1a",
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
+                  className={`session-item ${isSelected ? "selected" : ""}`}
                 >
-                  <div style={{ color: "var(--color-accent-yellow)" }}>
+                  <div className="session-track">
                     <strong>{session.trackName || "Unknown Track"}</strong>
                   </div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
@@ -304,7 +292,7 @@ export default function Profile({ username }) {
                   <div>Ended: {formatDate(session.endedAt)}</div>
                   <div>
                     Best Lap:{" "}
-                    <span style={{ color: "var(--color-accent-green)" }}>
+                    <span className="session-best-lap">
                       {formatLapTime(summary.bestLapTimeMs)}
                     </span>
                   </div>
