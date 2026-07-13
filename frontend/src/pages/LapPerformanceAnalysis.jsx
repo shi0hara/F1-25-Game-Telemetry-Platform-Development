@@ -307,9 +307,17 @@ function buildReplayTimeline(traces, lap) {
 }
 
 function replayIndexForTime(timeline, timeMs) {
+  const position = replayPositionForTime(timeline, timeMs);
+  return Number.isFinite(position) ? Math.floor(position) : null;
+}
+
+function replayPositionForTime(timeline, timeMs) {
   if (!Array.isArray(timeline) || timeline.length === 0) return null;
 
   const target = Math.max(0, Number(timeMs) || 0);
+  if (timeline.length === 1 || target <= timeline[0]) return 0;
+  if (target >= timeline[timeline.length - 1]) return timeline.length - 1;
+
   let low = 0;
   let high = timeline.length - 1;
 
@@ -322,7 +330,84 @@ function replayIndexForTime(timeline, timeMs) {
     }
   }
 
-  return low;
+  const nextIndex = Math.min(low + 1, timeline.length - 1);
+  const span = timeline[nextIndex] - timeline[low];
+  if (!Number.isFinite(span) || span <= 0) return low;
+
+  return low + Math.max(0, Math.min(1, (target - timeline[low]) / span));
+}
+
+const REPLAY_NUMERIC_FIELDS = [
+  "index",
+  "sampleIndex",
+  "lapDistance",
+  "distanceM",
+  "worldX",
+  "worldY",
+  "worldZ",
+  "steering",
+  "speedKph",
+  "throttlePct",
+  "brakePct",
+  "rpm",
+  "gear",
+  "deltaToPB",
+  "corneringSpeedKph",
+  "brakingDistanceM",
+];
+
+function lerpNumber(a, b, amount) {
+  const from = Number(a);
+  const to = Number(b);
+  if (Number.isFinite(from) && Number.isFinite(to)) {
+    return from + (to - from) * amount;
+  }
+  if (Number.isFinite(from)) return from;
+  if (Number.isFinite(to)) return to;
+  return null;
+}
+
+function interpolateReplaySample(traces, position) {
+  if (!Array.isArray(traces) || traces.length === 0) return null;
+
+  const rawPosition = Number(position);
+  const clamped = Number.isFinite(rawPosition)
+    ? Math.max(0, Math.min(rawPosition, traces.length - 1))
+    : 0;
+  const leftIndex = Math.floor(clamped);
+  const rightIndex = Math.min(leftIndex + 1, traces.length - 1);
+  const amount = rightIndex === leftIndex ? 0 : clamped - leftIndex;
+  const left = traces[leftIndex] || {};
+  const right = traces[rightIndex] || left;
+  const next = {
+    ...left,
+    index: clamped,
+  };
+
+  for (const key of REPLAY_NUMERIC_FIELDS) {
+    const value = lerpNumber(left[key], right[key], amount);
+    if (value !== null) next[key] = value;
+  }
+
+  if (amount >= 0.5) {
+    next.drs = right.drs;
+    next.sector = right.sector;
+  }
+
+  return next;
+}
+
+function chartPixelForIndex(xScale, index) {
+  const value = Number(index);
+  if (!Number.isFinite(value)) return null;
+  const left = Math.floor(value);
+  const right = Math.ceil(value);
+  if (left === right) return xScale.getPixelForValue(left);
+
+  const leftPixel = xScale.getPixelForValue(left);
+  const rightPixel = xScale.getPixelForValue(right);
+  if (!Number.isFinite(leftPixel) || !Number.isFinite(rightPixel)) return null;
+  return leftPixel + (rightPixel - leftPixel) * (value - left);
 }
 
 function clampReplayTime(value, duration) {
@@ -520,7 +605,7 @@ function ReplayControls({
           fontSize: 13,
         }}
       >
-        <div>Sample: <strong>{activeSample?.index ?? "-"}</strong></div>
+        <div>Sample: <strong>{formatNumber(activeSample?.index, 1, "")}</strong></div>
         <div>Distance: <strong>{formatNumber(activeSample?.distanceM, 1, " m")}</strong></div>
         <div>Speed: <strong>{formatNumber(activeSample?.speedKph, 1, " km/h")}</strong></div>
         <div>Gear: <strong>{activeSample?.gear ?? "-"}</strong></div>
@@ -562,8 +647,8 @@ const telemetryGuidesPlugin = {
       ctx.restore();
     }
 
-    if (Number.isInteger(options.activeIndex)) {
-      const x = xScale.getPixelForValue(options.activeIndex);
+    if (Number.isFinite(Number(options.activeIndex))) {
+      const x = chartPixelForIndex(xScale, options.activeIndex);
       if (Number.isFinite(x)) {
         ctx.save();
         ctx.beginPath();
@@ -677,7 +762,7 @@ function CombinedTelemetryGraph({
   const chartMinWidth = Math.max(1080, labels.length * 5);
 
   useEffect(() => {
-    if (!autoScroll || !Number.isInteger(activeIndex) || !scrollRef.current || labels.length < 2) {
+    if (!autoScroll || !Number.isFinite(Number(activeIndex)) || !scrollRef.current || labels.length < 2) {
       return;
     }
 
@@ -850,13 +935,9 @@ export default function LapPerformanceAnalysis() {
   );
   const replayDurationMs = replayTimeline[replayTimeline.length - 1] || 0;
   const replayIndex = replayIndexForTime(replayTimeline, replayTimeMs);
-  const activeSampleIndex = isReplaying
-    ? replayIndex
-    : hoveredSampleIndex ?? replayIndex;
-  const activeSample =
-    Number.isInteger(activeSampleIndex) && activeSampleIndex >= 0
-      ? traces[activeSampleIndex] || null
-      : null;
+  const replayPosition = replayPositionForTime(replayTimeline, replayTimeMs);
+  const activeSampleIndex = hoveredSampleIndex ?? replayPosition ?? replayIndex;
+  const activeSample = interpolateReplaySample(traces, activeSampleIndex);
 
   useEffect(() => {
     setIsReplaying(false);
