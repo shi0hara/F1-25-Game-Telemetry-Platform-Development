@@ -687,6 +687,19 @@ th {
     animation: none;
   }
 
+  .route-transition-shell,
+  .route-transition-shell .page-container > * {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+
+  .route-transition-shell::before,
+  .route-transition-shell::after {
+    display: none;
+    opacity: 0;
+  }
+
   .auth-launch .login-btn {
     animation: none;
   }

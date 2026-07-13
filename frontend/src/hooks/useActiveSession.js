@@ -203,10 +203,10 @@ export default function useActiveSession(username) {
           ...docSnap.data(),
         }));
 
-        const activeDocs = docs.filter(isActiveSession);
-        const bestSession = pickBestSession(activeDocs);
+        const bestSession = pickBestSession(docs);
 
-        // Show full session history in the picker, but only auto-select active sessions.
+        // Keep the full history visible and auto-select the best available session.
+        // Active sessions still win, but ended sessions are usable for review pages.
         setSessions(docs);
         setSessionId(bestSession?.id || null);
         setSessionData(bestSession || null);
