@@ -21,39 +21,11 @@
 .nav-subbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   padding: 8px 24px;
   background: linear-gradient(90deg, rgba(2, 4, 8, 0.96) 0%, rgba(8, 11, 18, 0.94) 100%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.nav-event {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-}
-
-.event-round {
-  color: #8da3d1;
-  font-family: var(--font-family-display);
-  font-size: 1.1rem;
-  letter-spacing: 0.06em;
-}
-
-.event-date {
-  color: #d6deef;
-  font-family: var(--font-family-display);
-  font-size: 1.1rem;
-  letter-spacing: 0.06em;
-}
-
-.event-track {
-  color: #ffffff;
-  font-family: var(--font-family-display);
-  font-size: 1.45rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .nav-utility-pills {

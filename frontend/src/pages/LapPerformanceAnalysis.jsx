@@ -865,6 +865,7 @@ export default function LapPerformanceAnalysis() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [analysisView, setAnalysisView] = useState("beginner");
   const [hoveredSampleIndex, setHoveredSampleIndex] = useState(null);
   const [isReplaying, setIsReplaying] = useState(false);
   const [replayTimeMs, setReplayTimeMs] = useState(0);
@@ -952,6 +953,7 @@ export default function LapPerformanceAnalysis() {
     () => buildReplayTimeline(traces, lap),
     [lap.lapTimeMs, traces]
   );
+  const isBeginnerView = analysisView === "beginner";
   const replayDurationMs = replayTimeline[replayTimeline.length - 1] || 0;
   const replayIndex = replayIndexForTime(replayTimeline, replayTimeMs);
   const replayPosition = replayPositionForTime(replayTimeline, replayTimeMs);
@@ -989,6 +991,12 @@ export default function LapPerformanceAnalysis() {
     frameId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frameId);
   }, [isReplaying, replayDurationMs, replaySpeed, traces.length]);
+
+  useEffect(() => {
+    if (isBeginnerView) {
+      setIsReplaying(false);
+    }
+  }, [isBeginnerView]);
 
   function handleReplayPlayPause() {
     if (traces.length < 2 || replayDurationMs <= 0) return;
@@ -1039,6 +1047,28 @@ export default function LapPerformanceAnalysis() {
           <p style={{ color: "#94a3b8", marginTop: 4 }}>
             Post-race analysis for one saved lap.
           </p>
+          <div
+            className={`lap-view-switch ${isBeginnerView ? "is-beginner" : "is-advanced"}`}
+            role="tablist"
+            aria-label="Analysis view mode"
+          >
+            <button
+              type="button"
+              className={isBeginnerView ? "active" : ""}
+              onClick={() => setAnalysisView("beginner")}
+              aria-selected={isBeginnerView}
+            >
+              Beginner
+            </button>
+            <button
+              type="button"
+              className={!isBeginnerView ? "active" : ""}
+              onClick={() => setAnalysisView("advanced")}
+              aria-selected={!isBeginnerView}
+            >
+              Advanced
+            </button>
+          </div>
         </div>
         <Link
           to="/leaderboard"
@@ -1077,26 +1107,12 @@ export default function LapPerformanceAnalysis() {
                 <p style={{ color: "#94a3b8", marginTop: 4 }}>
                   {session.username || "Unknown Driver"} | {formatDateTime(lap.recordedAt || session.startedAt)}
                 </p>
+                {isBeginnerView && (
+                  <p style={{ color: "#a8b2c8", marginTop: 8, marginBottom: 0 }}>
+                    Beginner mode shows essential lap insights. Switch to Advanced for full replay, map, and telemetry overlays.
+                  </p>
+                )}
               </div>
-
-              <button
-                type="button"
-                disabled
-                style={{
-                  padding: "9px 13px",
-                  borderRadius: 8,
-                  border: stats.drs?.used
-                    ? "1px solid var(--color-accent-green)"
-                    : "1px solid rgba(255,255,255,0.16)",
-                  background: stats.drs?.used
-                    ? "rgba(34,197,94,0.16)"
-                    : "rgba(255,255,255,0.05)",
-                  color: stats.drs?.used ? "#86efac" : "#cbd5e1",
-                  cursor: "default",
-                }}
-              >
-                DRS {stats.drs?.used ? "Used" : "Not Used"}
-              </button>
             </div>
 
             <div
@@ -1124,24 +1140,28 @@ export default function LapPerformanceAnalysis() {
                 color={lap.valid ? "#22c55e" : "#f87171"}
               />
               <StatBox label="Track" value={session.trackName || "-"} subvalue={session.trackKey || ""} />
-              <StatBox
-                label="Cornering Speed"
-                value={formatNumber(stats.cornering?.averageSpeedKph, 1, " km/h")}
-                subvalue={
-                  stats.cornering?.cornerCount
-                    ? stats.cornering.cornerCount + " detected corner zones"
-                    : "Estimated from steering samples"
-                }
-              />
-              <StatBox
-                label="Braking Distance"
-                value={formatNumber(stats.braking?.longestDistanceM, 1, " m")}
-                subvalue={
-                  stats.braking?.zoneCount
-                    ? stats.braking.zoneCount + " braking zones"
-                    : "Estimated from brake trace"
-                }
-              />
+              {!isBeginnerView && (
+                <StatBox
+                  label="Cornering Speed"
+                  value={formatNumber(stats.cornering?.averageSpeedKph, 1, " km/h")}
+                  subvalue={
+                    stats.cornering?.cornerCount
+                      ? stats.cornering.cornerCount + " detected corner zones"
+                      : "Estimated from steering samples"
+                  }
+                />
+              )}
+              {!isBeginnerView && (
+                <StatBox
+                  label="Braking Distance"
+                  value={formatNumber(stats.braking?.longestDistanceM, 1, " m")}
+                  subvalue={
+                    stats.braking?.zoneCount
+                      ? stats.braking.zoneCount + " braking zones"
+                      : "Estimated from brake trace"
+                  }
+                />
+              )}
             </div>
           </div>
 
@@ -1176,48 +1196,54 @@ export default function LapPerformanceAnalysis() {
             </div>
           </div>
 
-          <ReplayControls
-            traces={traces}
-            replayTimeMs={replayTimeMs}
-            replayDurationMs={replayDurationMs}
-            replaySpeed={replaySpeed}
-            isReplaying={isReplaying}
-            activeSample={activeSample}
-            onPlayPause={handleReplayPlayPause}
-            onRestart={handleReplayRestart}
-            onSeekBy={handleReplaySeekBy}
-            onSeekTo={handleReplaySeekTo}
-            onSpeedStep={handleReplaySpeedStep}
-          />
-
-          <PostLapTelemetryMap
-            apiBase={API_BASE}
-            trackKey={session.trackKey}
-            traces={traces}
-            activeIndex={activeSampleIndex}
-            sectorBoundaries={sectorBoundaries}
-          />
-
-          {traces.length === 0 ? (
-            <div className="card">
-              <h2>Telemetry Graphs</h2>
-              <p style={{ color: "#94a3b8" }}>
-                No raw telemetry samples were saved for this lap, so only timing data is available.
-              </p>
-            </div>
-          ) : (
-            <CombinedTelemetryGraph
-              labels={labels}
+          {!isBeginnerView && (
+            <ReplayControls
               traces={traces}
-              visibleMetrics={visibleMetrics}
-              onToggle={toggleMetric}
-              activeIndex={activeSampleIndex}
-              onHoverIndex={(index) => {
-                if (!isReplaying) setHoveredSampleIndex(index);
-              }}
-              sectorBoundaries={sectorBoundaries}
-              autoScroll={hoveredSampleIndex === null}
+              replayTimeMs={replayTimeMs}
+              replayDurationMs={replayDurationMs}
+              replaySpeed={replaySpeed}
+              isReplaying={isReplaying}
+              activeSample={activeSample}
+              onPlayPause={handleReplayPlayPause}
+              onRestart={handleReplayRestart}
+              onSeekBy={handleReplaySeekBy}
+              onSeekTo={handleReplaySeekTo}
+              onSpeedStep={handleReplaySpeedStep}
             />
+          )}
+
+          {!isBeginnerView && (
+            <PostLapTelemetryMap
+              apiBase={API_BASE}
+              trackKey={session.trackKey}
+              traces={traces}
+              activeIndex={activeSampleIndex}
+              sectorBoundaries={sectorBoundaries}
+            />
+          )}
+
+          {!isBeginnerView && (
+            traces.length === 0 ? (
+              <div className="card">
+                <h2>Telemetry Graphs</h2>
+                <p style={{ color: "#94a3b8" }}>
+                  No raw telemetry samples were saved for this lap, so only timing data is available.
+                </p>
+              </div>
+            ) : (
+              <CombinedTelemetryGraph
+                labels={labels}
+                traces={traces}
+                visibleMetrics={visibleMetrics}
+                onToggle={toggleMetric}
+                activeIndex={activeSampleIndex}
+                onHoverIndex={(index) => {
+                  if (!isReplaying) setHoveredSampleIndex(index);
+                }}
+                sectorBoundaries={sectorBoundaries}
+                autoScroll={hoveredSampleIndex === null}
+              />
+            )
           )}
         </>
       )}

@@ -76,13 +76,7 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
         </div>
       </nav>
 
-      <div className="nav-subbar" aria-label="Race Utility">
-        <div className="nav-event">
-          <span className="event-round">R10</span>
-          <span className="event-date">17 - 19 JUL</span>
-          <strong className="event-track">Belgium</strong>
-        </div>
-
+      <div className="nav-subbar" aria-label="Utility">
         <div className="nav-utility-pills">
           <span className="utility-pill">Race Week</span>
           <span className="utility-pill">Session: {currentDate}</span>

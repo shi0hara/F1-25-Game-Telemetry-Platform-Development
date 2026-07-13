@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
@@ -53,6 +53,70 @@ const AdminRoute = ({ user, children }) => {
   }
 
   return children;
+};
+
+const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
+  const location = useLocation();
+  const routeKey = `${location.pathname}${location.search}`;
+
+  return (
+    <div key={routeKey} className="route-transition-shell">
+      <Routes location={location}>
+        <Route path="/" element={<Dashboard />} />
+        <Route
+          path="/login"
+          element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" replace />}
+        />
+        <Route path="/contact" element={<Contact />} />
+        <Route
+          path="/live"
+          element={
+            <ProtectedRoute user={user}>
+              <LiveTelemetry currentUser={user} sessionId={sessionId} />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route
+          path="/analysis/:sessionId/lap/:lapId"
+          element={<LapPerformanceAnalysis />}
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute user={user}>
+              <Profile username={username} sessionId={sessionId} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/edit-profile"
+          element={
+            <ProtectedRoute user={user}>
+              <EditProfile username={username} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute user={user}>
+              <AdminUsers />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/calibrate"
+          element={
+            <AdminRoute user={user}>
+              <TrackCalibration username={username} />
+            </AdminRoute>
+          }
+        />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </div>
+  );
 };
 
 export default function App() {
@@ -113,60 +177,12 @@ export default function App() {
         )}
 
         <main className="app-main">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route
-              path="/login"
-              element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" replace />}
-            />
-            <Route path="/contact" element={<Contact />} />
-            <Route
-              path="/live"
-              element={
-                <ProtectedRoute user={user}>
-                  <LiveTelemetry currentUser={user} sessionId={sessionId} />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route
-              path="/analysis/:sessionId/lap/:lapId"
-              element={<LapPerformanceAnalysis />}
-            />
-            <Route
-              path="/profile"
-              element={
-                <ProtectedRoute user={user}>
-                  <Profile username={username} sessionId={sessionId} />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/edit-profile"
-              element={
-                <ProtectedRoute user={user}>
-                  <EditProfile username={username} />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <AdminRoute user={user}>
-                  <AdminUsers />
-                </AdminRoute>
-              }
-            />
-            <Route
-              path="/calibrate"
-              element={
-                <AdminRoute user={user}>
-                  <TrackCalibration username={username} />
-                </AdminRoute>
-              }
-            />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+          <AnimatedAppRoutes
+            user={user}
+            sessionId={sessionId}
+            handleLogin={handleLogin}
+            username={username}
+          />
         </main>
 
         <Footer />
