@@ -1158,7 +1158,7 @@ export default function LapPerformanceAnalysis() {
                 value={lap.valid ? "Valid" : "Invalid"}
                 color={lap.valid ? "#22c55e" : "#f87171"}
               />
-              <StatBox label="Track" value={session.trackName || "-"} subvalue={session.trackKey || ""} />
+              <StatBox label="Track" value={session.trackName || "-"} />
               {!isBeginnerView && (
                 <StatBox
                   label="Cornering Speed"
