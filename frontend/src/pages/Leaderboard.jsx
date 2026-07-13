@@ -15,6 +15,7 @@ const API_BASE =
 const FALLBACK_SESSION_LIMIT = 120;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
+const SECTOR_BEST_PURPLE = "#a855f7";
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -38,6 +39,56 @@ function formatSector(ms) {
   return Number.isFinite(Number(ms)) && Number(ms) > 0
     ? formatLapTime(Number(ms))
     : "-";
+}
+
+function leaderboardRowKey(row) {
+  return [
+    row.userKey || row.userId || row.username || "driver",
+    row.sessionId || "session",
+    row.lapId || row.lapNumber || "lap",
+  ].join("|");
+}
+
+function findBestSectorCells(rows) {
+  const best = {
+    sector1Ms: null,
+    sector2Ms: null,
+    sector3Ms: null,
+  };
+
+  for (const row of rows) {
+    for (const sectorKey of Object.keys(best)) {
+      const value = Number(row[sectorKey]);
+      if (!Number.isFinite(value) || value <= 0) continue;
+
+      if (!best[sectorKey] || value < best[sectorKey].value) {
+        best[sectorKey] = {
+          value,
+          cellKey: leaderboardRowKey(row) + "|" + sectorKey,
+        };
+      }
+    }
+  }
+
+  return {
+    sector1Ms: best.sector1Ms?.cellKey || null,
+    sector2Ms: best.sector2Ms?.cellKey || null,
+    sector3Ms: best.sector3Ms?.cellKey || null,
+  };
+}
+
+function isBestSectorCell(row, sectorKey, bestSectorCells) {
+  return bestSectorCells[sectorKey] === leaderboardRowKey(row) + "|" + sectorKey;
+}
+
+function bestSectorStyle(row, sectorKey, bestSectorCells) {
+  if (!isBestSectorCell(row, sectorKey, bestSectorCells)) return undefined;
+
+  return {
+    color: SECTOR_BEST_PURPLE,
+    fontWeight: 800,
+    textShadow: "0 0 10px rgba(168, 85, 247, 0.5)",
+  };
 }
 
 function toMillis(value) {
@@ -339,6 +390,7 @@ export default function Leaderboard() {
   }, [selectedTrackKey]);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
+  const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
 
   return (
     <div className="page-container">
@@ -477,9 +529,15 @@ export default function Leaderboard() {
                         {row.lapTime || formatLapTime(row.lapTimeMs)}
                       </td>
                       <td>{isLeader ? "-" : formatGap(row.gapToLeaderMs)}</td>
-                      <td>{formatSector(row.sector1Ms)}</td>
-                      <td>{formatSector(row.sector2Ms)}</td>
-                      <td>{formatSector(row.sector3Ms)}</td>
+                      <td style={bestSectorStyle(row, "sector1Ms", bestSectorCells)}>
+                        {formatSector(row.sector1Ms)}
+                      </td>
+                      <td style={bestSectorStyle(row, "sector2Ms", bestSectorCells)}>
+                        {formatSector(row.sector2Ms)}
+                      </td>
+                      <td style={bestSectorStyle(row, "sector3Ms", bestSectorCells)}>
+                        {formatSector(row.sector3Ms)}
+                      </td>
                       <td title={row.sessionId}>
                         {shortSessionId(row.sessionId)} | {formatDate(row.sessionStartedAt)}
                       </td>
