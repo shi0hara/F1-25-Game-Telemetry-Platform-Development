@@ -688,7 +688,6 @@ function CombinedTelemetryGraph({
   visibleMetrics,
   onToggle,
   activeIndex,
-  activeSample,
   onHoverIndex,
   sectorBoundaries,
   autoScroll = false,
@@ -806,24 +805,7 @@ function CombinedTelemetryGraph({
           marginBottom: 12,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 14,
-            flexWrap: "wrap",
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
-          <SteeringWheel
-            steering={activeSample?.steering}
-            throttle={activeSample?.throttlePct}
-            brake={activeSample?.brakePct}
-            label="Active Steering"
-            size={116}
-            maxRotationDeg={240}
-          />
-        </div>
+        <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {GRAPH_METRICS.map((metric) => (
             <label
@@ -1230,7 +1212,6 @@ export default function LapPerformanceAnalysis() {
               visibleMetrics={visibleMetrics}
               onToggle={toggleMetric}
               activeIndex={activeSampleIndex}
-              activeSample={activeSample}
               onHoverIndex={(index) => {
                 if (!isReplaying) setHoveredSampleIndex(index);
               }}
