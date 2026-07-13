@@ -609,6 +609,7 @@ function ReplayControls({
           steering={activeSample?.steering}
           label="Replay Steering"
           size={152}
+          maxRotationDeg={220}
         />
 
         <div
@@ -685,6 +686,7 @@ function CombinedTelemetryGraph({
   visibleMetrics,
   onToggle,
   activeIndex,
+  activeSample,
   onHoverIndex,
   sectorBoundaries,
   autoScroll = false,
@@ -802,7 +804,22 @@ function CombinedTelemetryGraph({
           marginBottom: 12,
         }}
       >
-        <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            flexWrap: "wrap",
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
+          <SteeringWheel
+            steering={activeSample?.steering}
+            label="Active Steering"
+            size={116}
+            maxRotationDeg={220}
+          />
+        </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {GRAPH_METRICS.map((metric) => (
             <label
@@ -1209,6 +1226,7 @@ export default function LapPerformanceAnalysis() {
               visibleMetrics={visibleMetrics}
               onToggle={toggleMetric}
               activeIndex={activeSampleIndex}
+              activeSample={activeSample}
               onHoverIndex={(index) => {
                 if (!isReplaying) setHoveredSampleIndex(index);
               }}

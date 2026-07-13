@@ -104,9 +104,8 @@ export default function SteeringWheel({
             strokeLinecap="round"
           />
           <g
+            transform={"rotate(" + rotation + " 110 110)"}
             style={{
-              transform: "rotate(" + rotation + "deg)",
-              transformOrigin: "110px 110px",
               transition: "transform 80ms linear",
             }}
           >
@@ -156,14 +155,29 @@ export default function SteeringWheel({
             />
             <line
               x1="110"
-              y1="26"
+              y1="22"
               x2="110"
-              y2="48"
+              y2="50"
               stroke={accent}
-              strokeWidth="8"
+              strokeWidth="10"
               strokeLinecap="round"
             />
+            <circle
+              cx="110"
+              cy="24"
+              r="7"
+              fill={accent}
+            />
           </g>
+          <path
+            d={safeValue < 0 ? "M70 190 L38 190 L55 170" : "M150 190 L182 190 L165 170"}
+            fill="none"
+            stroke={accent}
+            strokeWidth="8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={value === null || absValue < 0.035 ? 0.18 : 0.9}
+          />
         </svg>
       </div>
 
