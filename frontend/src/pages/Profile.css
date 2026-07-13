@@ -4,10 +4,6 @@
   --profile-team-accent: #ffd966;
 }
 
-.profile-page h1 .text-green {
-  color: var(--profile-team-accent);
-}
-
 .profile-page .card {
   border-left-color: var(--profile-team-primary);
   background: linear-gradient(
@@ -15,6 +11,12 @@
     color-mix(in srgb, var(--profile-team-secondary) 82%, #ffffff 18%) 0%,
     color-mix(in srgb, var(--profile-team-secondary) 92%, #000000 8%) 100%
   );
+  border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
+.profile-page h1 .text-green {
+  color: var(--profile-team-accent);
 }
 
 .profile-page-header {
@@ -22,12 +24,19 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   color: var(--color-text-muted);
+}
+
+.profile-theme-line {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
 }
 
 .profile-page-header strong {
   color: var(--profile-team-accent);
+  font-weight: 800;
 }
 
 .profile-saving-tag {
@@ -43,43 +52,69 @@
 
 .profile-media-card {
   margin-bottom: 20px;
+  padding: 22px;
+}
+
+.profile-media-card h2,
+.team-card h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
 }
 
 .profile-help-text {
-  margin-top: 0;
+  margin: 0;
+  max-width: 72ch;
+  line-height: 1.45;
   color: var(--color-text-muted);
 }
 
 .profile-photo-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-top: 18px;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.profile-photo-slot {
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--profile-team-primary) 26%, #ffffff 74%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--profile-team-secondary) 86%, #ffffff 14%) 0%,
+    color-mix(in srgb, var(--profile-team-secondary) 93%, #000000 7%) 100%
+  );
 }
 
 .profile-photo-slot h3 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font-size: 14px;
   letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--profile-team-accent) 70%, #ffffff 30%);
 }
 
 .profile-photo {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  border-radius: 10px;
+  border-radius: 11px;
   border: 2px solid color-mix(in srgb, var(--profile-team-primary) 40%, #ffffff 60%);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .profile-placeholder {
-  border-radius: 10px;
+  border-radius: 11px;
   border: 2px dashed color-mix(in srgb, var(--profile-team-primary) 35%, #ffffff 65%);
-  min-height: 180px;
+  min-height: 190px;
   display: grid;
   place-items: center;
   color: var(--color-text-muted);
-  padding: 12px;
+  padding: 16px;
   text-align: center;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--profile-team-secondary) 92%, #ffffff 8%);
 }
 
 .camera-panel {
@@ -166,18 +201,32 @@
   background: transparent;
   color: var(--profile-team-accent);
   border: 1px solid color-mix(in srgb, var(--profile-team-accent) 45%, #ffffff 55%);
-  border-radius: 4px;
-  padding: 10px 14px;
+  border-radius: 8px;
+  padding: 11px 14px;
   cursor: pointer;
   font-weight: 700;
   font-style: normal;
   font-size: inherit;
   text-transform: uppercase;
   text-align: center;
+  letter-spacing: 0.02em;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
 }
 
 .btn-secondary:hover {
   background: color-mix(in srgb, var(--profile-team-accent) 18%, transparent 82%);
+  border-color: color-mix(in srgb, var(--profile-team-accent) 68%, #ffffff 32%);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.profile-back-btn {
+  min-width: 210px;
 }
 
 .upload-trigger {
@@ -356,12 +405,13 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 16px;
+  margin-bottom: 10px;
 }
 
 .edit-profile-header h1 {
   margin: 0;
+  font-size: clamp(2rem, 4vw, 2.35rem);
 }
 
 .profile-user-header {
@@ -403,7 +453,8 @@
   margin-top: 10px;
   width: 100%;
   text-align: center;
-  padding: 8px 10px;
+  min-height: 44px;
+  padding: 10px 10px;
 }
 
 .btn-set-display.active {
@@ -414,5 +465,19 @@
 }
 
 .camera-section {
-  margin-top: 10px;
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--profile-team-primary) 24%, transparent 76%);
+}
+
+@media (max-width: 900px) {
+  .profile-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profile-back-btn {
+    min-width: 0;
+    width: 100%;
+  }
 }

@@ -516,13 +516,13 @@ export default function EditProfile({ username }) {
         <h1>
           Edit <span className="text-green">Profile</span>
         </h1>
-        <button type="button" className="btn-secondary" onClick={() => navigate("/profile")}>
+        <button type="button" className="btn-secondary profile-back-btn" onClick={() => navigate("/profile")}>
           ← Back to Profile
         </button>
       </div>
 
       <div className="profile-page-header">
-        <p>
+        <p className="profile-theme-line">
           Theme synced to: <strong>{activeTeamTheme.label}</strong>
         </p>
         {savingProfile && <span className="profile-saving-tag">Saving profile...</span>}
