@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   collection,
@@ -130,12 +130,59 @@ function normalizeKey(value) {
     .replace(/^_+|_+$/g, "");
 }
 
+// Map of known F1 track IDs to canonical names (mirrors revamp.py TRACK_ID_TO_NAME)
+const TRACK_ID_TO_NAME = {
+  0: "Melbourne",
+  2: "Shanghai",
+  3: "Sakhir (Bahrain)",
+  4: "Catalunya",
+  5: "Monaco",
+  6: "Montreal",
+  7: "Silverstone",
+  9: "Hungaroring",
+  10: "Spa",
+  11: "Monza",
+  12: "Singapore",
+  13: "Suzuka",
+  14: "Abu Dhabi",
+  15: "Texas",
+  16: "Brazil",
+  17: "Austria",
+  19: "Mexico",
+  20: "Baku (Azerbaijan)",
+  26: "Zandvoort",
+  27: "Imola",
+  29: "Jeddah",
+  30: "Miami",
+  31: "Las Vegas",
+  32: "Losail",
+  39: "Silverstone (Reverse)",
+  40: "Austria (Reverse)",
+  41: "Zandvoort (Reverse)",
+};
+
+function resolveTrackName(trackId, trackName) {
+  if (trackName && trackName !== "Unknown Track") return trackName;
+  if (trackId !== null && trackId !== undefined && trackId !== "") {
+    return TRACK_ID_TO_NAME[Number(trackId)] || trackName || "Unknown Track";
+  }
+  return trackName || "Unknown Track";
+}
+
 function trackKeyFrom(trackId, trackName) {
+  // Prefer trackName as the canonical key to avoid duplicates when some
+  // sessions have a numeric trackId and others only have the name string.
+  const resolved = resolveTrackName(trackId, trackName);
+  const normalized = normalizeKey(resolved);
+  if (normalized && normalized !== "unknown_track") {
+    return `track_${normalized}`;
+  }
+
   if (trackId !== null && trackId !== undefined && trackId !== "") {
     return `track_${Number(trackId)}`;
   }
 
-  return `track_${normalizeKey(trackName || "unknown_track") || "unknown_track"}`;
+  return "track_unknown_track";
 }
 
 function isValidLap(lap) {
@@ -151,8 +198,10 @@ function isValidLap(lap) {
 function buildFallbackEntry(session, lap) {
   const lapTimeMs = Number(lap.lapTimeMs);
   const trackId = lap.trackId ?? session.trackId ?? null;
-  const trackName = lap.trackName || session.trackName || "Unknown Track";
-  const trackKey = session.trackKey || trackKeyFrom(trackId, trackName);
+  const trackName = resolveTrackName(trackId, lap.trackName || session.trackName || null);
+  // Always recompute trackKey from trackName to avoid duplicates caused by
+  // stale or inconsistent trackKey values stored in Firestore documents.
+  const trackKey = trackKeyFrom(trackId, trackName);
   const userKey =
     session.userId ||
     normalizeKey(session.username) ||
@@ -264,13 +313,17 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
     tracks[0] ||
     null;
   const activeTrackKey = activeTrack?.trackKey || null;
-  const activeBestByUser = activeTrackKey
-    ? bestByTrackAndUser.get(activeTrackKey) || new Map()
-    : new Map();
-  const rows = rankEntries([...activeBestByUser.values()]).slice(0, 50);
+
+  // Collect best lap per user for ALL tracks so client-side switching works
+  const allRows = [];
+  for (const [, bestByUser] of bestByTrackAndUser) {
+    for (const entry of bestByUser.values()) {
+      allRows.push(entry);
+    }
+  }
 
   return {
-    rows,
+    rows: allRows,
     tracks,
     activeTrack,
     activeTrackKey,
@@ -279,8 +332,8 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
       leaderboardType: "best_valid_actual_lap_per_user_per_track",
       trackScoped: true,
       trackCount: tracks.length,
-      validLaps: activeTrack?.validLaps ?? 0,
-      userCount: activeBestByUser.size,
+      validLaps: tracks.reduce((sum, t) => sum + t.validLaps, 0),
+      userCount: new Set(allRows.map((r) => r.userKey)).size,
     },
   };
 }
@@ -326,6 +379,74 @@ function isTrackScopedPayload(data) {
   );
 }
 
+/**
+ * Merges tracks that resolve to the same canonical key (by trackName).
+ * This handles the case where the backend or Firestore data has the same track
+ * stored under different keys (e.g. "track_13" vs "track_suzuka").
+ */
+function normalizePayloadTrackKeys(payload, selectedTrackKey) {
+  const tracks = payload.tracks || [];
+  const rows = payload.rows || [];
+
+  // Build a mapping from original trackKey → canonical trackKey
+  const keyMap = new Map();
+  const mergedTracks = new Map();
+
+  for (const track of tracks) {
+    const canonicalKey = trackKeyFrom(track.trackId, track.trackName);
+    keyMap.set(track.trackKey, canonicalKey);
+
+    if (mergedTracks.has(canonicalKey)) {
+      const existing = mergedTracks.get(canonicalKey);
+      existing.validLaps += track.validLaps || 0;
+      existing.userCount += track.userCount || 0;
+      existing.latestActivityMs = Math.max(
+        existing.latestActivityMs || 0,
+        track.latestActivityMs || 0
+      );
+      if (
+        track.bestLapTimeMs &&
+        (!existing.bestLapTimeMs || track.bestLapTimeMs < existing.bestLapTimeMs)
+      ) {
+        existing.bestLapTimeMs = track.bestLapTimeMs;
+        existing.bestLapTime = formatLapTime(track.bestLapTimeMs);
+      }
+    } else {
+      mergedTracks.set(canonicalKey, {
+        ...track,
+        trackKey: canonicalKey,
+      });
+    }
+  }
+
+  const normalizedTracks = [...mergedTracks.values()];
+
+  // Determine the active track key after normalization
+  const resolvedSelectedKey = selectedTrackKey
+    ? keyMap.get(selectedTrackKey) || selectedTrackKey
+    : null;
+  const activeTrack =
+    normalizedTracks.find((t) => t.trackKey === resolvedSelectedKey) ||
+    normalizedTracks.find((t) => t.trackKey === (keyMap.get(payload.activeTrackKey) || payload.activeTrackKey)) ||
+    normalizedTracks[0] ||
+    null;
+  const activeTrackKey = activeTrack?.trackKey || null;
+
+  // Re-key rows
+  const normalizedRows = rows.map((row) => ({
+    ...row,
+    trackKey: keyMap.get(row.trackKey) || trackKeyFrom(row.trackId, row.trackName),
+  }));
+
+  return {
+    ...payload,
+    tracks: normalizedTracks,
+    rows: normalizedRows,
+    activeTrack,
+    activeTrackKey,
+  };
+}
+
 export default function Leaderboard() {
   const [rows, setRows] = useState([]);
   const [tracks, setTracks] = useState([]);
@@ -336,6 +457,10 @@ export default function Leaderboard() {
   const [notice, setNotice] = useState("");
   const [meta, setMeta] = useState(null);
   const navigate = useNavigate();
+
+  // Store all entries so track switching can happen client-side without re-fetching
+  const [allEntries, setAllEntries] = useState([]);
+  const [allTracks, setAllTracks] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,9 +474,7 @@ export default function Leaderboard() {
         let payload = null;
 
         try {
-          const url = selectedTrackKey
-            ? `${API_BASE}/leaderboard?limit=50&trackKey=${encodeURIComponent(selectedTrackKey)}`
-            : `${API_BASE}/leaderboard?limit=50`;
+          const url = `${API_BASE}/leaderboard?limit=50`;
           const res = await fetch(url);
           const contentType = res.headers.get("content-type") || "";
           const data = contentType.includes("application/json")
@@ -368,17 +491,35 @@ export default function Leaderboard() {
             throw new Error("Backend leaderboard is not track-scoped yet.");
           }
 
+          // Backend must return rows for all tracks for client-side switching.
+          // If it only returns rows for one track, fall through to Firestore.
+          const trackKeysInRows = new Set(
+            (data.rows || []).map((r) => r.trackKey)
+          );
+          if (
+            Array.isArray(data.tracks) &&
+            data.tracks.length > 1 &&
+            trackKeysInRows.size <= 1
+          ) {
+            throw new Error("Backend only returned rows for one track.");
+          }
+
           payload = data;
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(selectedTrackKey);
+          payload = await loadLeaderboardFromFirestore(null);
           setNotice("");
         }
 
         if (cancelled) return;
-        setRows(Array.isArray(payload.rows) ? payload.rows : []);
-        setTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
-        setActiveTrack(payload.activeTrack || null);
+
+        // Normalize track keys in the payload to merge duplicates
+        if (Array.isArray(payload.tracks) && payload.tracks.length > 0) {
+          payload = normalizePayloadTrackKeys(payload, null);
+        }
+
+        setAllTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
+        setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
         setMeta(payload.meta || null);
 
         if (!selectedTrackKey && payload.activeTrackKey) {
@@ -398,10 +539,79 @@ export default function Leaderboard() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTrackKey]);
+  }, []);
+
+  // Client-side track switching: re-derive rows whenever selectedTrackKey changes
+  useEffect(() => {
+    if (allTracks.length === 0) return;
+
+    const active =
+      allTracks.find((t) => t.trackKey === selectedTrackKey) ||
+      allTracks[0] ||
+      null;
+    setActiveTrack(active);
+    setTracks(allTracks);
+
+    if (!active) {
+      setRows([]);
+      return;
+    }
+
+    // If allEntries already contains all tracks' rows (from Firestore fallback
+    // which builds the full dataset), filter and rank for the active track.
+    // For the initial load where rows were already filtered to one track,
+    // we need to re-fetch from Firestore if the track doesn't match.
+    const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey);
+    if (trackRows.length > 0 || active.trackKey === selectedTrackKey) {
+      setRows(rankEntries(trackRows).slice(0, 50));
+    } else {
+      setRows([]);
+    }
+  }, [selectedTrackKey, allTracks, allEntries]);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
   const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
+
+  // Custom searchable dropdown state
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [trackSearch, setTrackSearch] = useState("");
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  const selectedLabel = useMemo(() => {
+    const track = tracks.find(
+      (t) => t.trackKey === (activeTrack?.trackKey || selectedTrackKey)
+    );
+    if (!track) return "";
+    return `${track.trackName || track.trackKey} (${track.userCount})`;
+  }, [tracks, activeTrack, selectedTrackKey]);
+
+  const filteredTracks = useMemo(() => {
+    if (!trackSearch.trim()) return tracks;
+    const query = trackSearch.toLowerCase();
+    return tracks.filter((t) =>
+      (t.trackName || t.trackKey).toLowerCase().includes(query)
+    );
+  }, [tracks, trackSearch]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setDropdownOpen(false);
+        setTrackSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Focus search input when dropdown opens
+  useEffect(() => {
+    if (dropdownOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [dropdownOpen]);
 
   return (
     <div className="page-container">
@@ -426,20 +636,63 @@ export default function Leaderboard() {
         </div>
 
         {tracks.length > 0 && (
-          <div className="chip-row">
-            {tracks.map((track) => {
-              const selected = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
-              return (
-                <button
-                  key={track.trackKey}
-                  type="button"
-                  onClick={() => setSelectedTrackKey(track.trackKey)}
-                  className={selected ? "chip-btn active" : "chip-btn"}
-                >
-                  {track.trackName || track.trackKey} ({track.userCount})
-                </button>
-              );
-            })}
+          <div className="track-select-row" ref={dropdownRef}>
+            <button
+              type="button"
+              className="track-dropdown-trigger"
+              onClick={() => { setDropdownOpen((prev) => !prev); setTrackSearch(""); }}
+              aria-haspopup="listbox"
+              aria-expanded={dropdownOpen}
+            >
+              <span>{selectedLabel || "Select Track"}</span>
+              <svg className="track-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+
+            {dropdownOpen && (
+              <div className="track-dropdown-menu" role="listbox">
+                <div className="track-dropdown-search-wrap">
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    className="track-dropdown-search"
+                    placeholder="Search tracks..."
+                    value={trackSearch}
+                    onChange={(e) => setTrackSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setDropdownOpen(false);
+                        setTrackSearch("");
+                      }
+                    }}
+                  />
+                </div>
+                <ul className="track-dropdown-list">
+                  {filteredTracks.length === 0 && (
+                    <li className="track-dropdown-empty">No tracks found</li>
+                  )}
+                  {filteredTracks.map((track) => {
+                    const isActive = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
+                    return (
+                      <li
+                        key={track.trackKey}
+                        role="option"
+                        aria-selected={isActive}
+                        className={isActive ? "track-dropdown-item active" : "track-dropdown-item"}
+                        onClick={() => {
+                          setSelectedTrackKey(track.trackKey);
+                          setDropdownOpen(false);
+                          setTrackSearch("");
+                        }}
+                      >
+                        {track.trackName || track.trackKey} ({track.userCount})
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 

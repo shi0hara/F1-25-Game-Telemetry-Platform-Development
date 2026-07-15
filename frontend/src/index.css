@@ -314,6 +314,116 @@ textarea:focus {
   background: rgba(0, 166, 81, 0.18);
 }
 
+.track-select-row {
+  margin-top: 14px;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.track-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-family);
+  font-size: 0.95rem;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.track-dropdown-trigger:hover,
+.track-dropdown-trigger:focus {
+  border-color: rgba(0, 166, 81, 0.9);
+  background-color: rgba(0, 166, 81, 0.1);
+  outline: none;
+}
+
+.track-dropdown-trigger[aria-expanded="true"] {
+  border-color: rgba(0, 166, 81, 0.9);
+  background-color: rgba(0, 166, 81, 0.18);
+}
+
+.track-dropdown-chevron {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.track-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  background: #1a1a2e;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.track-dropdown-search-wrap {
+  padding: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.track-dropdown-search {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.track-dropdown-search:focus {
+  border-color: rgba(0, 166, 81, 0.7);
+}
+
+.track-dropdown-search::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.track-dropdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.track-dropdown-item {
+  padding: 9px 14px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: #fff;
+  transition: background-color 0.15s;
+}
+
+.track-dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.track-dropdown-item.active {
+  background-color: rgba(0, 166, 81, 0.18);
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.track-dropdown-empty {
+  padding: 12px 14px;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
 .notice-message {
   color: #facc15;
 }
