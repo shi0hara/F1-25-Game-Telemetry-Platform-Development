@@ -258,6 +258,72 @@ function trackKeyFrom(trackId, trackName) {
   return "track_unknown_track";
 }
 
+function normalizeCatalogTrack(track) {
+  const trackId = track?.trackId ?? null;
+  const trackName = resolveTrackName(trackId, track?.trackName || null);
+  const trackKey = track?.trackKey || trackKeyFrom(trackId, trackName);
+
+  return {
+    trackKey,
+    trackName: trackName || trackKey,
+    trackId,
+    validLaps: 0,
+    userCount: 0,
+    bestLapTimeMs: null,
+    bestLapTime: "-",
+    latestActivityMs: Number(track?.latestActivityMs) || 0,
+    catalogOnly: true,
+  };
+}
+
+function mergeScopedTracksWithCatalog(scopedTracks = [], catalogTracks = []) {
+  const merged = new Map();
+
+  for (const track of catalogTracks) {
+    const normalized = normalizeCatalogTrack(track);
+    if (!normalized.trackKey) continue;
+
+    const existing = merged.get(normalized.trackKey);
+    merged.set(normalized.trackKey, {
+      ...existing,
+      ...normalized,
+      latestActivityMs: Math.max(
+        existing?.latestActivityMs || 0,
+        normalized.latestActivityMs || 0
+      ),
+    });
+  }
+
+  for (const track of scopedTracks) {
+    const trackKey = track?.trackKey || trackKeyFrom(track?.trackId, track?.trackName);
+    if (!trackKey) continue;
+    const existing = merged.get(trackKey) || normalizeCatalogTrack(track);
+
+    merged.set(trackKey, {
+      ...existing,
+      ...track,
+      trackKey,
+      trackName: track.trackName || existing.trackName || trackKey,
+      validLaps: track.validLaps || 0,
+      userCount: track.userCount || 0,
+      latestActivityMs: Math.max(
+        existing.latestActivityMs || 0,
+        track.latestActivityMs || 0
+      ),
+      catalogOnly: false,
+    });
+  }
+
+  return [...merged.values()].sort((a, b) => {
+    const aHasScopedLaps = (a.validLaps || 0) > 0;
+    const bHasScopedLaps = (b.validLaps || 0) > 0;
+    if (aHasScopedLaps !== bHasScopedLaps) return bHasScopedLaps - aHasScopedLaps;
+    if ((b.latestActivityMs || 0) !== (a.latestActivityMs || 0)) {
+      return (b.latestActivityMs || 0) - (a.latestActivityMs || 0);
+    }
+    return String(a.trackName || "").localeCompare(String(b.trackName || ""));
+  });
+}
 function isValidLap(lap) {
   const lapTimeMs = Number(lap?.lapTimeMs);
   return (
@@ -335,7 +401,7 @@ function rankEntries(entries) {
   }));
 }
 
-function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "all") {
+function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "all", trackCatalog = []) {
   const trackStats = new Map();
   const bestByTrackAndUser = new Map();
 
@@ -382,7 +448,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
     }
   }
 
-  const tracks = [...trackStats.values()]
+  const scopedTracks = [...trackStats.values()]
     .map((track) => ({
       trackKey: track.trackKey,
       trackName: track.trackName,
@@ -397,6 +463,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
       if (b.latestActivityMs !== a.latestActivityMs) return b.latestActivityMs - a.latestActivityMs;
       return String(a.trackName || "").localeCompare(String(b.trackName || ""));
     });
+  const tracks = mergeScopedTracksWithCatalog(scopedTracks, trackCatalog);
 
   const activeTrack =
     tracks.find((track) => track.trackKey === selectedTrackKey) ||
@@ -424,7 +491,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
       leaderboardType: "best_valid_actual_lap_per_user_per_track",
       trackScoped: true,
       trackCount: tracks.length,
-      validLaps: tracks.reduce((sum, t) => sum + t.validLaps, 0),
+      validLaps: scopedTracks.reduce((sum, t) => sum + t.validLaps, 0),
       userCount: new Set(allRows.map((r) => r.userKey)).size,
     },
   };
@@ -478,8 +545,46 @@ async function loadSessionDocsForLeaderboard() {
     return bTime - aTime;
   });
 }
+function buildTrackCatalogFromSessionDocs(sessionDocs) {
+  const catalog = new Map();
+
+  for (const sessionDoc of sessionDocs) {
+    const session = sessionDoc.data();
+    const trackId = session.trackId ?? null;
+    const trackName = resolveTrackName(trackId, session.trackName || null);
+    const trackKey = trackKeyFrom(trackId, trackName);
+    const latestActivityMs = maxMillis(
+      session.endedAt,
+      session.latestTelemetryAt,
+      session.updatedAt,
+      session.startedAt,
+      session.createdAt
+    );
+
+    if (!catalog.has(trackKey)) {
+      catalog.set(trackKey, normalizeCatalogTrack({
+        trackKey,
+        trackName,
+        trackId,
+        latestActivityMs,
+      }));
+      continue;
+    }
+
+    const existing = catalog.get(trackKey);
+    existing.latestActivityMs = Math.max(existing.latestActivityMs || 0, latestActivityMs);
+  }
+
+  return mergeScopedTracksWithCatalog([], [...catalog.values()]);
+}
+
+async function loadTrackCatalogFromFirestore() {
+  const sessionDocs = await loadSessionDocsForLeaderboard();
+  return buildTrackCatalogFromSessionDocs(sessionDocs);
+}
 async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope = "all") {
   const sessionDocs = await loadSessionDocsForLeaderboard();
+  const trackCatalog = buildTrackCatalogFromSessionDocs(sessionDocs);
   const entries = [];
   let scannedLaps = 0;
 
@@ -495,7 +600,7 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope =
     });
   }
 
-  const payload = buildTrackScopedPayload(entries, selectedTrackKey, timeScope);
+  const payload = buildTrackScopedPayload(entries, selectedTrackKey, timeScope, trackCatalog);
   return {
     ...payload,
     meta: {
@@ -664,7 +769,34 @@ export default function Leaderboard() {
           payload = normalizePayloadTrackKeys(payload, null);
         }
 
-        setAllTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
+        let displayTracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+        if (timeScope !== "all") {
+          try {
+            const catalogTracks = await loadTrackCatalogFromFirestore();
+            const normalizedCatalog =
+              catalogTracks.length > 0
+                ? normalizePayloadTrackKeys({ tracks: catalogTracks, rows: [] }, null).tracks
+                : [];
+            displayTracks = mergeScopedTracksWithCatalog(displayTracks, normalizedCatalog);
+          } catch (catalogErr) {
+            console.warn("Leaderboard track catalog failed:", catalogErr);
+          }
+        }
+
+        payload = {
+          ...payload,
+          tracks: displayTracks,
+          activeTrack:
+            displayTracks.find((track) => track.trackKey === payload.activeTrackKey) ||
+            displayTracks[0] ||
+            null,
+          activeTrackKey:
+            displayTracks.find((track) => track.trackKey === payload.activeTrackKey)?.trackKey ||
+            displayTracks[0]?.trackKey ||
+            "",
+        };
+
+        setAllTracks(displayTracks);
         setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
         setMeta(payload.meta || null);
 
@@ -881,7 +1013,7 @@ export default function Leaderboard() {
         {error && <p className="error-message">{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p className="empty-state">No valid lap times found for this track yet.</p>
+          <p className="empty-state">{`No valid ${activeScope.label.toLowerCase()} lap times found for ${activeTrack?.trackName || "this track"} yet.`}</p>
         )}
 
         {!loading && !error && leader && (
@@ -998,5 +1130,8 @@ export default function Leaderboard() {
     </div>
   );
 }
+
+
+
 
 
