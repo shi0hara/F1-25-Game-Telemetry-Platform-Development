@@ -624,6 +624,7 @@ export default function TrackTelemetryMap({
   mapImageUrl = "/maps/default-track.png",
   selectedTrailKey = "current",
   onTrailOptionsChange,
+  liveMapPosition = null,
 }) {
   const canvasRef = useRef(null);
   const currentLapTrailRef = useRef([]);
@@ -692,6 +693,69 @@ export default function TrackTelemetryMap({
     const next = [...old, latest].slice(-1600);
     currentLapTrailRef.current = next;
     setCurrentLapTrail(next);
+  }
+
+  function applyLatestMapPosition(latest, sessionMapData = null) {
+    if (!latest || !hasNumber(latest.worldX) || !hasNumber(latest.worldZ)) {
+      if (sessionMapData) setSessionMap(sessionMapData);
+      return;
+    }
+
+    const freshness = readMapPointFreshness(latest);
+    const freshnessDelta = compareMapPointFreshness(
+      freshness,
+      latestLivePointFreshnessRef.current
+    );
+
+    if (freshnessDelta < 0) {
+      return;
+    }
+
+    if (freshnessDelta > 0) {
+      latestLivePointFreshnessRef.current = freshness;
+    }
+
+    if (sessionMapData) {
+      setSessionMap(sessionMapData);
+    } else {
+      setSessionMap((prev) => ({
+        ...(prev || {}),
+        latestMapPosition: latest,
+      }));
+    }
+
+    if (
+      freshnessDelta === 0 &&
+      isSameMapPosition(
+        currentLapTrailRef.current[currentLapTrailRef.current.length - 1],
+        latest
+      )
+    ) {
+      return;
+    }
+
+    const previousLapNumber = currentLapNumberRef.current;
+    const nextLapNumber = getLapNumber(latest, previousLapNumber);
+
+    if (previousLapNumber === null && nextLapNumber !== null) {
+      currentLapNumberRef.current = nextLapNumber;
+      setCurrentLapNumber(nextLapNumber);
+    }
+
+    if (
+      previousLapNumber !== null &&
+      nextLapNumber !== null &&
+      nextLapNumber !== previousLapNumber
+    ) {
+      saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
+
+      currentLapTrailRef.current = [];
+      setCurrentLapTrail([]);
+      currentLapNumberRef.current = nextLapNumber;
+      setCurrentLapNumber(nextLapNumber);
+    }
+
+    appendToCurrentLapTrail(latest);
   }
 
   useEffect(() => {
@@ -831,6 +895,10 @@ export default function TrackTelemetryMap({
   }, [apiBase, sessionId]);
 
   useEffect(() => {
+    applyLatestMapPosition(liveMapPosition);
+  }, [liveMapPosition]);
+
+  useEffect(() => {
     if (!apiBase || !sessionId) return undefined;
 
     const requestId = livePositionLoadSeqRef.current + 1;
@@ -860,64 +928,7 @@ export default function TrackTelemetryMap({
         const data = await res.json();
         if (!isCurrentRequest()) return;
 
-        const latest = data.latestMapPosition;
-
-        if (
-          latest &&
-          hasNumber(latest.worldX) &&
-          hasNumber(latest.worldZ)
-        ) {
-          const freshness = readMapPointFreshness(latest);
-          const freshnessDelta = compareMapPointFreshness(
-            freshness,
-            latestLivePointFreshnessRef.current
-          );
-
-          if (freshnessDelta < 0) {
-            return;
-          }
-
-          if (freshnessDelta > 0) {
-            latestLivePointFreshnessRef.current = freshness;
-          }
-
-          setSessionMap(data);
-
-          if (
-            freshnessDelta === 0 &&
-            isSameMapPosition(
-              currentLapTrailRef.current[currentLapTrailRef.current.length - 1],
-              latest
-            )
-          ) {
-            return;
-          }
-
-          const previousLapNumber = currentLapNumberRef.current;
-          const nextLapNumber = getLapNumber(latest, previousLapNumber);
-
-          if (previousLapNumber === null && nextLapNumber !== null) {
-            currentLapNumberRef.current = nextLapNumber;
-            setCurrentLapNumber(nextLapNumber);
-          }
-
-          if (
-            previousLapNumber !== null &&
-            nextLapNumber !== null &&
-            nextLapNumber !== previousLapNumber
-          ) {
-            saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
-
-            currentLapTrailRef.current = [];
-            setCurrentLapTrail([]);
-            currentLapNumberRef.current = nextLapNumber;
-            setCurrentLapNumber(nextLapNumber);
-          }
-
-          appendToCurrentLapTrail(latest);
-        } else {
-          setSessionMap(data);
-        }
+        applyLatestMapPosition(data.latestMapPosition, data);
       } catch (err) {
         if (err?.name === "AbortError" || !isCurrentRequest()) return;
         console.error(err);

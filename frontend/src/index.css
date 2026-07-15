@@ -314,9 +314,48 @@ textarea:focus {
   background: rgba(0, 166, 81, 0.18);
 }
 
+.leaderboard-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  margin-bottom: 12px;
+}
+
+.scope-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.scope-toggle-btn {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.76);
+  padding: 8px 12px;
+  font-family: var(--font-family);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scope-toggle-btn:hover,
+.scope-toggle-btn:focus {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.scope-toggle-btn.active {
+  color: #07130d;
+  background: var(--color-accent-green);
+}
+
 .track-select-row {
-  margin-top: 14px;
-  margin-bottom: 8px;
   position: relative;
 }
 
@@ -430,6 +469,59 @@ textarea:focus {
 
 .error-message {
   color: #f87171;
+}
+
+.leader-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin: 18px 0 16px;
+  padding: 16px;
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-left: 4px solid var(--color-accent-yellow);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(250, 204, 21, 0.18), rgba(0, 166, 81, 0.08)),
+    rgba(255, 255, 255, 0.04);
+}
+
+.leader-banner-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-accent-yellow);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.leader-banner h2 {
+  margin: 0;
+  color: #fff;
+}
+
+.leader-banner p {
+  margin: 4px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.leader-banner-action {
+  border: 1px solid rgba(250, 204, 21, 0.55);
+  border-radius: 8px;
+  background: rgba(250, 204, 21, 0.14);
+  color: #fff;
+  padding: 10px 14px;
+  font-family: var(--font-family);
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.leader-banner-action:hover,
+.leader-banner-action:focus {
+  background: rgba(250, 204, 21, 0.24);
+  outline: none;
 }
 
 .table-wrap {
