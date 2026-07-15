@@ -34,6 +34,7 @@ SESSION_HISTORY_PACKET_ID = 11
 RACE_SESSION_TYPES = {15, 16, 17}
 MIN_EVENT_END_AFTER_START_SEC = 10.0
 SESSION_END_GRACE_PERIOD_SEC = float(os.getenv("SESSION_END_GRACE_PERIOD_SEC", "3.0"))
+SESSION_IDLE_END_TIMEOUT_SEC = float(os.getenv("SESSION_IDLE_END_TIMEOUT_SEC", "12.0"))
 
 REQUEST_TIMEOUT = (5.0, 10.0)
 LATEST_REQUEST_TIMEOUT = (1.0, 2.0)
@@ -560,6 +561,7 @@ SESSION_END_DETECTED_AT = None
 SESSION_END_DETECTED_MONO = None
 SESSION_END_REASON = None
 SESSION_END_PACKET_TYPE = None
+LAST_PACKET_MONO = None
 LAST_SAMPLE_TIMESTAMP = None
 
 STOP_EVENT = threading.Event()
@@ -715,19 +717,44 @@ def create_user_and_session():
             print(f"API not ready, retrying in 5s... ({e})")
             time.sleep(5)
 
-def mark_session_end(reason, packet_type=None):
+def mark_session_end(reason, packet_type=None, detected_at=None):
     global SESSION_END_DETECTED_AT, SESSION_END_DETECTED_MONO
     global SESSION_END_REASON, SESSION_END_PACKET_TYPE
 
     if SESSION_END_DETECTED_AT is not None:
         return False
 
-    SESSION_END_DETECTED_AT = iso_now()
+    SESSION_END_DETECTED_AT = detected_at or iso_now()
     SESSION_END_DETECTED_MONO = time.time()
     SESSION_END_REASON = reason
     SESSION_END_PACKET_TYPE = packet_type
-    print(f"Grand Prix session ended. Detected at {SESSION_END_DETECTED_AT} ({reason})")
+    print(f"Telemetry session ended. Detected at {SESSION_END_DETECTED_AT} ({reason})")
     return True
+
+
+def maybe_mark_idle_session_end(race_active, race_started_at):
+    if SESSION_END_DETECTED_AT is not None or not SESSION_ID:
+        return race_active, race_started_at
+
+    if LAST_PACKET_MONO is None:
+        return race_active, race_started_at
+
+    if not race_active and LAST_SAMPLE_TIMESTAMP is None:
+        return race_active, race_started_at
+
+    if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
+        return race_active, race_started_at
+
+    idle_for = time.time() - LAST_PACKET_MONO
+    if idle_for >= SESSION_IDLE_END_TIMEOUT_SEC:
+        mark_session_end(
+            f"udp_idle_timeout_{SESSION_IDLE_END_TIMEOUT_SEC:.1f}s",
+            "listener_idle_timeout",
+            detected_at=LAST_SAMPLE_TIMESTAMP,
+        )
+        return False, None
+
+    return race_active, race_started_at
 
 
 def end_session_once(session_closed):
@@ -735,13 +762,14 @@ def end_session_once(session_closed):
         return True
 
     ended_at = SESSION_END_DETECTED_AT or LAST_SAMPLE_TIMESTAMP or iso_now()
-    end_source = (
-        "game_packet"
-        if SESSION_END_DETECTED_AT
-        else "last_telemetry_sample"
-        if LAST_SAMPLE_TIMESTAMP
-        else "listener_shutdown"
-    )
+    if SESSION_END_PACKET_TYPE == "listener_idle_timeout":
+        end_source = "last_telemetry_sample_idle_timeout"
+    elif SESSION_END_DETECTED_AT:
+        end_source = "game_packet"
+    elif LAST_SAMPLE_TIMESTAMP:
+        end_source = "last_telemetry_sample"
+    else:
+        end_source = "listener_shutdown"
     end_reason = SESSION_END_REASON or (
         "manual_or_listener_shutdown" if not SESSION_END_DETECTED_AT else None
     )
@@ -1216,7 +1244,7 @@ def post_telemetry_sample(header, pkt):
         TELEMETRY_BATCH.clear()
 
 def main():
-    global DRIVER_USERNAME
+    global DRIVER_USERNAME, LAST_PACKET_MONO
 
     prompt_identity()
 
@@ -1283,7 +1311,16 @@ def main():
                 try:
                     data, addr = sock.recvfrom(4096)
                 except socket.timeout:
+                    race_active, race_started_at = maybe_mark_idle_session_end(race_active, race_started_at)
+                    if (
+                        SESSION_END_DETECTED_MONO is not None
+                        and time.time() - SESSION_END_DETECTED_MONO >= SESSION_END_GRACE_PERIOD_SEC
+                    ):
+                        print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing listener session.")
+                        STOP_EVENT.set()
                     continue
+
+                LAST_PACKET_MONO = time.time()
 
                 header_size = ctypes.sizeof(PacketHeader)
                 if len(data) < header_size:
