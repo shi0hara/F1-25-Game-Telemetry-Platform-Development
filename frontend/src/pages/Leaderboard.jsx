@@ -113,6 +113,12 @@ function formatDate(value) {
   return new Date(ms).toLocaleDateString();
 }
 
+function formatDateTime(value) {
+  const ms = toMillis(value);
+  if (!ms) return "-";
+  return new Date(ms).toLocaleString();
+}
+
 function leaderboardScopeWindow(scope) {
   const now = Date.now();
   if (scope === "daily") {
@@ -122,6 +128,16 @@ function leaderboardScopeWindow(scope) {
     return { startMs: now - 7 * 24 * 60 * 60 * 1000, endMs: now };
   }
   return { startMs: null, endMs: now };
+}
+
+function scopeLabel(scope) {
+  return SCOPE_OPTIONS.find((option) => option.key === scope)?.label || "All Time";
+}
+
+function scopeWindowLabel(scope) {
+  const window = leaderboardScopeWindow(scope);
+  if (!window.startMs) return "all recorded valid laps";
+  return `${formatDateTime(window.startMs)} to ${formatDateTime(window.endMs)}`;
 }
 
 function entryActivityMs(entry) {
@@ -619,9 +635,22 @@ export default function Leaderboard() {
 
         setSelectedTrackKey((current) => {
           const nextTracks = selectorTracks;
-          const currentStillExists = current && nextTracks.some((track) => track.trackKey === current);
-          if (currentStillExists) return current;
-          return normalizedScopedPayload.activeTrackKey || nextTracks[0]?.trackKey || current || "";
+          const currentTrack = current
+            ? nextTracks.find((track) => track.trackKey === current)
+            : null;
+          const firstScopedTrack = nextTracks.find((track) => Number(track.validLaps || 0) > 0);
+
+          if (currentTrack && (scope === "all" || currentTrack.validLaps > 0 || !firstScopedTrack)) {
+            return current;
+          }
+
+          return (
+            normalizedScopedPayload.activeTrackKey ||
+            firstScopedTrack?.trackKey ||
+            nextTracks[0]?.trackKey ||
+            current ||
+            ""
+          );
         });
       } catch (err) {
         if (cancelled) return;
@@ -822,7 +851,14 @@ export default function Leaderboard() {
         {error && <p className="error-message">{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p className="empty-state">No valid lap times found for this track yet.</p>
+          <p className="empty-state">
+            No valid {scopeLabel(scope).toLowerCase()} lap times found for{" "}
+            {activeTrack?.trackName || "this track"}.
+            <br />
+            <span style={{ color: "var(--color-text-muted)", fontSize: "0.92rem" }}>
+              Window: {scopeWindowLabel(scope)}
+            </span>
+          </p>
         )}
 
         {!loading && !error && rows.length > 0 && (
