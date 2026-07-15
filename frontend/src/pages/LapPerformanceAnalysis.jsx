@@ -55,6 +55,13 @@ function formatDelta(ms) {
   return sign + formatLapTime(Math.abs(value));
 }
 
+function formatSectorDeltaSeconds(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value)) return "-";
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return sign + (Math.abs(value) / 1000).toFixed(3) + "s";
+}
+
 function deltaColor(ms) {
   const value = Number(ms);
   if (!Number.isFinite(value)) return "#cbd5e1";
@@ -1256,19 +1263,19 @@ export default function LapPerformanceAnalysis() {
               <StatBox
                 label="Sector 1"
                 value={formatLapTime(lap.sector1Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector1Ms)}
+                subvalue={"Delta to PB: " + formatSectorDeltaSeconds(sectorDeltas.sector1Ms)}
                 color={deltaColor(sectorDeltas.sector1Ms)}
               />
               <StatBox
                 label="Sector 2"
                 value={formatLapTime(lap.sector2Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector2Ms)}
+                subvalue={"Delta to PB: " + formatSectorDeltaSeconds(sectorDeltas.sector2Ms)}
                 color={deltaColor(sectorDeltas.sector2Ms)}
               />
               <StatBox
                 label="Sector 3"
                 value={formatLapTime(lap.sector3Ms)}
-                subvalue={"vs PB: " + formatDelta(sectorDeltas.sector3Ms)}
+                subvalue={"Delta to PB: " + formatSectorDeltaSeconds(sectorDeltas.sector3Ms)}
                 color={deltaColor(sectorDeltas.sector3Ms)}
               />
             </div>
