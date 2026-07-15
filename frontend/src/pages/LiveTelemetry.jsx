@@ -28,11 +28,6 @@ ChartJS.register(
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-function getAuthHeaders() {
-  const token = window.localStorage.getItem("f1AuthToken");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 function createEmptyMapTrailState() {
   return {
     currentLapNumber: null,
@@ -157,47 +152,6 @@ function compareTelemetryFreshness(next, prev) {
   }
 
   return 0;
-}
-
-function parseLiveStreamMessage(rawMessage) {
-  let event = "message";
-  const dataLines = [];
-
-  for (const line of rawMessage.split(/\r?\n/)) {
-    if (!line || line.startsWith(":")) continue;
-
-    if (line.startsWith("event:")) {
-      event = line.slice(6).trim();
-    } else if (line.startsWith("data:")) {
-      dataLines.push(line.slice(5).trimStart());
-    }
-  }
-
-  if (dataLines.length === 0) return null;
-
-  try {
-    return {
-      event,
-      data: JSON.parse(dataLines.join("\n")),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function waitFor(ms, signal) {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(resolve, ms);
-
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timeoutId);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true }
-    );
-  });
 }
 
 function isReasonableLiveSpeed(speed, previousPoint, freshness) {
@@ -330,50 +284,6 @@ export default function LiveTelemetry({ currentUser }) {
     setSpeedPoints((prev) => [...prev, point].slice(-75));
   }
 
-  function applyLatestTelemetryData(data) {
-    const latestTelemetry = data?.latestTelemetry || null;
-
-    if (!latestTelemetry) return false;
-
-    const freshness = readTelemetryFreshness(latestTelemetry);
-    const freshnessDelta = compareTelemetryFreshness(
-      freshness,
-      lastTelemetryFreshnessRef.current
-    );
-
-    if (freshnessDelta < 0) {
-      setSelectedSession((prev) =>
-        prev
-          ? {
-              ...prev,
-              ...data,
-              id: prev.id || selectedSessionId,
-              latestTelemetry: prev.latestTelemetry,
-              latestMapPosition: prev.latestMapPosition,
-            }
-          : prev
-      );
-      return false;
-    }
-
-    setSelectedSession((prev) => ({
-      ...(prev || { id: selectedSessionId }),
-      ...data,
-      id: data.id || data.sessionId || selectedSessionId,
-      latestTelemetry,
-      latestMapPosition:
-        data.latestMapPosition ?? prev?.latestMapPosition ?? null,
-    }));
-    setSelectedTelemetry(latestTelemetry);
-
-    if (freshnessDelta > 0) {
-      lastTelemetryFreshnessRef.current = freshness;
-      appendLiveSpeedPoint(latestTelemetry, freshness);
-    }
-
-    return true;
-  }
-
   useEffect(() => {
     if (!autoSessionId) {
       setSelectedSessionId(null);
@@ -423,13 +333,31 @@ export default function LiveTelemetry({ currentUser }) {
           ...snapshot.data(),
         };
 
-        if (!data.latestTelemetry) {
+        const latestTelemetry = data.latestTelemetry || null;
+
+        if (!latestTelemetry) {
           setSelectedSession(data);
           setSelectedTelemetry(null);
           return;
         }
 
-        applyLatestTelemetryData(data);
+        const freshness = readTelemetryFreshness(latestTelemetry);
+        const freshnessDelta = compareTelemetryFreshness(
+          freshness,
+          lastTelemetryFreshnessRef.current
+        );
+
+        if (freshnessDelta < 0) {
+          return;
+        }
+
+        setSelectedSession(data);
+        setSelectedTelemetry(latestTelemetry);
+
+        if (freshnessDelta > 0) {
+          lastTelemetryFreshnessRef.current = freshness;
+          appendLiveSpeedPoint(latestTelemetry, freshness);
+        }
       },
       (err) => {
         console.error("Selected session listener error:", err);
@@ -438,77 +366,6 @@ export default function LiveTelemetry({ currentUser }) {
     );
 
     return unsubscribe;
-  }, [selectedSessionId]);
-
-  useEffect(() => {
-    if (!selectedSessionId || !API_BASE) return undefined;
-
-    const abortController = new AbortController();
-    let reconnectDelayMs = 500;
-
-    async function connectLiveStream() {
-      while (!abortController.signal.aborted) {
-        try {
-          const res = await fetch(
-            `${API_BASE}/sessions/${selectedSessionId}/live-stream`,
-            {
-              headers: {
-                ...getAuthHeaders(),
-                Accept: "text/event-stream",
-              },
-              cache: "no-store",
-              signal: abortController.signal,
-            }
-          );
-
-          if (!res.ok || !res.body) {
-            throw new Error(`Live stream unavailable (${res.status})`);
-          }
-
-          reconnectDelayMs = 500;
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
-
-          while (!abortController.signal.aborted) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            let boundary = buffer.indexOf("\n\n");
-
-            while (boundary >= 0) {
-              const rawMessage = buffer.slice(0, boundary);
-              buffer = buffer.slice(boundary + 2);
-              const message = parseLiveStreamMessage(rawMessage);
-
-              if (message?.event === "telemetry" && message.data) {
-                applyLatestTelemetryData(message.data);
-              }
-
-              boundary = buffer.indexOf("\n\n");
-            }
-          }
-        } catch (err) {
-          if (abortController.signal.aborted) return;
-          console.warn("Live telemetry stream reconnecting:", err);
-        }
-
-        try {
-          await waitFor(reconnectDelayMs, abortController.signal);
-        } catch {
-          return;
-        }
-
-        reconnectDelayMs = Math.min(reconnectDelayMs * 1.5, 3000);
-      }
-    }
-
-    connectLiveStream();
-
-    return () => {
-      abortController.abort();
-    };
   }, [selectedSessionId]);
 
   function resetLapSelection() {
@@ -877,7 +734,6 @@ export default function LiveTelemetry({ currentUser }) {
                 mapImageUrl={mapImageUrl}
                 selectedTrailKey={activeTrailKey}
                 onTrailOptionsChange={setMapTrailState}
-                liveMapPosition={selectedSession.latestMapPosition || null}
               />
             ) : (
               <p>No track key found for this session.</p>

@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   collection,
@@ -12,15 +12,10 @@ import { db } from "../firebase";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-const FALLBACK_SESSION_LIMIT = 400;
+const FALLBACK_SESSION_LIMIT = 120;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
 const SECTOR_BEST_PURPLE = "#a855f7";
-const LEADERBOARD_SCOPES = [
-  { key: "all", label: "All Time", shortLabel: "All" },
-  { key: "weekly", label: "Weekly", shortLabel: "Week" },
-  { key: "daily", label: "Daily", shortLabel: "Day" },
-];
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -100,85 +95,17 @@ function toMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();
   if (typeof value.toDate === "function") return value.toDate().getTime();
-  if (typeof value.seconds === "number") {
-    return value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1000000);
-  }
-  if (typeof value._seconds === "number") {
-    return value._seconds * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1000000);
-  }
+  if (typeof value.seconds === "number") return value.seconds * 1000;
+  if (typeof value._seconds === "number") return value._seconds * 1000;
   if (typeof value === "number") return value;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function maxMillis(...values) {
-  return values.reduce((best, value) => Math.max(best, toMillis(value)), 0);
-}
 function formatDate(value) {
   const ms = toMillis(value);
   if (!ms) return "-";
   return new Date(ms).toLocaleDateString();
-}
-
-function scopeOption(scopeKey) {
-  return (
-    LEADERBOARD_SCOPES.find((scope) => scope.key === scopeKey) ||
-    LEADERBOARD_SCOPES[0]
-  );
-}
-
-function scopeStartMs(scopeKey) {
-  const now = Date.now();
-  if (scopeKey === "daily") return now - 24 * 60 * 60 * 1000;
-  if (scopeKey === "weekly") return now - 7 * 24 * 60 * 60 * 1000;
-  return null;
-}
-
-function leaderboardActivityMs(entry) {
-  return (
-    Number(entry?.activityMs) ||
-    Number(entry?.sortActivityMs) ||
-    Number(entry?.sortRecordedAtMs) ||
-    Number(entry?.recordedAtMs) ||
-    maxMillis(
-      entry?.recordedAt,
-      entry?.completedAt,
-      entry?.sessionEndedAt,
-      entry?.endedAt,
-      entry?.sessionLatestTelemetryAt,
-      entry?.latestTelemetryAt,
-      entry?.sessionUpdatedAt,
-      entry?.updatedAt,
-      entry?.sessionStartedAt,
-      entry?.startedAt,
-      entry?.sessionCreatedAt,
-      entry?.createdAt
-    )
-  );
-}
-
-function leaderboardDateValue(entry) {
-  return (
-    entry?.recordedAt ||
-    entry?.completedAt ||
-    entry?.sessionEndedAt ||
-    entry?.endedAt ||
-    entry?.sessionLatestTelemetryAt ||
-    entry?.latestTelemetryAt ||
-    entry?.sessionUpdatedAt ||
-    entry?.updatedAt ||
-    entry?.sessionStartedAt ||
-    entry?.startedAt ||
-    entry?.sessionCreatedAt ||
-    entry?.createdAt ||
-    entry?.activityMs ||
-    null
-  );
-}
-function isEntryInScope(entry, scopeKey) {
-  const startMs = scopeStartMs(scopeKey);
-  if (!startMs) return true;
-  return leaderboardActivityMs(entry) >= startMs;
 }
 
 function shortSessionId(value) {
@@ -258,72 +185,6 @@ function trackKeyFrom(trackId, trackName) {
   return "track_unknown_track";
 }
 
-function normalizeCatalogTrack(track) {
-  const trackId = track?.trackId ?? null;
-  const trackName = resolveTrackName(trackId, track?.trackName || null);
-  const trackKey = track?.trackKey || trackKeyFrom(trackId, trackName);
-
-  return {
-    trackKey,
-    trackName: trackName || trackKey,
-    trackId,
-    validLaps: 0,
-    userCount: 0,
-    bestLapTimeMs: null,
-    bestLapTime: "-",
-    latestActivityMs: Number(track?.latestActivityMs) || 0,
-    catalogOnly: true,
-  };
-}
-
-function mergeScopedTracksWithCatalog(scopedTracks = [], catalogTracks = []) {
-  const merged = new Map();
-
-  for (const track of catalogTracks) {
-    const normalized = normalizeCatalogTrack(track);
-    if (!normalized.trackKey) continue;
-
-    const existing = merged.get(normalized.trackKey);
-    merged.set(normalized.trackKey, {
-      ...existing,
-      ...normalized,
-      latestActivityMs: Math.max(
-        existing?.latestActivityMs || 0,
-        normalized.latestActivityMs || 0
-      ),
-    });
-  }
-
-  for (const track of scopedTracks) {
-    const trackKey = track?.trackKey || trackKeyFrom(track?.trackId, track?.trackName);
-    if (!trackKey) continue;
-    const existing = merged.get(trackKey) || normalizeCatalogTrack(track);
-
-    merged.set(trackKey, {
-      ...existing,
-      ...track,
-      trackKey,
-      trackName: track.trackName || existing.trackName || trackKey,
-      validLaps: track.validLaps || 0,
-      userCount: track.userCount || 0,
-      latestActivityMs: Math.max(
-        existing.latestActivityMs || 0,
-        track.latestActivityMs || 0
-      ),
-      catalogOnly: false,
-    });
-  }
-
-  return [...merged.values()].sort((a, b) => {
-    const aHasScopedLaps = (a.validLaps || 0) > 0;
-    const bHasScopedLaps = (b.validLaps || 0) > 0;
-    if (aHasScopedLaps !== bHasScopedLaps) return bHasScopedLaps - aHasScopedLaps;
-    if ((b.latestActivityMs || 0) !== (a.latestActivityMs || 0)) {
-      return (b.latestActivityMs || 0) - (a.latestActivityMs || 0);
-    }
-    return String(a.trackName || "").localeCompare(String(b.trackName || ""));
-  });
-}
 function isValidLap(lap) {
   const lapTimeMs = Number(lap?.lapTimeMs);
   return (
@@ -347,16 +208,6 @@ function buildFallbackEntry(session, lap) {
     normalizeKey(session.email) ||
     session.id;
 
-  const recordedAt = lap.recordedAt || lap.completedAt || lap.createdAt || null;
-  const activityMs = maxMillis(
-    recordedAt,
-    session.endedAt,
-    session.latestTelemetryAt,
-    session.updatedAt,
-    session.startedAt,
-    session.createdAt
-  );
-
   return {
     userKey,
     userId: session.userId || null,
@@ -374,14 +225,8 @@ function buildFallbackEntry(session, lap) {
     trackId,
     trackKey,
     sessionStartedAt: session.startedAt || null,
-    sessionEndedAt: session.endedAt || null,
-    sessionLatestTelemetryAt: session.latestTelemetryAt || null,
-    sessionUpdatedAt: session.updatedAt || null,
-    sessionCreatedAt: session.createdAt || null,
-    recordedAt,
-    activityMs,
-    sortActivityMs: activityMs,
-    sortRecordedAtMs: toMillis(recordedAt),
+    recordedAt: lap.recordedAt || null,
+    sortRecordedAtMs: toMillis(lap.recordedAt),
     sortStartedAtMs: toMillis(session.startedAt),
   };
 }
@@ -389,7 +234,7 @@ function buildFallbackEntry(session, lap) {
 function rankEntries(entries) {
   const sorted = [...entries].sort((a, b) => {
     if (a.lapTimeMs !== b.lapTimeMs) return a.lapTimeMs - b.lapTimeMs;
-    return leaderboardActivityMs(b) - leaderboardActivityMs(a);
+    return b.sortRecordedAtMs - a.sortRecordedAtMs;
   });
 
   const leaderTime = sorted[0]?.lapTimeMs ?? null;
@@ -401,12 +246,11 @@ function rankEntries(entries) {
   }));
 }
 
-function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "all", trackCatalog = []) {
+function buildTrackScopedPayload(entries, selectedTrackKey = null) {
   const trackStats = new Map();
   const bestByTrackAndUser = new Map();
 
   for (const entry of entries) {
-    if (!isEntryInScope(entry, timeScope)) continue;
     if (!entry.trackKey) continue;
 
     if (!trackStats.has(entry.trackKey)) {
@@ -426,7 +270,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
     stats.userKeys.add(entry.userKey);
     stats.latestActivityMs = Math.max(
       stats.latestActivityMs,
-      leaderboardActivityMs(entry)
+      entry.sortRecordedAtMs || entry.sortStartedAtMs || 0
     );
     if (stats.bestLapTimeMs === null || entry.lapTimeMs < stats.bestLapTimeMs) {
       stats.bestLapTimeMs = entry.lapTimeMs;
@@ -442,13 +286,13 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
       !existing ||
       entry.lapTimeMs < existing.lapTimeMs ||
       (entry.lapTimeMs === existing.lapTimeMs &&
-        leaderboardActivityMs(entry) > leaderboardActivityMs(existing))
+        entry.sortRecordedAtMs > existing.sortRecordedAtMs)
     ) {
       bestByUser.set(entry.userKey, entry);
     }
   }
 
-  const scopedTracks = [...trackStats.values()]
+  const tracks = [...trackStats.values()]
     .map((track) => ({
       trackKey: track.trackKey,
       trackName: track.trackName,
@@ -463,7 +307,6 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
       if (b.latestActivityMs !== a.latestActivityMs) return b.latestActivityMs - a.latestActivityMs;
       return String(a.trackName || "").localeCompare(String(b.trackName || ""));
     });
-  const tracks = mergeScopedTracksWithCatalog(scopedTracks, trackCatalog);
 
   const activeTrack =
     tracks.find((track) => track.trackKey === selectedTrackKey) ||
@@ -486,109 +329,26 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
     activeTrackKey,
     meta: {
       source: "firestore_fallback",
-      timeScope,
-      timeScopeLabel: scopeOption(timeScope).label,
       leaderboardType: "best_valid_actual_lap_per_user_per_track",
       trackScoped: true,
       trackCount: tracks.length,
-      validLaps: scopedTracks.reduce((sum, t) => sum + t.validLaps, 0),
+      validLaps: tracks.reduce((sum, t) => sum + t.validLaps, 0),
       userCount: new Set(allRows.map((r) => r.userKey)).size,
     },
   };
 }
 
-async function loadSessionDocsForLeaderboard() {
-  const sessionsRef = collection(db, "sessions");
-  const docsById = new Map();
-  const orderedFields = [
-    "startedAt",
-    "endedAt",
-    "latestTelemetryAt",
-    "updatedAt",
-    "createdAt",
-  ];
-
-  async function collect(q) {
-    try {
-      const snap = await getDocs(q);
-      snap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
-    } catch (err) {
-      console.warn("Leaderboard session query skipped:", err);
-    }
-  }
-
-  for (const field of orderedFields) {
-    await collect(query(sessionsRef, orderBy(field, "desc"), limit(FALLBACK_SESSION_LIMIT)));
-  }
-
-  if (docsById.size === 0) {
-    await collect(query(sessionsRef, limit(FALLBACK_SESSION_LIMIT)));
-  }
-
-  return [...docsById.values()].sort((a, b) => {
-    const aData = a.data();
-    const bData = b.data();
-    const aTime = maxMillis(
-      aData.endedAt,
-      aData.latestTelemetryAt,
-      aData.updatedAt,
-      aData.startedAt,
-      aData.createdAt
-    );
-    const bTime = maxMillis(
-      bData.endedAt,
-      bData.latestTelemetryAt,
-      bData.updatedAt,
-      bData.startedAt,
-      bData.createdAt
-    );
-    return bTime - aTime;
-  });
-}
-function buildTrackCatalogFromSessionDocs(sessionDocs) {
-  const catalog = new Map();
-
-  for (const sessionDoc of sessionDocs) {
-    const session = sessionDoc.data();
-    const trackId = session.trackId ?? null;
-    const trackName = resolveTrackName(trackId, session.trackName || null);
-    const trackKey = trackKeyFrom(trackId, trackName);
-    const latestActivityMs = maxMillis(
-      session.endedAt,
-      session.latestTelemetryAt,
-      session.updatedAt,
-      session.startedAt,
-      session.createdAt
-    );
-
-    if (!catalog.has(trackKey)) {
-      catalog.set(trackKey, normalizeCatalogTrack({
-        trackKey,
-        trackName,
-        trackId,
-        latestActivityMs,
-      }));
-      continue;
-    }
-
-    const existing = catalog.get(trackKey);
-    existing.latestActivityMs = Math.max(existing.latestActivityMs || 0, latestActivityMs);
-  }
-
-  return mergeScopedTracksWithCatalog([], [...catalog.values()]);
-}
-
-async function loadTrackCatalogFromFirestore() {
-  const sessionDocs = await loadSessionDocsForLeaderboard();
-  return buildTrackCatalogFromSessionDocs(sessionDocs);
-}
-async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope = "all") {
-  const sessionDocs = await loadSessionDocsForLeaderboard();
-  const trackCatalog = buildTrackCatalogFromSessionDocs(sessionDocs);
+async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
+  const sessionsQuery = query(
+    collection(db, "sessions"),
+    orderBy("startedAt", "desc"),
+    limit(FALLBACK_SESSION_LIMIT)
+  );
+  const sessionsSnap = await getDocs(sessionsQuery);
   const entries = [];
   let scannedLaps = 0;
 
-  for (const sessionDoc of sessionDocs) {
+  for (const sessionDoc of sessionsSnap.docs) {
     const session = { id: sessionDoc.id, ...sessionDoc.data() };
     const lapsSnap = await getDocs(collection(db, "sessions", sessionDoc.id, "laps"));
 
@@ -600,12 +360,12 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope =
     });
   }
 
-  const payload = buildTrackScopedPayload(entries, selectedTrackKey, timeScope, trackCatalog);
+  const payload = buildTrackScopedPayload(entries, selectedTrackKey);
   return {
     ...payload,
     meta: {
       ...payload.meta,
-      scannedSessions: sessionDocs.length,
+      scannedSessions: sessionsSnap.size,
       scannedLaps,
     },
   };
@@ -628,7 +388,7 @@ function normalizePayloadTrackKeys(payload, selectedTrackKey) {
   const tracks = payload.tracks || [];
   const rows = payload.rows || [];
 
-  // Build a mapping from original trackKey to canonical trackKey
+  // Build a mapping from original trackKey → canonical trackKey
   const keyMap = new Map();
   const mergedTracks = new Map();
 
@@ -696,7 +456,6 @@ export default function Leaderboard() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [meta, setMeta] = useState(null);
-  const [timeScope, setTimeScope] = useState("all");
   const navigate = useNavigate();
 
   // Store all entries so track switching can happen client-side without re-fetching
@@ -715,12 +474,7 @@ export default function Leaderboard() {
         let payload = null;
 
         try {
-          const params = new URLSearchParams({
-            limit: "50",
-            scanLimit: "500",
-            scope: timeScope,
-          });
-          const url = `${API_BASE}/leaderboard?${params.toString()}`;
+          const url = `${API_BASE}/leaderboard?limit=50`;
           const res = await fetch(url);
           const contentType = res.headers.get("content-type") || "";
           const data = contentType.includes("application/json")
@@ -735,11 +489,6 @@ export default function Leaderboard() {
 
           if (!isTrackScopedPayload(data)) {
             throw new Error("Backend leaderboard is not track-scoped yet.");
-          }
-
-          const backendScope = data.meta?.timeScope || data.filters?.scope || "all";
-          if (backendScope !== timeScope) {
-            throw new Error("Backend leaderboard does not support this time period yet.");
           }
 
           // Backend must return rows for all tracks for client-side switching.
@@ -758,7 +507,7 @@ export default function Leaderboard() {
           payload = data;
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(null, timeScope);
+          payload = await loadLeaderboardFromFirestore(null);
           setNotice("");
         }
 
@@ -769,47 +518,13 @@ export default function Leaderboard() {
           payload = normalizePayloadTrackKeys(payload, null);
         }
 
-        let displayTracks = Array.isArray(payload.tracks) ? payload.tracks : [];
-        if (timeScope !== "all") {
-          try {
-            const catalogTracks = await loadTrackCatalogFromFirestore();
-            const normalizedCatalog =
-              catalogTracks.length > 0
-                ? normalizePayloadTrackKeys({ tracks: catalogTracks, rows: [] }, null).tracks
-                : [];
-            displayTracks = mergeScopedTracksWithCatalog(displayTracks, normalizedCatalog);
-          } catch (catalogErr) {
-            console.warn("Leaderboard track catalog failed:", catalogErr);
-          }
-        }
-
-        payload = {
-          ...payload,
-          tracks: displayTracks,
-          activeTrack:
-            displayTracks.find((track) => track.trackKey === payload.activeTrackKey) ||
-            displayTracks[0] ||
-            null,
-          activeTrackKey:
-            displayTracks.find((track) => track.trackKey === payload.activeTrackKey)?.trackKey ||
-            displayTracks[0]?.trackKey ||
-            "",
-        };
-
-        setAllTracks(displayTracks);
+        setAllTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
         setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
         setMeta(payload.meta || null);
 
-        setSelectedTrackKey((previousTrackKey) => {
-          if (
-            previousTrackKey &&
-            payload.tracks?.some((track) => track.trackKey === previousTrackKey)
-          ) {
-            return previousTrackKey;
-          }
-
-          return payload.activeTrackKey || payload.tracks?.[0]?.trackKey || "";
-        });
+        if (!selectedTrackKey && payload.activeTrackKey) {
+          setSelectedTrackKey(payload.activeTrackKey);
+        }
       } catch (err) {
         if (cancelled) return;
         console.error("Leaderboard load error:", err);
@@ -824,16 +539,11 @@ export default function Leaderboard() {
     return () => {
       cancelled = true;
     };
-  }, [timeScope]);
+  }, []);
 
   // Client-side track switching: re-derive rows whenever selectedTrackKey changes
   useEffect(() => {
-    if (allTracks.length === 0) {
-      setActiveTrack(null);
-      setTracks([]);
-      setRows([]);
-      return;
-    }
+    if (allTracks.length === 0) return;
 
     const active =
       allTracks.find((t) => t.trackKey === selectedTrackKey) ||
@@ -851,19 +561,16 @@ export default function Leaderboard() {
     // which builds the full dataset), filter and rank for the active track.
     // For the initial load where rows were already filtered to one track,
     // we need to re-fetch from Firestore if the track doesn't match.
-    const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey && isEntryInScope(r, timeScope));
+    const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey);
     if (trackRows.length > 0 || active.trackKey === selectedTrackKey) {
       setRows(rankEntries(trackRows).slice(0, 50));
     } else {
       setRows([]);
     }
-  }, [selectedTrackKey, allTracks, allEntries, timeScope]);
+  }, [selectedTrackKey, allTracks, allEntries]);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
   const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
-  const activeScope = scopeOption(timeScope);
-  const activeDriverCount = activeTrack?.userCount ?? rows.length;
-  const activeValidLapCount = activeTrack?.validLaps ?? meta?.validLaps ?? 0;
 
   // Custom searchable dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -917,34 +624,16 @@ export default function Leaderboard() {
           <div>
             <h2>{activeTrack?.trackName || "Fastest Valid Laps"}</h2>
             <p className="muted-copy">
-              Rankings are separated by track and time period. One placement per driver, using their best real valid lap.
+              Rankings are separated by track. One placement per driver, using their best real valid lap.
             </p>
           </div>
 
           {meta && (
             <div className="meta-copy">
-              {activeScope.label} | {activeDriverCount} drivers | {activeValidLapCount} valid laps
+              {meta.userCount ?? rows.length} drivers | {meta.validLaps ?? 0} valid laps
             </div>
           )}
         </div>
-
-        <div className="leaderboard-controls">
-          <div className="scope-toggle" aria-label="Leaderboard time period">
-            {LEADERBOARD_SCOPES.map((scope) => (
-              <button
-                key={scope.key}
-                type="button"
-                className={
-                  timeScope === scope.key
-                    ? "scope-toggle-btn active"
-                    : "scope-toggle-btn"
-                }
-                onClick={() => setTimeScope(scope.key)}
-              >
-                {scope.label}
-              </button>
-            ))}
-          </div>
 
         {tracks.length > 0 && (
           <div className="track-select-row" ref={dropdownRef}>
@@ -1006,37 +695,13 @@ export default function Leaderboard() {
             )}
           </div>
         )}
-        </div>
 
         {loading && <p>Loading leaderboard...</p>}
         {notice && !error && <p className="notice-message">{notice}</p>}
         {error && <p className="error-message">{error}</p>}
 
         {!loading && !error && rows.length === 0 && (
-          <p className="empty-state">{`No valid ${activeScope.label.toLowerCase()} lap times found for ${activeTrack?.trackName || "this track"} yet.`}</p>
-        )}
-
-        {!loading && !error && leader && (
-          <div className="leader-banner">
-            <div>
-              <span className="leader-banner-kicker">
-                {activeScope.label} #{leader.rank || 1} on {activeTrack?.trackName || leader.trackName || "this track"}
-              </span>
-              <h2>{leader.username || "Unknown Driver"}</h2>
-              <p>
-                {leader.lapTime || formatLapTime(leader.lapTimeMs)} | Lap {leader.lapNumber ?? "-"} | {formatDate(leaderboardDateValue(leader))}
-              </p>
-            </div>
-            {lapAnalysisPath(leader) && (
-              <button
-                type="button"
-                className="leader-banner-action"
-                onClick={() => navigate(lapAnalysisPath(leader))}
-              >
-                View lap
-              </button>
-            )}
-          </div>
+          <p className="empty-state">No valid lap times found for this track yet.</p>
         )}
 
         {!loading && !error && rows.length > 0 && (
@@ -1117,7 +782,7 @@ export default function Leaderboard() {
                         {formatSector(row.sector3Ms)}
                       </td>
                       <td title={row.sessionId}>
-                        {shortSessionId(row.sessionId)} | {formatDate(leaderboardDateValue(row))}
+                        {shortSessionId(row.sessionId)} | {formatDate(row.sessionStartedAt)}
                       </td>
                     </tr>
                   );
@@ -1130,8 +795,3 @@ export default function Leaderboard() {
     </div>
   );
 }
-
-
-
-
-
