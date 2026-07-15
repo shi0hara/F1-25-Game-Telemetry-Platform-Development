@@ -124,15 +124,31 @@ function leaderboardScopeWindow(scope) {
   return { startMs: null, endMs: now };
 }
 
+function entryActivityMs(entry) {
+  return Math.max(
+    toMillis(entry.activityMs),
+    toMillis(entry.sortActivityMs),
+    toMillis(entry.sortRecordedAtMs),
+    toMillis(entry.recordedAt),
+    toMillis(entry.completedAt),
+    toMillis(entry.createdAt),
+    toMillis(entry.sessionEndedAt),
+    toMillis(entry.endedAt),
+    toMillis(entry.sessionLatestTelemetryAt),
+    toMillis(entry.latestTelemetryAt),
+    toMillis(entry.sessionUpdatedAt),
+    toMillis(entry.updatedAt),
+    toMillis(entry.sessionStartedAt),
+    toMillis(entry.startedAt),
+    toMillis(entry.sessionCreatedAt)
+  );
+}
+
 function isEntryInScope(entry, scope) {
   const window = leaderboardScopeWindow(scope);
   if (window.startMs === null) return true;
 
-  const activityMs =
-    entry.sortRecordedAtMs ||
-    entry.sortStartedAtMs ||
-    toMillis(entry.recordedAt) ||
-    toMillis(entry.sessionStartedAt);
+  const activityMs = entryActivityMs(entry);
 
   return activityMs >= window.startMs && activityMs <= window.endMs;
 }
@@ -236,6 +252,20 @@ function buildFallbackEntry(session, lap) {
     normalizeKey(session.username) ||
     normalizeKey(session.email) ||
     session.id;
+  const sortRecordedAtMs = Math.max(
+    toMillis(lap.recordedAt),
+    toMillis(lap.completedAt),
+    toMillis(lap.createdAt)
+  );
+  const sortStartedAtMs = toMillis(session.startedAt);
+  const sortActivityMs = Math.max(
+    sortRecordedAtMs,
+    toMillis(session.endedAt),
+    toMillis(session.latestTelemetryAt),
+    toMillis(session.updatedAt),
+    sortStartedAtMs,
+    toMillis(session.createdAt)
+  );
 
   return {
     userKey,
@@ -254,9 +284,17 @@ function buildFallbackEntry(session, lap) {
     trackId,
     trackKey,
     sessionStartedAt: session.startedAt || null,
-    recordedAt: lap.recordedAt || null,
-    sortRecordedAtMs: toMillis(lap.recordedAt),
-    sortStartedAtMs: toMillis(session.startedAt),
+    sessionEndedAt: session.endedAt || null,
+    sessionLatestTelemetryAt: session.latestTelemetryAt || null,
+    sessionUpdatedAt: session.updatedAt || null,
+    sessionCreatedAt: session.createdAt || null,
+    recordedAt: lap.recordedAt || lap.completedAt || lap.createdAt || null,
+    completedAt: lap.completedAt || null,
+    createdAt: lap.createdAt || null,
+    activityMs: sortActivityMs,
+    sortActivityMs,
+    sortRecordedAtMs,
+    sortStartedAtMs,
   };
 }
 
@@ -367,6 +405,24 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
   };
 }
 
+function mergeTrackOptions(baseTracks, scopedTracks) {
+  const scopedByKey = new Map((scopedTracks || []).map((track) => [track.trackKey, track]));
+
+  return (baseTracks || []).map((track) => {
+    const scoped = scopedByKey.get(track.trackKey);
+    return {
+      ...track,
+      validLaps: scoped?.validLaps ?? 0,
+      userCount: scoped?.userCount ?? 0,
+      bestLapTimeMs: scoped?.bestLapTimeMs ?? null,
+      bestLapTime: scoped?.bestLapTime ?? "-",
+      latestActivityMs: scoped?.latestActivityMs ?? track.latestActivityMs ?? 0,
+      allTimeValidLaps: track.validLaps ?? 0,
+      allTimeUserCount: track.userCount ?? 0,
+    };
+  });
+}
+
 async function loadLeaderboardFromFirestore(selectedTrackKey = null, scope = "all") {
   const sessionsQuery = query(
     collection(db, "sessions"),
@@ -401,6 +457,36 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null, scope = "al
       scannedLaps,
     },
   };
+}
+
+async function fetchBackendLeaderboard(scope) {
+  const url = `${API_BASE}/leaderboard?limit=100&scope=${encodeURIComponent(scope)}&scanLimit=500`;
+  const res = await fetch(url);
+  const contentType = res.headers.get("content-type") || "";
+  const data = contentType.includes("application/json")
+    ? await res.json()
+    : null;
+
+  if (!res.ok) {
+    throw new Error(
+      data?.error || `Backend leaderboard failed: HTTP ${res.status}`
+    );
+  }
+
+  if (!isTrackScopedPayload(data)) {
+    throw new Error("Backend leaderboard is not track-scoped yet.");
+  }
+
+  return data;
+}
+
+async function loadLeaderboardPayload(scope) {
+  try {
+    return await fetchBackendLeaderboard(scope);
+  } catch (backendErr) {
+    console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
+    return loadLeaderboardFromFirestore(null, scope);
+  }
 }
 
 function isTrackScopedPayload(data) {
@@ -504,62 +590,38 @@ export default function Leaderboard() {
         setError("");
         setNotice("");
 
-        let payload = null;
-
-        try {
-          const url = `${API_BASE}/leaderboard?limit=50&scope=${encodeURIComponent(scope)}`;
-          const res = await fetch(url);
-          const contentType = res.headers.get("content-type") || "";
-          const data = contentType.includes("application/json")
-            ? await res.json()
-            : null;
-
-          if (!res.ok) {
-            throw new Error(
-              data?.error || `Backend leaderboard failed: HTTP ${res.status}`
-            );
-          }
-
-          if (!isTrackScopedPayload(data)) {
-            throw new Error("Backend leaderboard is not track-scoped yet.");
-          }
-
-          // Backend must return rows for all tracks for client-side switching.
-          // If it only returns rows for one track, fall through to Firestore.
-          const trackKeysInRows = new Set(
-            (data.rows || []).map((r) => r.trackKey)
-          );
-          if (
-            Array.isArray(data.tracks) &&
-            data.tracks.length > 1 &&
-            trackKeysInRows.size <= 1
-          ) {
-            throw new Error("Backend only returned rows for one track.");
-          }
-
-          payload = data;
-        } catch (backendErr) {
-          console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(null, scope);
-          setNotice("");
-        }
+        const scopedPayload = await loadLeaderboardPayload(scope);
+        const trackPayload =
+          scope === "all"
+            ? scopedPayload
+            : await loadLeaderboardPayload("all");
 
         if (cancelled) return;
 
-        // Normalize track keys in the payload to merge duplicates
-        if (Array.isArray(payload.tracks) && payload.tracks.length > 0) {
-          payload = normalizePayloadTrackKeys(payload, null);
-        }
+        const normalizedScopedPayload = Array.isArray(scopedPayload.tracks) && scopedPayload.tracks.length > 0
+          ? normalizePayloadTrackKeys(scopedPayload, null)
+          : scopedPayload;
+        const normalizedTrackPayload = Array.isArray(trackPayload.tracks) && trackPayload.tracks.length > 0
+          ? normalizePayloadTrackKeys(trackPayload, null)
+          : trackPayload;
+        const selectorTracks = mergeTrackOptions(
+          normalizedTrackPayload.tracks || [],
+          normalizedScopedPayload.tracks || []
+        );
 
-        setAllTracks(Array.isArray(payload.tracks) ? payload.tracks : []);
-        setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
-        setMeta(payload.meta || null);
+        setAllTracks(selectorTracks);
+        setAllEntries(Array.isArray(normalizedScopedPayload.rows) ? normalizedScopedPayload.rows : []);
+        setMeta({
+          ...(normalizedScopedPayload.meta || {}),
+          trackCount: selectorTracks.length,
+        });
+        setNotice("");
 
         setSelectedTrackKey((current) => {
-          const nextTracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+          const nextTracks = selectorTracks;
           const currentStillExists = current && nextTracks.some((track) => track.trackKey === current);
           if (currentStillExists) return current;
-          return payload.activeTrackKey || nextTracks[0]?.trackKey || current || "";
+          return normalizedScopedPayload.activeTrackKey || nextTracks[0]?.trackKey || current || "";
         });
       } catch (err) {
         if (cancelled) return;
@@ -579,7 +641,12 @@ export default function Leaderboard() {
 
   // Client-side track switching: re-derive rows whenever selectedTrackKey changes
   useEffect(() => {
-    if (allTracks.length === 0) return;
+    if (allTracks.length === 0) {
+      setTracks([]);
+      setRows([]);
+      setActiveTrack(null);
+      return;
+    }
 
     const active =
       allTracks.find((t) => t.trackKey === selectedTrackKey) ||
@@ -671,101 +738,84 @@ export default function Leaderboard() {
           )}
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            flexWrap: "wrap",
-            marginBottom: 16,
-          }}
-        >
-          {SCOPE_OPTIONS.map((option) => {
-            const selected = scope === option.key;
-            return (
+        <div className="leaderboard-controls">
+          {tracks.length > 0 && (
+            <div className="track-select-row" ref={dropdownRef}>
               <button
                 type="button"
-                key={option.key}
-                onClick={() => setScope(option.key)}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 8,
-                  border: selected
-                    ? "1px solid var(--color-accent-green)"
-                    : "1px solid rgba(255,255,255,0.16)",
-                  background: selected
-                    ? "rgba(34,197,94,0.16)"
-                    : "rgba(255,255,255,0.05)",
-                  color: selected ? "#bbf7d0" : "white",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                }}
+                className="track-dropdown-trigger"
+                onClick={() => { setDropdownOpen((prev) => !prev); setTrackSearch(""); }}
+                aria-haspopup="listbox"
+                aria-expanded={dropdownOpen}
               >
-                {option.label}
+                <span>{selectedLabel || "Select Track"}</span>
+                <svg className="track-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
               </button>
-            );
-          })}
-        </div>
 
-        {tracks.length > 0 && (
-          <div className="track-select-row" ref={dropdownRef}>
-            <button
-              type="button"
-              className="track-dropdown-trigger"
-              onClick={() => { setDropdownOpen((prev) => !prev); setTrackSearch(""); }}
-              aria-haspopup="listbox"
-              aria-expanded={dropdownOpen}
-            >
-              <span>{selectedLabel || "Select Track"}</span>
-              <svg className="track-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-
-            {dropdownOpen && (
-              <div className="track-dropdown-menu" role="listbox">
-                <div className="track-dropdown-search-wrap">
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    className="track-dropdown-search"
-                    placeholder="Search tracks..."
-                    value={trackSearch}
-                    onChange={(e) => setTrackSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setDropdownOpen(false);
-                        setTrackSearch("");
-                      }
-                    }}
-                  />
-                </div>
-                <ul className="track-dropdown-list">
-                  {filteredTracks.length === 0 && (
-                    <li className="track-dropdown-empty">No tracks found</li>
-                  )}
-                  {filteredTracks.map((track) => {
-                    const isActive = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
-                    return (
-                      <li
-                        key={track.trackKey}
-                        role="option"
-                        aria-selected={isActive}
-                        className={isActive ? "track-dropdown-item active" : "track-dropdown-item"}
-                        onClick={() => {
-                          setSelectedTrackKey(track.trackKey);
+              {dropdownOpen && (
+                <div className="track-dropdown-menu" role="listbox">
+                  <div className="track-dropdown-search-wrap">
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      className="track-dropdown-search"
+                      placeholder="Search tracks..."
+                      value={trackSearch}
+                      onChange={(e) => setTrackSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
                           setDropdownOpen(false);
                           setTrackSearch("");
-                        }}
-                      >
-                        {track.trackName || track.trackKey} ({track.userCount})
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
+                        }
+                      }}
+                    />
+                  </div>
+                  <ul className="track-dropdown-list">
+                    {filteredTracks.length === 0 && (
+                      <li className="track-dropdown-empty">No tracks found</li>
+                    )}
+                    {filteredTracks.map((track) => {
+                      const isActive = track.trackKey === (activeTrack?.trackKey || selectedTrackKey);
+                      return (
+                        <li
+                          key={track.trackKey}
+                          role="option"
+                          aria-selected={isActive}
+                          className={isActive ? "track-dropdown-item active" : "track-dropdown-item"}
+                          onClick={() => {
+                            setSelectedTrackKey(track.trackKey);
+                            setDropdownOpen(false);
+                            setTrackSearch("");
+                          }}
+                        >
+                          {track.trackName || track.trackKey} ({track.userCount})
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="leaderboard-scope-group">
+            {SCOPE_OPTIONS.map((option) => {
+              const selected = scope === option.key;
+              return (
+                <button
+                  type="button"
+                  key={option.key}
+                  onClick={() => setScope(option.key)}
+                  className={selected ? "leaderboard-scope-btn active" : "leaderboard-scope-btn"}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
-        )}
+        </div>
 
         {loading && <p>Loading leaderboard...</p>}
         {notice && !error && <p className="notice-message">{notice}</p>}

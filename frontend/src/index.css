@@ -320,6 +320,54 @@ textarea:focus {
   position: relative;
 }
 
+.leaderboard-controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  margin-bottom: 14px;
+}
+
+.leaderboard-controls .track-select-row {
+  margin: 0;
+}
+
+.leaderboard-scope-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.leaderboard-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--font-family);
+  font-size: 0.95rem;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.leaderboard-scope-btn:hover,
+.leaderboard-scope-btn:focus {
+  border-color: rgba(0, 166, 81, 0.9);
+  background-color: rgba(0, 166, 81, 0.1);
+  outline: none;
+}
+
+.leaderboard-scope-btn.active {
+  border-color: rgba(0, 166, 81, 0.9);
+  background-color: rgba(0, 166, 81, 0.18);
+  color: #bbf7d0;
+  font-weight: 700;
+}
+
 .track-dropdown-trigger {
   display: inline-flex;
   align-items: center;
