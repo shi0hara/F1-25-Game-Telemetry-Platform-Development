@@ -1100,7 +1100,17 @@ def post_telemetry_sample(header, pkt):
     throttle = float(parse_number(get_attr(t, "throttle", "m_throttle", default=0.0), 0.0) or 0.0)
     brake = float(parse_number(get_attr(t, "brake", "m_brake", default=0.0), 0.0) or 0.0)
     steering = float(parse_number(get_attr(t, "steer", "m_steer", default=0.0), 0.0) or 0.0)
-    rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
+    rpm = int(parse_int(get_attr_loose(
+        t,
+        "rpm",
+        "engineRPM",
+        "engineRpm",
+        "engine_rpm",
+        "m_engineRPM",
+        "m_engineRpm",
+        "m_engine_rpm",
+        default=0,
+    ), 0) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
     raw_drs_activation_distance = parse_number(
@@ -1325,7 +1335,17 @@ def main():
                         throttle = float(parse_number(get_attr(t, "throttle", "m_throttle", default=0.0), 0.0) or 0.0)
                         brake = float(parse_number(get_attr(t, "brake", "m_brake", default=0.0), 0.0) or 0.0)
                         steering = float(parse_number(get_attr(t, "steer", "m_steer", default=0.0), 0.0) or 0.0)
-                        rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
+                        rpm = int(parse_int(get_attr_loose(
+                            t,
+                            "rpm",
+                            "engineRPM",
+                            "engineRpm",
+                            "engine_rpm",
+                            "m_engineRPM",
+                            "m_engineRpm",
+                            "m_engine_rpm",
+                            default=0,
+                        ), 0) or 0)
                         gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
                         drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
                         raw_drs_activation_distance = parse_number(

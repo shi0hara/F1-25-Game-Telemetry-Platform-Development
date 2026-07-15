@@ -172,7 +172,9 @@ function StatBox({ label, value, subvalue, color }) {
 
 function graphRawValue(metric, sample) {
   if (metric.key === "drs") return sample.drs ? 1 : 0;
-  const value = Number(sample[metric.key]);
+  const raw = sample[metric.key];
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
   return Number.isFinite(value) ? value : null;
 }
 
@@ -190,12 +192,19 @@ function buildRaceBoundaries(traces) {
   traces.forEach((sample, index) => {
     const lapNumber = Number(sample.lapNumber);
     if (!Number.isFinite(lapNumber)) return;
-    if (previousLap !== null && lapNumber !== previousLap) {
+
+    if (previousLap === null) {
+      previousLap = lapNumber;
+      return;
+    }
+
+    if (lapNumber !== previousLap) {
       boundaries.push({
         index,
         label: "Lap " + lapNumber,
       });
     }
+
     previousLap = lapNumber;
   });
 
@@ -229,6 +238,39 @@ function buildSessionGraphLabels(traces) {
   }
 
   return traces.map((_, index) => "Sample " + (index + 1));
+}
+
+function canOrderByLapDistance(traces) {
+  const usable = traces.filter((sample) => {
+    return (
+      Number.isFinite(Number(sample.lapNumber)) &&
+      Number.isFinite(Number(sample.lapDistance))
+    );
+  });
+
+  return usable.length >= Math.max(3, traces.length * 0.65);
+}
+
+function orderSessionTraces(traces) {
+  if (!canOrderByLapDistance(traces)) return traces;
+
+  return [...traces].sort((a, b) => {
+    const aLap = Number(a.lapNumber);
+    const bLap = Number(b.lapNumber);
+    if (aLap !== bLap) return aLap - bLap;
+
+    const aDistance = Number(a.lapDistance);
+    const bDistance = Number(b.lapDistance);
+    if (aDistance !== bDistance) return aDistance - bDistance;
+
+    const aIndex = Number(a.sampleIndex ?? a.index);
+    const bIndex = Number(b.sampleIndex ?? b.index);
+    if (Number.isFinite(aIndex) && Number.isFinite(bIndex) && aIndex !== bIndex) {
+      return aIndex - bIndex;
+    }
+
+    return 0;
+  });
 }
 
 const raceGraphGuidesPlugin = {
@@ -268,18 +310,20 @@ function RaceTelemetryGraph({ traces }) {
     }, {});
   });
 
-  const labels = useMemo(() => {
-    return buildSessionGraphLabels(traces);
-  }, [traces]);
+  const orderedTraces = useMemo(() => orderSessionTraces(traces), [traces]);
 
-  const boundaries = useMemo(() => buildRaceBoundaries(traces), [traces]);
+  const labels = useMemo(() => {
+    return buildSessionGraphLabels(orderedTraces);
+  }, [orderedTraces]);
+
+  const boundaries = useMemo(() => buildRaceBoundaries(orderedTraces), [orderedTraces]);
 
   const chartData = useMemo(() => {
     return {
       labels,
       datasets: GRAPH_METRICS.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
         label: metric.label,
-        data: traces.map((sample) => graphScaledValue(metric, sample)),
+        data: orderedTraces.map((sample) => graphScaledValue(metric, sample)),
         borderColor: metric.color,
         backgroundColor: metric.color,
         borderWidth: metric.key === "speedKph" ? 2.5 : 2,
@@ -290,7 +334,7 @@ function RaceTelemetryGraph({ traces }) {
         rawMetric: metric,
       })),
     };
-  }, [labels, traces, visibleMetrics]);
+  }, [labels, orderedTraces, visibleMetrics]);
 
   const options = useMemo(() => {
     return {
@@ -336,14 +380,14 @@ function RaceTelemetryGraph({ traces }) {
           callbacks: {
             label(context) {
               const metric = context.dataset.rawMetric;
-              const sample = traces[context.dataIndex] || {};
+              const sample = orderedTraces[context.dataIndex] || {};
               const raw = metric ? graphRawValue(metric, sample) : null;
               if (raw === null) return context.dataset.label + ": -";
               if (metric.key === "drs") return context.dataset.label + ": " + (raw ? "On" : "Off");
               return context.dataset.label + ": " + formatNumber(raw, metric.key === "rpm" ? 0 : 1, metric.unit ? " " + metric.unit : "");
             },
             afterBody(items) {
-              const sample = traces[items[0]?.dataIndex] || {};
+              const sample = orderedTraces[items[0]?.dataIndex] || {};
               return [
                 "Lap: " + (sample.lapNumber ?? "-"),
                 "Sector: " + (sample.sector ?? "-"),
@@ -356,7 +400,7 @@ function RaceTelemetryGraph({ traces }) {
         },
       },
     };
-  }, [boundaries, traces]);
+  }, [boundaries, orderedTraces]);
 
   if (!traces.length) {
     return (
@@ -369,7 +413,7 @@ function RaceTelemetryGraph({ traces }) {
     );
   }
 
-  const chartMinWidth = Math.max(1800, traces.length * 12);
+  const chartMinWidth = Math.max(1800, orderedTraces.length * 12);
 
   return (
     <div className="card">
@@ -505,7 +549,7 @@ function LiveSessionPanel({ session }) {
               <div style={{ display: "grid", gap: 8 }}>
                 <p><strong>Speed:</strong> {telemetry.speedKph ?? 0} km/h</p>
                 <p><strong>Gear:</strong> {telemetry.gear ?? "-"}</p>
-                <p><strong>RPM:</strong> {telemetry.rpm ?? 0}</p>
+                <p><strong>RPM:</strong> {telemetry.rpm ?? telemetry.engineRPM ?? "-"}</p>
                 <p><strong>Lap:</strong> {telemetry.lapNumber ?? "-"}</p>
                 <p><strong>DRS:</strong> {telemetry.drs ? "On" : "Off"}</p>
               </div>
