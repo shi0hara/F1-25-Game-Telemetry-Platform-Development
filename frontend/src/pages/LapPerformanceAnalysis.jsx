@@ -476,6 +476,7 @@ function ReplayControls({
   onSeekBy,
   onSeekTo,
   onSpeedStep,
+  containerStyle,
 }) {
   const disabled = traces.length < 2 || replayDurationMs <= 0;
   const progress = disabled
@@ -488,7 +489,7 @@ function ReplayControls({
       : "Replay Lap";
 
   return (
-    <div className="card" style={{ marginBottom: 20 }}>
+    <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
       <div
         style={{
           display: "flex",
@@ -702,6 +703,7 @@ function CombinedTelemetryGraph({
   sectorBoundaries,
   autoScroll = false,
   metrics = GRAPH_METRICS,
+  containerStyle,
 }) {
   const scrollRef = useRef(null);
 
@@ -805,7 +807,7 @@ function CombinedTelemetryGraph({
   }, [activeIndex, autoScroll, labels.length]);
 
   return (
-    <div className="card">
+    <div className="card" style={containerStyle}>
       <div
         style={{
           display: "flex",
@@ -1057,8 +1059,38 @@ export default function LapPerformanceAnalysis() {
     setReplaySpeed((current) => speedStep(current, direction));
   }
 
+  function renderTelemetryPanel({ metrics = GRAPH_METRICS, visible = visibleMetrics, onToggle }) {
+    if (traces.length === 0) {
+      return (
+        <div className="card" style={{ height: "100%" }}>
+          <h2>Telemetry Overview</h2>
+          <p style={{ color: "#94a3b8" }}>
+            No raw telemetry samples were saved for this lap, so only timing data is available.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <CombinedTelemetryGraph
+        labels={labels}
+        traces={traces}
+        metrics={metrics}
+        visibleMetrics={visible}
+        onToggle={onToggle}
+        activeIndex={activeSampleIndex}
+        onHoverIndex={(index) => {
+          if (!isReplaying) setHoveredSampleIndex(index);
+        }}
+        sectorBoundaries={sectorBoundaries}
+        autoScroll={hoveredSampleIndex === null}
+        containerStyle={{ height: "100%" }}
+      />
+    );
+  }
+
   return (
-    <div className="page-container">
+    <div className="page-container lap-performance-page">
       <div
         style={{
           display: "flex",
@@ -1259,103 +1291,86 @@ export default function LapPerformanceAnalysis() {
 
               {extrasExpanded && (
                 <div className="lap-extras-body">
-                  <ReplayControls
-                    traces={traces}
-                    replayTimeMs={replayTimeMs}
-                    replayDurationMs={replayDurationMs}
-                    replaySpeed={replaySpeed}
-                    isReplaying={isReplaying}
-                    activeSample={activeSample}
-                    onPlayPause={handleReplayPlayPause}
-                    onRestart={handleReplayRestart}
-                    onSeekBy={handleReplaySeekBy}
-                    onSeekTo={handleReplaySeekTo}
-                    onSpeedStep={handleReplaySpeedStep}
-                  />
-
-                  <PostLapTelemetryMap
-                    apiBase={API_BASE}
-                    trackKey={session.trackKey}
-                    traces={traces}
-                    activeIndex={activeSampleIndex}
-                    sectorBoundaries={sectorBoundaries}
-                  />
-
-                  {traces.length === 0 ? (
-                    <div className="card">
-                      <h2>Telemetry Overview</h2>
-                      <p style={{ color: "#94a3b8" }}>
-                        No raw telemetry samples were saved for this lap, so only timing data is available.
-                      </p>
+                  <div className="lap-analysis-triple-grid">
+                    <div className="lap-analysis-grid-item replay-panel">
+                      <ReplayControls
+                        traces={traces}
+                        replayTimeMs={replayTimeMs}
+                        replayDurationMs={replayDurationMs}
+                        replaySpeed={replaySpeed}
+                        isReplaying={isReplaying}
+                        activeSample={activeSample}
+                        onPlayPause={handleReplayPlayPause}
+                        onRestart={handleReplayRestart}
+                        onSeekBy={handleReplaySeekBy}
+                        onSeekTo={handleReplaySeekTo}
+                        onSpeedStep={handleReplaySpeedStep}
+                        containerStyle={{ height: "100%" }}
+                      />
                     </div>
-                  ) : (
-                    <CombinedTelemetryGraph
-                      labels={labels}
-                      traces={traces}
-                      metrics={beginnerMetrics}
-                      visibleMetrics={beginnerVisibleMetrics}
-                      onToggle={toggleBeginnerMetric}
-                      activeIndex={activeSampleIndex}
-                      onHoverIndex={(index) => {
-                        if (!isReplaying) setHoveredSampleIndex(index);
-                      }}
-                      sectorBoundaries={sectorBoundaries}
-                      autoScroll={hoveredSampleIndex === null}
-                    />
-                  )}
+
+                    <div className="lap-analysis-grid-item map-panel">
+                      <PostLapTelemetryMap
+                        apiBase={API_BASE}
+                        trackKey={session.trackKey}
+                        traces={traces}
+                        activeIndex={activeSampleIndex}
+                        sectorBoundaries={sectorBoundaries}
+                        containerStyle={{ height: "100%" }}
+                      />
+                    </div>
+
+                    <div className="lap-analysis-grid-item telemetry-panel">
+                      {renderTelemetryPanel({
+                        metrics: beginnerMetrics,
+                        visible: beginnerVisibleMetrics,
+                        onToggle: toggleBeginnerMetric,
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           )}
 
           {!isBeginnerView && (
-            <ReplayControls
-              traces={traces}
-              replayTimeMs={replayTimeMs}
-              replayDurationMs={replayDurationMs}
-              replaySpeed={replaySpeed}
-              isReplaying={isReplaying}
-              activeSample={activeSample}
-              onPlayPause={handleReplayPlayPause}
-              onRestart={handleReplayRestart}
-              onSeekBy={handleReplaySeekBy}
-              onSeekTo={handleReplaySeekTo}
-              onSpeedStep={handleReplaySpeedStep}
-            />
-          )}
-
-          {!isBeginnerView && (
-            <PostLapTelemetryMap
-              apiBase={API_BASE}
-              trackKey={session.trackKey}
-              traces={traces}
-              activeIndex={activeSampleIndex}
-              sectorBoundaries={sectorBoundaries}
-            />
-          )}
-
-          {!isBeginnerView && (
-            traces.length === 0 ? (
-              <div className="card">
-                <h2>Telemetry Graphs</h2>
-                <p style={{ color: "#94a3b8" }}>
-                  No raw telemetry samples were saved for this lap, so only timing data is available.
-                </p>
+            <div className="lap-analysis-triple-grid">
+              <div className="lap-analysis-grid-item replay-panel">
+                <ReplayControls
+                  traces={traces}
+                  replayTimeMs={replayTimeMs}
+                  replayDurationMs={replayDurationMs}
+                  replaySpeed={replaySpeed}
+                  isReplaying={isReplaying}
+                  activeSample={activeSample}
+                  onPlayPause={handleReplayPlayPause}
+                  onRestart={handleReplayRestart}
+                  onSeekBy={handleReplaySeekBy}
+                  onSeekTo={handleReplaySeekTo}
+                  onSpeedStep={handleReplaySpeedStep}
+                  containerStyle={{ height: "100%" }}
+                />
               </div>
-            ) : (
-              <CombinedTelemetryGraph
-                labels={labels}
-                traces={traces}
-                visibleMetrics={visibleMetrics}
-                onToggle={toggleMetric}
-                activeIndex={activeSampleIndex}
-                onHoverIndex={(index) => {
-                  if (!isReplaying) setHoveredSampleIndex(index);
-                }}
-                sectorBoundaries={sectorBoundaries}
-                autoScroll={hoveredSampleIndex === null}
-              />
-            )
+
+              <div className="lap-analysis-grid-item map-panel">
+                <PostLapTelemetryMap
+                  apiBase={API_BASE}
+                  trackKey={session.trackKey}
+                  traces={traces}
+                  activeIndex={activeSampleIndex}
+                  sectorBoundaries={sectorBoundaries}
+                  containerStyle={{ height: "100%" }}
+                />
+              </div>
+
+              <div className="lap-analysis-grid-item telemetry-panel">
+                {renderTelemetryPanel({
+                  metrics: GRAPH_METRICS,
+                  visible: visibleMetrics,
+                  onToggle: toggleMetric,
+                })}
+              </div>
+            </div>
           )}
         </>
       )}

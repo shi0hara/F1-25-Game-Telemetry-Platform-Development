@@ -258,6 +258,7 @@ export default function PostLapTelemetryMap({
   traces,
   activeIndex,
   sectorBoundaries = [],
+  containerStyle,
 }) {
   const canvasRef = useRef(null);
   const [trackMap, setTrackMap] = useState(null);
@@ -479,7 +480,7 @@ export default function PostLapTelemetryMap({
 
   if (positionedSamples.length < 2) {
     return (
-      <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
         <h2>Lap Map</h2>
         <p style={{ color: "#94a3b8" }}>
           This lap has no saved world-position samples. New laps will include them after the backend update.
@@ -489,7 +490,7 @@ export default function PostLapTelemetryMap({
   }
 
   return (
-    <div className="card" style={{ marginBottom: 20 }}>
+    <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Lap Map</h2>
         <p style={{ color: "#94a3b8", margin: "5px 0 0" }}>
