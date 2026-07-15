@@ -578,6 +578,13 @@ BRAKE_ACTIVE = False
 BRAKE_START_DISTANCE_M = 0.0
 LAST_BRAKE_SAMPLE_TIME = None
 
+CURRENT_DRS_AVAILABLE = False
+CURRENT_DRS_ACTIVATION_DISTANCE_M = None
+DRS_AVAILABLE_SINCE_MONO = None
+DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
+DRS_ACTIVATION_PENDING = False
+LAST_DRS_ACTIVE = False
+
 def prompt_identity():
     global DRIVER_USERNAME, DRIVER_EMAIL
 
@@ -1096,19 +1103,34 @@ def post_telemetry_sample(header, pkt):
     rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
-<<<<<<< HEAD
+    raw_drs_activation_distance = parse_number(
+        get_attr_loose(
+            t,
+            "drs_activation_distance",
+            "drsActivationDistance",
+            "m_drsActivationDistance",
+            "m_drs_activation_distance",
+            default=None,
+        ),
+        None,
+    )
+    drs_activation_distance = (
+        raw_drs_activation_distance
+        if raw_drs_activation_distance is not None
+        else CURRENT_DRS_ACTIVATION_DISTANCE_M
+    )
     drs_activation_delay_ms = None
     drs_activation_delay_distance_m = None
     if CURRENT_DRS_AVAILABLE and drs and not LAST_DRS_ACTIVE and DRS_ACTIVATION_PENDING:
         if DRS_AVAILABLE_SINCE_MONO is not None:
             drs_activation_delay_ms = int(max(0, (now - DRS_AVAILABLE_SINCE_MONO) * 1000))
         if DRS_AVAILABLE_SINCE_LAP_DISTANCE_M is not None and CURRENT_LAP_DISTANCE_M is not None:
-            drs_activation_delay_distance_m = max(0.0, float(CURRENT_LAP_DISTANCE_M) - float(DRS_AVAILABLE_SINCE_LAP_DISTANCE_M))
+            drs_activation_delay_distance_m = max(
+                0.0,
+                float(CURRENT_LAP_DISTANCE_M) - float(DRS_AVAILABLE_SINCE_LAP_DISTANCE_M),
+            )
         DRS_ACTIVATION_PENDING = False
     LAST_DRS_ACTIVE = drs
-=======
-    drs_activation_distance = float(parse_number(get_attr(t, "drs_activation_distance", "m_drsActivationDistance", default=0.0), 0.0) or 0.0)
->>>>>>> d031e6ec656edc68b98aef7ca4f327cc6db0731b
 
     cornering_speed = speed if abs(steering) >= 0.25 else None
 
@@ -1158,14 +1180,11 @@ def post_telemetry_sample(header, pkt):
         "corneringSpeed": cornering_speed,
         "brakingDistance": braking_distance,
         "drs": drs,
-<<<<<<< HEAD
         "drsAvailable": CURRENT_DRS_AVAILABLE,
-        "drsActivationDistanceM": CURRENT_DRS_ACTIVATION_DISTANCE_M,
+        "drsActivationDistanceM": drs_activation_distance,
+        "drsActivationDistance": drs_activation_distance,
         "drsActivationDelayMs": drs_activation_delay_ms,
         "drsActivationDelayDistanceM": drs_activation_delay_distance_m,
-=======
-        "drsActivationDistance": drs_activation_distance,
->>>>>>> d031e6ec656edc68b98aef7ca4f327cc6db0731b
         "playerCarIndex": player_idx,
         "currentSector": CURRENT_SECTOR,
         "pitStatus": CURRENT_PIT_STATUS,
@@ -1242,14 +1261,10 @@ def main():
                 "cornering_speed",
                 "braking_distance",
                 "drs",
-<<<<<<< HEAD
                 "drs_available",
                 "drs_activation_distance_m",
                 "drs_activation_delay_ms",
                 "drs_activation_delay_distance_m",
-=======
-                "drs_activation_distance"
->>>>>>> d031e6ec656edc68b98aef7ca4f327cc6db0731b
             ])
 
             print("\nListening for telemetry... (CTRL+C to stop)")
@@ -1313,7 +1328,22 @@ def main():
                         rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
                         gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
                         drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
-                        drs_activation_distance = float(parse_number(get_attr(t, "drs_activation_distance", "m_drsActivationDistance", default=0.0), 0.0) or 0.0)
+                        raw_drs_activation_distance = parse_number(
+                            get_attr_loose(
+                                t,
+                                "drs_activation_distance",
+                                "drsActivationDistance",
+                                "m_drsActivationDistance",
+                                "m_drs_activation_distance",
+                                default=None,
+                            ),
+                            None,
+                        )
+                        drs_activation_distance = (
+                            raw_drs_activation_distance
+                            if raw_drs_activation_distance is not None
+                            else CURRENT_DRS_ACTIVATION_DISTANCE_M
+                        )
 
                         rows_buffer.append([
                             iso_now(),
@@ -1336,14 +1366,10 @@ def main():
                             speed if abs(steering) >= 0.25 else None,
                             BRAKE_START_DISTANCE_M if brake > 0.05 else None,
                             drs,
-<<<<<<< HEAD
                             CURRENT_DRS_AVAILABLE,
-                            CURRENT_DRS_ACTIVATION_DISTANCE_M,
+                            drs_activation_distance,
                             None,
                             None,
-=======
-                            drs_activation_distance
->>>>>>> d031e6ec656edc68b98aef7ca4f327cc6db0731b
                         ])
 
                         if len(rows_buffer) >= CSV_FLUSH_EVERY_ROWS:
@@ -1396,11 +1422,6 @@ def main():
         sock.close()
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     main()
 
 
-
-=======
-    main()
->>>>>>> d031e6ec656edc68b98aef7ca4f327cc6db0731b

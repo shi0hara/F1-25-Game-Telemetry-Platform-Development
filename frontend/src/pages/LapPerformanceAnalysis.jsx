@@ -1182,7 +1182,11 @@ export default function LapPerformanceAnalysis() {
                       " activations, ready " +
                       formatNumber(stats.drs.availablePct, 1, "%") +
                       " of samples"
-                    : "Needs DRS-ready telemetry"
+                    : stats.drs?.availableSampleCount
+                      ? "Ready " +
+                        formatNumber(stats.drs.availablePct, 1, "%") +
+                        " of samples, no activation detected"
+                      : "Needs DRS-ready telemetry"
                 }
               />
               {!isBeginnerView && (
@@ -1358,4 +1362,5 @@ export default function LapPerformanceAnalysis() {
     </div>
   );
 }
+
 
