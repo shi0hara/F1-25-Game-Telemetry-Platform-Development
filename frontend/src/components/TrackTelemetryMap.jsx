@@ -383,6 +383,69 @@ function isSameMapPosition(a, b) {
   );
 }
 
+function mapPointTimestampMs(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (typeof value.seconds === "number") {
+    return value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1000000);
+  }
+
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readMapPointFreshness(point) {
+  if (!point || typeof point !== "object") {
+    return {
+      sampleIndex: null,
+      lapNumber: null,
+      lapDistance: null,
+      timestampMs: null,
+    };
+  }
+
+  return {
+    sampleIndex: hasNumber(point.sampleIndex ?? point.i)
+      ? Number(point.sampleIndex ?? point.i)
+      : null,
+    lapNumber: getLapNumber(point, null),
+    lapDistance: hasNumber(point.lapDistance ?? point.d)
+      ? Number(point.lapDistance ?? point.d)
+      : null,
+    timestampMs: mapPointTimestampMs(point.timestamp ?? point.t),
+  };
+}
+
+function compareMapPointFreshness(next, prev) {
+  if (!prev) return 1;
+
+  for (const key of ["sampleIndex", "timestampMs"]) {
+    if (next[key] !== null && prev[key] !== null) {
+      const diff = next[key] - prev[key];
+      if (diff !== 0) return diff;
+    }
+  }
+
+  if (
+    next.lapNumber !== null &&
+    prev.lapNumber !== null &&
+    next.lapNumber !== prev.lapNumber
+  ) {
+    return next.lapNumber - prev.lapNumber;
+  }
+
+  if (
+    next.lapDistance !== null &&
+    prev.lapDistance !== null &&
+    next.lapDistance !== prev.lapDistance
+  ) {
+    return next.lapDistance - prev.lapDistance;
+  }
+
+  return 0;
+}
+
 function readCenterlinePoint(point) {
   const worldX = point.x ?? point.worldX;
   const worldZ = point.z ?? point.worldZ;
@@ -568,6 +631,7 @@ export default function TrackTelemetryMap({
   const trackMapLoadSeqRef = useRef(0);
   const lapTrailLoadSeqRef = useRef(0);
   const livePositionLoadSeqRef = useRef(0);
+  const latestLivePointFreshnessRef = useRef(null);
 
   const [trackMap, setTrackMap] = useState(null);
   const [sessionMap, setSessionMap] = useState(null);
@@ -601,6 +665,7 @@ export default function TrackTelemetryMap({
   function resetLapTrails() {
     currentLapTrailRef.current = [];
     currentLapNumberRef.current = null;
+    latestLivePointFreshnessRef.current = null;
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
     setCompletedLapTrails([]);
@@ -794,7 +859,6 @@ export default function TrackTelemetryMap({
 
         const data = await res.json();
         if (!isCurrentRequest()) return;
-        setSessionMap(data);
 
         const latest = data.latestMapPosition;
 
@@ -803,6 +867,32 @@ export default function TrackTelemetryMap({
           hasNumber(latest.worldX) &&
           hasNumber(latest.worldZ)
         ) {
+          const freshness = readMapPointFreshness(latest);
+          const freshnessDelta = compareMapPointFreshness(
+            freshness,
+            latestLivePointFreshnessRef.current
+          );
+
+          if (freshnessDelta < 0) {
+            return;
+          }
+
+          if (freshnessDelta > 0) {
+            latestLivePointFreshnessRef.current = freshness;
+          }
+
+          setSessionMap(data);
+
+          if (
+            freshnessDelta === 0 &&
+            isSameMapPosition(
+              currentLapTrailRef.current[currentLapTrailRef.current.length - 1],
+              latest
+            )
+          ) {
+            return;
+          }
+
           const previousLapNumber = currentLapNumberRef.current;
           const nextLapNumber = getLapNumber(latest, previousLapNumber);
 
@@ -825,6 +915,8 @@ export default function TrackTelemetryMap({
           }
 
           appendToCurrentLapTrail(latest);
+        } else {
+          setSessionMap(data);
         }
       } catch (err) {
         if (err?.name === "AbortError" || !isCurrentRequest()) return;
@@ -1052,7 +1144,7 @@ export default function TrackTelemetryMap({
       if (transform.anchorCount > 0) {
         const rmseText =
           transform.rmsePixels != null
-            ? `Calibration: ${transform.anchorCount} anchors, ±${transform.rmsePixels.toFixed(
+            ? `Calibration: ${transform.anchorCount} anchors, +/-${transform.rmsePixels.toFixed(
                 1
               )} px`
             : `Calibration: ${transform.anchorCount} anchors`;
@@ -1138,19 +1230,19 @@ export default function TrackTelemetryMap({
         }}
       >
         <span>
-          <b style={{ color: "rgb(255, 60, 60)" }}>━</b> Brake
+          <b style={{ color: "rgb(255, 60, 60)" }}>--</b> Brake
         </span>
         <span>
-          <b style={{ color: "rgb(50, 255, 100)" }}>━</b> Throttle
+          <b style={{ color: "rgb(50, 255, 100)" }}>--</b> Throttle
         </span>
         <span>
-          <b style={{ color: "rgb(80, 160, 255)" }}>━</b> Steering / cornering
+          <b style={{ color: "rgb(80, 160, 255)" }}>--</b> Steering / cornering
         </span>
         <span>
-          <b style={{ color: "rgb(160, 160, 160)" }}>━</b> Coasting
+          <b style={{ color: "rgb(160, 160, 160)" }}>--</b> Coasting
         </span>
         <span>
-          <b style={{ color: "white" }}>●</b> Current car
+          <b style={{ color: "white" }}>o</b> Current car
         </span>
       </div>
     </div>

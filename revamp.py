@@ -35,6 +35,7 @@ MIN_EVENT_END_AFTER_START_SEC = 10.0
 SESSION_END_GRACE_PERIOD_SEC = float(os.getenv("SESSION_END_GRACE_PERIOD_SEC", "3.0"))
 
 REQUEST_TIMEOUT = (5.0, 10.0)
+LATEST_REQUEST_TIMEOUT = (1.0, 2.0)
 SOCKET_TIMEOUT_SEC = 1.0
 SAMPLE_MIN_INTERVAL_SEC = 0.1
 CSV_FLUSH_EVERY_ROWS = 25
@@ -562,7 +563,7 @@ LAST_SAMPLE_TIMESTAMP = None
 
 STOP_EVENT = threading.Event()
 
-LATEST_QUEUE = queue.Queue(maxsize=200)
+LATEST_QUEUE = queue.Queue(maxsize=1)
 BATCH_QUEUE = queue.Queue(maxsize=2000)
 LAP_QUEUE = queue.Queue(maxsize=200)
 CORNER_QUEUE = queue.Queue(maxsize=500)
@@ -647,10 +648,19 @@ def queue_worker(qobj, label):
         except queue.Empty:
             continue
 
-        delay = 0.5
+        if label == "latest":
+            while True:
+                try:
+                    endpoint, body, retries_left = qobj.get_nowait()
+                except queue.Empty:
+                    break
+
+        delay = 0.25 if label == "latest" else 0.5
+        timeout = LATEST_REQUEST_TIMEOUT if label == "latest" else REQUEST_TIMEOUT
+
         for attempt in range(retries_left + 1):
             try:
-                post_json(endpoint, body)
+                post_json(endpoint, body, timeout=timeout)
                 break
             except Exception as e:
                 if attempt >= retries_left:
@@ -977,6 +987,14 @@ def handle_session_history_packet(header, pkt):
     LAST_HISTORY_NUM_LAPS = num_laps
 
 def enqueue_latest(item):
+    # Live updates should never build a backlog. If the API/network pauses, keep only
+    # the newest sample so the website does not replay stale telemetry to catch up.
+    while True:
+        try:
+            LATEST_QUEUE.get_nowait()
+        except queue.Empty:
+            break
+
     try:
         LATEST_QUEUE.put_nowait(item)
     except queue.Full:

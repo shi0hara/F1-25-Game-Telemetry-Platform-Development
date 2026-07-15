@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import {
   Chart as ChartJS,
@@ -80,6 +80,102 @@ function getDefaultMapImage(trackKey) {
   return mapImages[trackKey] || "/maps/default-track.png";
 }
 
+function telemetryTimestampMs(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (typeof value.seconds === "number") {
+    return value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1000000);
+  }
+
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readTelemetryFreshness(sample) {
+  if (!sample || typeof sample !== "object") {
+    return {
+      sampleIndex: null,
+      gameTimeMs: null,
+      lapNumber: null,
+      lapDistance: null,
+      timestampMs: null,
+    };
+  }
+
+  const gameTime = Number(
+    sample.gameTimeMs ??
+      sample.gameTime ??
+      sample.sessionTimeMs ??
+      sample.sessionTime
+  );
+
+  return {
+    sampleIndex: Number.isFinite(Number(sample.sampleIndex ?? sample.i))
+      ? Number(sample.sampleIndex ?? sample.i)
+      : null,
+    gameTimeMs: Number.isFinite(gameTime) ? gameTime : null,
+    lapNumber: Number.isFinite(Number(sample.lapNumber ?? sample.lap))
+      ? Number(sample.lapNumber ?? sample.lap)
+      : null,
+    lapDistance: Number.isFinite(Number(sample.lapDistance ?? sample.d))
+      ? Number(sample.lapDistance ?? sample.d)
+      : null,
+    timestampMs: telemetryTimestampMs(sample.timestamp ?? sample.t),
+  };
+}
+
+function compareTelemetryFreshness(next, prev) {
+  if (!prev) return 1;
+
+  for (const key of ["sampleIndex", "gameTimeMs", "timestampMs"]) {
+    if (next[key] !== null && prev[key] !== null) {
+      const diff = next[key] - prev[key];
+      if (diff !== 0) return diff;
+    }
+  }
+
+  if (
+    next.lapNumber !== null &&
+    prev.lapNumber !== null &&
+    next.lapNumber !== prev.lapNumber
+  ) {
+    return next.lapNumber - prev.lapNumber;
+  }
+
+  if (
+    next.lapDistance !== null &&
+    prev.lapDistance !== null &&
+    next.lapDistance !== prev.lapDistance
+  ) {
+    return next.lapDistance - prev.lapDistance;
+  }
+
+  return 0;
+}
+
+function isReasonableLiveSpeed(speed, previousPoint, freshness) {
+  if (!Number.isFinite(speed) || speed < 0 || speed > 430) return false;
+  if (!previousPoint) return true;
+
+  const timeDeltaMs =
+    freshness.timestampMs !== null && previousPoint.timestampMs !== null
+      ? freshness.timestampMs - previousPoint.timestampMs
+      : null;
+  const frameDelta =
+    freshness.sampleIndex !== null && previousPoint.sampleIndex !== null
+      ? freshness.sampleIndex - previousPoint.sampleIndex
+      : null;
+  const speedDelta = Math.abs(speed - previousPoint.speed);
+
+  if (timeDeltaMs !== null && timeDeltaMs < 0) return false;
+  if (frameDelta !== null && frameDelta < 0) return false;
+  if (speedDelta > 160 && (timeDeltaMs === null || timeDeltaMs < 700)) return false;
+  if (speedDelta > 160 && (frameDelta === null || frameDelta < 8)) return false;
+
+  return true;
+}
+
 function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
   return (
     <div
@@ -152,6 +248,8 @@ export default function LiveTelemetry({ currentUser }) {
     createEmptyMapTrailState()
   );
   const [localError, setLocalError] = useState("");
+  const lastTelemetryFreshnessRef = useRef(null);
+  const lastSpeedPointRef = useRef(null);
 
   const {
     sessionId: autoSessionId,
@@ -162,12 +260,36 @@ export default function LiveTelemetry({ currentUser }) {
     error,
   } = useActiveSession(activeUsername);
 
+  function resetSpeedTrace() {
+    lastTelemetryFreshnessRef.current = null;
+    lastSpeedPointRef.current = null;
+    setSpeedPoints([]);
+  }
+
+  function appendLiveSpeedPoint(latestTelemetry, freshness) {
+    const speed = Number(latestTelemetry?.speedKph);
+
+    if (!isReasonableLiveSpeed(speed, lastSpeedPointRef.current, freshness)) {
+      return;
+    }
+
+    const point = {
+      time: freshness.timestampMs ?? Date.now(),
+      timestampMs: freshness.timestampMs,
+      sampleIndex: freshness.sampleIndex,
+      speed,
+    };
+
+    lastSpeedPointRef.current = point;
+    setSpeedPoints((prev) => [...prev, point].slice(-75));
+  }
+
   useEffect(() => {
     if (!autoSessionId) {
       setSelectedSessionId(null);
       setSelectedSession(null);
       setSelectedTelemetry(null);
-      setSpeedPoints([]);
+      resetSpeedTrace();
       setSelectedTrailKey("current");
       setMapTrailState(createEmptyMapTrailState());
       return;
@@ -183,6 +305,7 @@ export default function LiveTelemetry({ currentUser }) {
   }, [autoSessionId, sessions]);
 
   useEffect(() => {
+    resetSpeedTrace();
     setSelectedTrailKey("current");
     setMapTrailState(createEmptyMapTrailState());
   }, [selectedSessionId]);
@@ -210,36 +333,30 @@ export default function LiveTelemetry({ currentUser }) {
           ...snapshot.data(),
         };
 
-        setSelectedSession(data);
-
         const latestTelemetry = data.latestTelemetry || null;
+
+        if (!latestTelemetry) {
+          setSelectedSession(data);
+          setSelectedTelemetry(null);
+          return;
+        }
+
+        const freshness = readTelemetryFreshness(latestTelemetry);
+        const freshnessDelta = compareTelemetryFreshness(
+          freshness,
+          lastTelemetryFreshnessRef.current
+        );
+
+        if (freshnessDelta < 0) {
+          return;
+        }
+
+        setSelectedSession(data);
         setSelectedTelemetry(latestTelemetry);
 
-        if (latestTelemetry?.speedKph != null) {
-          setSpeedPoints((prev) => {
-            const newSpeed = Number(latestTelemetry.speedKph);
-            const telemetryTimestamp = latestTelemetry.timestamp;
-            const now = Date.now();
-            const last = prev[prev.length - 1];
-
-            if (!last) {
-              return [{ time: now, speed: newSpeed, ts: telemetryTimestamp }];
-            }
-
-            // If the telemetry timestamp hasn't changed, this is a duplicate
-            // snapshot triggered by a different field update on the document
-            if (telemetryTimestamp && last.ts && telemetryTimestamp === last.ts) {
-              return prev;
-            }
-
-            // Minimum 150ms between plotted points
-            if (now - last.time < 150) {
-              return prev;
-            }
-
-            const next = [...prev, { time: now, speed: newSpeed, ts: telemetryTimestamp }];
-            return next.slice(-75);
-          });
+        if (freshnessDelta > 0) {
+          lastTelemetryFreshnessRef.current = freshness;
+          appendLiveSpeedPoint(latestTelemetry, freshness);
         }
       },
       (err) => {
@@ -260,7 +377,7 @@ export default function LiveTelemetry({ currentUser }) {
     if (nextScope === "all" && !isAdmin) return;
 
     setLocalError("");
-    setSpeedPoints([]);
+    resetSpeedTrace();
     setSelectedSessionId(null);
     setSelectedSession(null);
     setSelectedTelemetry(null);
@@ -446,7 +563,7 @@ export default function LiveTelemetry({ currentUser }) {
                     setSelectedSessionId(session.id);
                     setSelectedSession(session);
                     setSelectedTelemetry(session.latestTelemetry || null);
-                    setSpeedPoints([]);
+                    resetSpeedTrace();
                     if (isDifferentSession) {
                       resetLapSelection();
                     }
