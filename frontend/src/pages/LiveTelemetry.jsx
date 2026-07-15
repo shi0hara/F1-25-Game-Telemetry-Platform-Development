@@ -217,14 +217,27 @@ export default function LiveTelemetry({ currentUser }) {
 
         if (latestTelemetry?.speedKph != null) {
           setSpeedPoints((prev) => {
-            const next = [
-              ...prev,
-              {
-                time: Date.now(),
-                speed: Number(latestTelemetry.speedKph ?? 0),
-              },
-            ];
+            const newSpeed = Number(latestTelemetry.speedKph);
+            const telemetryTimestamp = latestTelemetry.timestamp;
+            const now = Date.now();
+            const last = prev[prev.length - 1];
 
+            if (!last) {
+              return [{ time: now, speed: newSpeed, ts: telemetryTimestamp }];
+            }
+
+            // If the telemetry timestamp hasn't changed, this is a duplicate
+            // snapshot triggered by a different field update on the document
+            if (telemetryTimestamp && last.ts && telemetryTimestamp === last.ts) {
+              return prev;
+            }
+
+            // Minimum 150ms between plotted points
+            if (now - last.time < 150) {
+              return prev;
+            }
+
+            const next = [...prev, { time: now, speed: newSpeed, ts: telemetryTimestamp }];
             return next.slice(-75);
           });
         }
