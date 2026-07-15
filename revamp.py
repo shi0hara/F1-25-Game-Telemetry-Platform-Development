@@ -1049,6 +1049,7 @@ def post_telemetry_sample(header, pkt):
     rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
+    drs_activation_distance = float(parse_number(get_attr(t, "drs_activation_distance", "m_drsActivationDistance", default=0.0), 0.0) or 0.0)
 
     cornering_speed = speed if abs(steering) >= 0.25 else None
 
@@ -1098,6 +1099,7 @@ def post_telemetry_sample(header, pkt):
         "corneringSpeed": cornering_speed,
         "brakingDistance": braking_distance,
         "drs": drs,
+        "drsActivationDistance": drs_activation_distance,
         "playerCarIndex": player_idx,
         "currentSector": CURRENT_SECTOR,
         "pitStatus": CURRENT_PIT_STATUS,
@@ -1174,6 +1176,7 @@ def main():
                 "cornering_speed",
                 "braking_distance",
                 "drs",
+                "drs_activation_distance"
             ])
 
             print("\nListening for telemetry... (CTRL+C to stop)")
@@ -1233,6 +1236,7 @@ def main():
                         rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
                         gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
                         drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
+                        drs_activation_distance = float(parse_number(get_attr(t, "drs_activation_distance", "m_drsActivationDistance", default=0.0), 0.0) or 0.0)
 
                         rows_buffer.append([
                             iso_now(),
@@ -1255,6 +1259,7 @@ def main():
                             speed if abs(steering) >= 0.25 else None,
                             BRAKE_START_DISTANCE_M if brake > 0.05 else None,
                             drs,
+                            drs_activation_distance
                         ])
 
                         if len(rows_buffer) >= CSV_FLUSH_EVERY_ROWS:
