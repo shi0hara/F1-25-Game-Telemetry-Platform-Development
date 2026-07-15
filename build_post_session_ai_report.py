@@ -115,6 +115,7 @@ def normalize_row(row, index):
         "corneringSpeedKph": parse_float(field(row, "cornering_speed", "corneringSpeed")),
         "brakingDistanceM": parse_float(field(row, "braking_distance", "brakingDistance")),
         "drs": parse_bool(field(row, "drs")),
+        "drsActivationDistance": parse_float(field(row, "drs_activation_distance", "drsActivationDistance")),
     }
 
 
@@ -203,6 +204,66 @@ def summarize_segment(run):
     }
 
 
+def compute_drs_reaction_times(samples):
+    """
+    Calculate the time from when drsActivationDistance reaches 0
+    (driver crosses the DRS activation point) to when DRS actually opens.
+
+    Returns a list of reaction time dicts, one per DRS activation event.
+    """
+    reactions = []
+    i = 0
+    n = len(samples)
+
+    while i < n:
+        # Look for a sample where drsActivationDistance == 0 and DRS is not yet open.
+        # drsActivationDistance == 0 means the car is at/past the activation line.
+        sample = samples[i]
+        dist = sample.get("drsActivationDistance")
+        drs_active = sample.get("drs")
+
+        if dist is not None and dist == 0.0 and not drs_active:
+            activation_point_sample = sample
+            activation_time = sample["timestamp"]
+
+            if activation_time is None:
+                i += 1
+                continue
+
+            # Scan forward to find when DRS flips to True
+            j = i + 1
+            while j < n:
+                future = samples[j]
+                future_dist = future.get("drsActivationDistance")
+
+                # If activation distance goes back above 0 before DRS opened,
+                # the driver missed/chose not to use DRS this time.
+                if future_dist is not None and future_dist > 0:
+                    break
+
+                if future.get("drs"):
+                    open_time = future["timestamp"]
+                    if open_time is not None:
+                        delta_sec = (open_time - activation_time).total_seconds()
+                        if 0 < delta_sec < 5.0:  # sanity: ignore >5s gaps
+                            reactions.append({
+                                "lapNumber": sample.get("lapNumber"),
+                                "lapDistanceM": sample.get("lapDistanceM"),
+                                "reactionTimeSec": round(delta_sec, 4),
+                            })
+                    # Skip past this DRS zone
+                    i = j
+                    break
+                j += 1
+            else:
+                i = j
+                continue
+
+        i += 1
+
+    return reactions
+
+
 def summarize_lap(lap_number, samples):
     speeds = [sample["speedKph"] for sample in samples]
     throttles = [sample["throttle"] for sample in samples]
@@ -220,6 +281,9 @@ def summarize_lap(lap_number, samples):
         samples,
         lambda s: (s["throttle"] or 0) < 0.05 and (s["brake"] or 0) < 0.05,
     )
+
+    drs_reactions = compute_drs_reaction_times(samples)
+    drs_reaction_times_sec = [r["reactionTimeSec"] for r in drs_reactions]
 
     return {
         "lapNumber": lap_number,
@@ -240,6 +304,11 @@ def summarize_lap(lap_number, samples):
         "avgAbsSteering": avg([abs(value or 0) for value in steerings]),
         "maxAbsSteering": max([abs(value or 0) for value in steerings]) if steerings else None,
         "drsPct": ratio(samples, lambda s: s["drs"]),
+        "drsReactionCount": len(drs_reactions),
+        "drsAvgReactionTimeSec": avg(drs_reaction_times_sec),
+        "drsFastestReactionTimeSec": min(drs_reaction_times_sec) if drs_reaction_times_sec else None,
+        "drsSlowestReactionTimeSec": max(drs_reaction_times_sec) if drs_reaction_times_sec else None,
+        "drsReactions": drs_reactions,
         "bestDeltaToPbMs": min(deltas) if deltas else None,
         "finalDeltaToPbMs": deltas[-1] if deltas else None,
         "brakingZoneCount": len(braking_runs),
@@ -323,6 +392,16 @@ def build_coach_signals(laps):
                 "lap": lap["lapNumber"],
                 "evidence": f"{lap_label}: heavy braking for {lap['heavyBrakePct']:.1f}% of samples.",
                 "coachingAngle": "Review braking zones for over-slowing, braking too long, or missing trail-brake release.",
+            })
+
+        drs_avg_reaction = lap.get("drsAvgReactionTimeSec")
+        if drs_avg_reaction is not None and drs_avg_reaction > 0.3:
+            signals.append({
+                "severity": "medium" if drs_avg_reaction < 0.6 else "high",
+                "area": "DRS reaction time",
+                "lap": lap["lapNumber"],
+                "evidence": f"{lap_label}: average DRS reaction time {drs_avg_reaction:.3f}s across {lap.get('drsReactionCount', 0)} activation(s).",
+                "coachingAngle": "The driver is slow to open DRS after crossing the activation line. Every tenth lost here is free time on a straight. Anticipate the line and press DRS immediately.",
             })
 
     return signals[:18]
@@ -460,6 +539,10 @@ def render_markdown(report):
             f"- Average absolute steering: {format_number(lap['avgAbsSteering'], 3)}",
             f"- Max absolute steering: {format_number(lap['maxAbsSteering'], 3)}",
             f"- DRS active: {pct(lap['drsPct'])}",
+            f"- DRS activations: {lap.get('drsReactionCount', 0)}",
+            f"- DRS avg reaction time: {format_number(lap.get('drsAvgReactionTimeSec'), 3, ' sec')}",
+            f"- DRS fastest reaction: {format_number(lap.get('drsFastestReactionTimeSec'), 3, ' sec')}",
+            f"- DRS slowest reaction: {format_number(lap.get('drsSlowestReactionTimeSec'), 3, ' sec')}",
             "",
         ])
 
@@ -503,6 +586,24 @@ def render_markdown(report):
                 "",
                 markdown_table(
                     ["#", "Start", "End", "Avg speed", "Min speed", "Avg throttle", "Peak steering"],
+                    rows,
+                ),
+                "",
+            ])
+
+        if lap.get("drsReactions"):
+            rows = []
+            for index, reaction in enumerate(lap["drsReactions"], start=1):
+                rows.append([
+                    index,
+                    format_number(reaction["lapDistanceM"], 1, " m"),
+                    format_number(reaction["reactionTimeSec"], 3, " sec"),
+                ])
+            lines.extend([
+                "DRS reaction times:",
+                "",
+                markdown_table(
+                    ["#", "Activation distance", "Reaction time"],
                     rows,
                 ),
                 "",
