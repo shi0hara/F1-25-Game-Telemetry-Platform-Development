@@ -725,6 +725,44 @@ th {
   padding: 14px;
 }
 
+.page-container.lap-performance-page {
+  max-width: 1680px;
+  padding-left: 18px;
+  padding-right: 18px;
+}
+
+.lap-analysis-triple-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+  align-items: stretch;
+}
+
+.lap-analysis-grid-item {
+  min-width: 0;
+}
+
+@media (max-width: 1500px) {
+  .lap-analysis-triple-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lap-analysis-grid-item.telemetry-panel {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .lap-analysis-triple-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lap-analysis-grid-item.telemetry-panel {
+    grid-column: auto;
+  }
+}
+
 .auth-switch button {
   position: relative;
   z-index: 1;
