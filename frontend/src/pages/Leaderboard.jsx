@@ -12,7 +12,7 @@ import { db } from "../firebase";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-const FALLBACK_SESSION_LIMIT = 180;
+const FALLBACK_SESSION_LIMIT = 400;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
 const SECTOR_BEST_PURPLE = "#a855f7";
@@ -100,13 +100,20 @@ function toMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();
   if (typeof value.toDate === "function") return value.toDate().getTime();
-  if (typeof value.seconds === "number") return value.seconds * 1000;
-  if (typeof value._seconds === "number") return value._seconds * 1000;
+  if (typeof value.seconds === "number") {
+    return value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1000000);
+  }
+  if (typeof value._seconds === "number") {
+    return value._seconds * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1000000);
+  }
   if (typeof value === "number") return value;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function maxMillis(...values) {
+  return values.reduce((best, value) => Math.max(best, toMillis(value)), 0);
+}
 function formatDate(value) {
   const ms = toMillis(value);
   if (!ms) return "-";
@@ -129,15 +136,45 @@ function scopeStartMs(scopeKey) {
 
 function leaderboardActivityMs(entry) {
   return (
+    Number(entry?.activityMs) ||
+    Number(entry?.sortActivityMs) ||
     Number(entry?.sortRecordedAtMs) ||
     Number(entry?.recordedAtMs) ||
-    toMillis(entry?.recordedAt) ||
-    Number(entry?.sortStartedAtMs) ||
-    toMillis(entry?.sessionStartedAt) ||
-    0
+    maxMillis(
+      entry?.recordedAt,
+      entry?.completedAt,
+      entry?.sessionEndedAt,
+      entry?.endedAt,
+      entry?.sessionLatestTelemetryAt,
+      entry?.latestTelemetryAt,
+      entry?.sessionUpdatedAt,
+      entry?.updatedAt,
+      entry?.sessionStartedAt,
+      entry?.startedAt,
+      entry?.sessionCreatedAt,
+      entry?.createdAt
+    )
   );
 }
 
+function leaderboardDateValue(entry) {
+  return (
+    entry?.recordedAt ||
+    entry?.completedAt ||
+    entry?.sessionEndedAt ||
+    entry?.endedAt ||
+    entry?.sessionLatestTelemetryAt ||
+    entry?.latestTelemetryAt ||
+    entry?.sessionUpdatedAt ||
+    entry?.updatedAt ||
+    entry?.sessionStartedAt ||
+    entry?.startedAt ||
+    entry?.sessionCreatedAt ||
+    entry?.createdAt ||
+    entry?.activityMs ||
+    null
+  );
+}
 function isEntryInScope(entry, scopeKey) {
   const startMs = scopeStartMs(scopeKey);
   if (!startMs) return true;
@@ -244,6 +281,16 @@ function buildFallbackEntry(session, lap) {
     normalizeKey(session.email) ||
     session.id;
 
+  const recordedAt = lap.recordedAt || lap.completedAt || lap.createdAt || null;
+  const activityMs = maxMillis(
+    recordedAt,
+    session.endedAt,
+    session.latestTelemetryAt,
+    session.updatedAt,
+    session.startedAt,
+    session.createdAt
+  );
+
   return {
     userKey,
     userId: session.userId || null,
@@ -261,8 +308,14 @@ function buildFallbackEntry(session, lap) {
     trackId,
     trackKey,
     sessionStartedAt: session.startedAt || null,
-    recordedAt: lap.recordedAt || null,
-    sortRecordedAtMs: toMillis(lap.recordedAt),
+    sessionEndedAt: session.endedAt || null,
+    sessionLatestTelemetryAt: session.latestTelemetryAt || null,
+    sessionUpdatedAt: session.updatedAt || null,
+    sessionCreatedAt: session.createdAt || null,
+    recordedAt,
+    activityMs,
+    sortActivityMs: activityMs,
+    sortRecordedAtMs: toMillis(recordedAt),
     sortStartedAtMs: toMillis(session.startedAt),
   };
 }
@@ -307,7 +360,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
     stats.userKeys.add(entry.userKey);
     stats.latestActivityMs = Math.max(
       stats.latestActivityMs,
-      entry.sortRecordedAtMs || entry.sortStartedAtMs || 0
+      leaderboardActivityMs(entry)
     );
     if (stats.bestLapTimeMs === null || entry.lapTimeMs < stats.bestLapTimeMs) {
       stats.bestLapTimeMs = entry.lapTimeMs;
@@ -323,7 +376,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
       !existing ||
       entry.lapTimeMs < existing.lapTimeMs ||
       (entry.lapTimeMs === existing.lapTimeMs &&
-        entry.sortRecordedAtMs > existing.sortRecordedAtMs)
+        leaderboardActivityMs(entry) > leaderboardActivityMs(existing))
     ) {
       bestByUser.set(entry.userKey, entry);
     }
@@ -377,17 +430,60 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "
   };
 }
 
+async function loadSessionDocsForLeaderboard() {
+  const sessionsRef = collection(db, "sessions");
+  const docsById = new Map();
+  const orderedFields = [
+    "startedAt",
+    "endedAt",
+    "latestTelemetryAt",
+    "updatedAt",
+    "createdAt",
+  ];
+
+  async function collect(q) {
+    try {
+      const snap = await getDocs(q);
+      snap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+    } catch (err) {
+      console.warn("Leaderboard session query skipped:", err);
+    }
+  }
+
+  for (const field of orderedFields) {
+    await collect(query(sessionsRef, orderBy(field, "desc"), limit(FALLBACK_SESSION_LIMIT)));
+  }
+
+  if (docsById.size === 0) {
+    await collect(query(sessionsRef, limit(FALLBACK_SESSION_LIMIT)));
+  }
+
+  return [...docsById.values()].sort((a, b) => {
+    const aData = a.data();
+    const bData = b.data();
+    const aTime = maxMillis(
+      aData.endedAt,
+      aData.latestTelemetryAt,
+      aData.updatedAt,
+      aData.startedAt,
+      aData.createdAt
+    );
+    const bTime = maxMillis(
+      bData.endedAt,
+      bData.latestTelemetryAt,
+      bData.updatedAt,
+      bData.startedAt,
+      bData.createdAt
+    );
+    return bTime - aTime;
+  });
+}
 async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope = "all") {
-  const sessionsQuery = query(
-    collection(db, "sessions"),
-    orderBy("startedAt", "desc"),
-    limit(FALLBACK_SESSION_LIMIT)
-  );
-  const sessionsSnap = await getDocs(sessionsQuery);
+  const sessionDocs = await loadSessionDocsForLeaderboard();
   const entries = [];
   let scannedLaps = 0;
 
-  for (const sessionDoc of sessionsSnap.docs) {
+  for (const sessionDoc of sessionDocs) {
     const session = { id: sessionDoc.id, ...sessionDoc.data() };
     const lapsSnap = await getDocs(collection(db, "sessions", sessionDoc.id, "laps"));
 
@@ -404,7 +500,7 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope =
     ...payload,
     meta: {
       ...payload.meta,
-      scannedSessions: sessionsSnap.size,
+      scannedSessions: sessionDocs.length,
       scannedLaps,
     },
   };
@@ -600,7 +696,12 @@ export default function Leaderboard() {
 
   // Client-side track switching: re-derive rows whenever selectedTrackKey changes
   useEffect(() => {
-    if (allTracks.length === 0) return;
+    if (allTracks.length === 0) {
+      setActiveTrack(null);
+      setTracks([]);
+      setRows([]);
+      return;
+    }
 
     const active =
       allTracks.find((t) => t.trackKey === selectedTrackKey) ||
@@ -618,13 +719,13 @@ export default function Leaderboard() {
     // which builds the full dataset), filter and rank for the active track.
     // For the initial load where rows were already filtered to one track,
     // we need to re-fetch from Firestore if the track doesn't match.
-    const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey);
+    const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey && isEntryInScope(r, timeScope));
     if (trackRows.length > 0 || active.trackKey === selectedTrackKey) {
       setRows(rankEntries(trackRows).slice(0, 50));
     } else {
       setRows([]);
     }
-  }, [selectedTrackKey, allTracks, allEntries]);
+  }, [selectedTrackKey, allTracks, allEntries, timeScope]);
 
   const leader = useMemo(() => rows[0] || null, [rows]);
   const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
@@ -791,7 +892,7 @@ export default function Leaderboard() {
               </span>
               <h2>{leader.username || "Unknown Driver"}</h2>
               <p>
-                {leader.lapTime || formatLapTime(leader.lapTimeMs)} | Lap {leader.lapNumber ?? "-"} | {formatDate(leader.sessionStartedAt)}
+                {leader.lapTime || formatLapTime(leader.lapTimeMs)} | Lap {leader.lapNumber ?? "-"} | {formatDate(leaderboardDateValue(leader))}
               </p>
             </div>
             {lapAnalysisPath(leader) && (
@@ -884,7 +985,7 @@ export default function Leaderboard() {
                         {formatSector(row.sector3Ms)}
                       </td>
                       <td title={row.sessionId}>
-                        {shortSessionId(row.sessionId)} | {formatDate(row.sessionStartedAt)}
+                        {shortSessionId(row.sessionId)} | {formatDate(leaderboardDateValue(row))}
                       </td>
                     </tr>
                   );
@@ -897,4 +998,5 @@ export default function Leaderboard() {
     </div>
   );
 }
+
 
