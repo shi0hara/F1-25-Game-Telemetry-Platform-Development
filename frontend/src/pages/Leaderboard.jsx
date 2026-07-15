@@ -119,13 +119,35 @@ function formatDateTime(value) {
   return new Date(ms).toLocaleString();
 }
 
+function getLocalTimezoneOffsetMinutes() {
+  return -new Date().getTimezoneOffset();
+}
+
+function calendarWeekStartMs(nowMs, timezoneOffsetMinutes = getLocalTimezoneOffsetMinutes()) {
+  const offsetMs = timezoneOffsetMinutes * 60 * 1000;
+  const shifted = new Date(nowMs + offsetMs);
+  const day = shifted.getUTCDay();
+  const daysSinceMonday = (day + 6) % 7;
+  const startShiftedMs = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate() - daysSinceMonday,
+    0,
+    0,
+    0,
+    0
+  );
+
+  return startShiftedMs - offsetMs;
+}
+
 function leaderboardScopeWindow(scope) {
   const now = Date.now();
   if (scope === "daily") {
     return { startMs: now - 24 * 60 * 60 * 1000, endMs: now };
   }
   if (scope === "weekly") {
-    return { startMs: now - 7 * 24 * 60 * 60 * 1000, endMs: now };
+    return { startMs: calendarWeekStartMs(now), endMs: now };
   }
   return { startMs: null, endMs: now };
 }
@@ -476,7 +498,13 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null, scope = "al
 }
 
 async function fetchBackendLeaderboard(scope) {
-  const url = `${API_BASE}/leaderboard?limit=100&scope=${encodeURIComponent(scope)}&scanLimit=500`;
+  const params = new URLSearchParams({
+    limit: "100",
+    scope,
+    scanLimit: "500",
+    tzOffsetMinutes: String(getLocalTimezoneOffsetMinutes()),
+  });
+  const url = `${API_BASE}/leaderboard?${params.toString()}`;
   const res = await fetch(url);
   const contentType = res.headers.get("content-type") || "";
   const data = contentType.includes("application/json")
