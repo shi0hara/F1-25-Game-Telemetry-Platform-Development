@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import LiveTelemetry from "./pages/LiveTelemetry";
 import Leaderboard from "./pages/Leaderboard";
 import LapPerformanceAnalysis from "./pages/LapPerformanceAnalysis";
+import SessionDetails from "./pages/SessionDetails";
 import Profile from "./pages/Profile";
 import EditProfile from "./pages/EditProfile";
 import Login from "./pages/Login";
@@ -80,6 +81,14 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
         <Route
           path="/analysis/:sessionId/lap/:lapId"
           element={<LapPerformanceAnalysis />}
+        />
+        <Route
+          path="/session/:sessionId"
+          element={
+            <ProtectedRoute user={user}>
+              <SessionDetails />
+            </ProtectedRoute>
+          }
         />
         <Route
           path="/profile"

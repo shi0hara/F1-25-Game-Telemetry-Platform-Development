@@ -13,6 +13,7 @@ import { db } from "../firebase";
 import ListenerTokenPanel from "../components/ListenerTokenPanel";
 import "../components/ListenerTokenPanel.css";
 import "./Profile.css";
+import { isActiveSession, latestSessionId, sortSessionsForDisplay } from "../utils/sessionUtils";
 
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
 
@@ -123,7 +124,6 @@ export default function Profile({ username }) {
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState("");
   const [resolvedUser, setResolvedUser] = useState(null);
-  const [selectedSession, setSelectedSession] = useState(null);
   const [favoriteTeam, setFavoriteTeam] = useState("ferrari");
   const [profilePhoto, setProfilePhoto] = useState("");
   const [displayPhoto, setDisplayPhoto] = useState("original");
@@ -219,6 +219,8 @@ export default function Profile({ username }) {
     "--profile-team-secondary": activeTeamTheme.secondary,
     "--profile-team-accent": activeTeamTheme.accent,
   };
+  const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
+  const latestId = useMemo(() => latestSessionId(sessions), [sessions]);
 
   return (
     <div className="page-container profile-page" style={profileThemeStyle}>
@@ -274,18 +276,25 @@ export default function Profile({ username }) {
           <p>No sessions found.</p>
         ) : (
           <div className="session-list">
-            {sessions.map((session) => {
-              const isSelected = selectedSession?.id === session.id;
+            {displaySessions.map((session) => {
               const summary = session.processedSummary || {};
+              const active = isActiveSession(session);
+              const latest = session.id === latestId;
 
               return (
                 <button
                   key={session.id}
-                  onClick={() => setSelectedSession(session)}
-                  className={`session-item ${isSelected ? "selected" : ""}`}
+                  onClick={() => navigate(`/session/${encodeURIComponent(session.id)}`)}
+                  className={`session-item ${active ? "active-session" : ""} ${
+                    latest ? "latest-session" : ""
+                  }`}
                 >
                   <div className="session-track">
                     <strong>{session.trackName || "Unknown Track"}</strong>
+                    <span className={active ? "session-pill active" : "session-pill"}>
+                      {active ? "Active" : "Ended"}
+                    </span>
+                    {latest && <span className="session-pill latest">Latest</span>}
                   </div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
                   <div>Started: {formatDate(session.startedAt)}</div>

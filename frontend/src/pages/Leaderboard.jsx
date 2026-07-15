@@ -16,6 +16,11 @@ const FALLBACK_SESSION_LIMIT = 120;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
 const SECTOR_BEST_PURPLE = "#a855f7";
+const SCOPE_OPTIONS = [
+  { key: "all", label: "All Time" },
+  { key: "weekly", label: "Weekly" },
+  { key: "daily", label: "Daily" },
+];
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -106,6 +111,30 @@ function formatDate(value) {
   const ms = toMillis(value);
   if (!ms) return "-";
   return new Date(ms).toLocaleDateString();
+}
+
+function leaderboardScopeWindow(scope) {
+  const now = Date.now();
+  if (scope === "daily") {
+    return { startMs: now - 24 * 60 * 60 * 1000, endMs: now };
+  }
+  if (scope === "weekly") {
+    return { startMs: now - 7 * 24 * 60 * 60 * 1000, endMs: now };
+  }
+  return { startMs: null, endMs: now };
+}
+
+function isEntryInScope(entry, scope) {
+  const window = leaderboardScopeWindow(scope);
+  if (window.startMs === null) return true;
+
+  const activityMs =
+    entry.sortRecordedAtMs ||
+    entry.sortStartedAtMs ||
+    toMillis(entry.recordedAt) ||
+    toMillis(entry.sessionStartedAt);
+
+  return activityMs >= window.startMs && activityMs <= window.endMs;
 }
 
 function shortSessionId(value) {
@@ -338,7 +367,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
   };
 }
 
-async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
+async function loadLeaderboardFromFirestore(selectedTrackKey = null, scope = "all") {
   const sessionsQuery = query(
     collection(db, "sessions"),
     orderBy("startedAt", "desc"),
@@ -356,7 +385,9 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
       scannedLaps += 1;
       const lap = { id: lapDoc.id, ...lapDoc.data() };
       if (!isValidLap(lap)) return;
-      entries.push(buildFallbackEntry(session, lap));
+      const entry = buildFallbackEntry(session, lap);
+      if (!isEntryInScope(entry, scope)) return;
+      entries.push(entry);
     });
   }
 
@@ -365,6 +396,7 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
     ...payload,
     meta: {
       ...payload.meta,
+      timeScope: scope,
       scannedSessions: sessionsSnap.size,
       scannedLaps,
     },
@@ -451,6 +483,7 @@ export default function Leaderboard() {
   const [rows, setRows] = useState([]);
   const [tracks, setTracks] = useState([]);
   const [selectedTrackKey, setSelectedTrackKey] = useState("");
+  const [scope, setScope] = useState("all");
   const [activeTrack, setActiveTrack] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -474,7 +507,7 @@ export default function Leaderboard() {
         let payload = null;
 
         try {
-          const url = `${API_BASE}/leaderboard?limit=50`;
+          const url = `${API_BASE}/leaderboard?limit=50&scope=${encodeURIComponent(scope)}`;
           const res = await fetch(url);
           const contentType = res.headers.get("content-type") || "";
           const data = contentType.includes("application/json")
@@ -507,7 +540,7 @@ export default function Leaderboard() {
           payload = data;
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(null);
+          payload = await loadLeaderboardFromFirestore(null, scope);
           setNotice("");
         }
 
@@ -522,9 +555,12 @@ export default function Leaderboard() {
         setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
         setMeta(payload.meta || null);
 
-        if (!selectedTrackKey && payload.activeTrackKey) {
-          setSelectedTrackKey(payload.activeTrackKey);
-        }
+        setSelectedTrackKey((current) => {
+          const nextTracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+          const currentStillExists = current && nextTracks.some((track) => track.trackKey === current);
+          if (currentStillExists) return current;
+          return payload.activeTrackKey || nextTracks[0]?.trackKey || current || "";
+        });
       } catch (err) {
         if (cancelled) return;
         console.error("Leaderboard load error:", err);
@@ -539,7 +575,7 @@ export default function Leaderboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scope]);
 
   // Client-side track switching: re-derive rows whenever selectedTrackKey changes
   useEffect(() => {
@@ -635,6 +671,41 @@ export default function Leaderboard() {
           )}
         </div>
 
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 16,
+          }}
+        >
+          {SCOPE_OPTIONS.map((option) => {
+            const selected = scope === option.key;
+            return (
+              <button
+                type="button"
+                key={option.key}
+                onClick={() => setScope(option.key)}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: selected
+                    ? "1px solid var(--color-accent-green)"
+                    : "1px solid rgba(255,255,255,0.16)",
+                  background: selected
+                    ? "rgba(34,197,94,0.16)"
+                    : "rgba(255,255,255,0.05)",
+                  color: selected ? "#bbf7d0" : "white",
+                  cursor: "pointer",
+                  fontWeight: 800,
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+
         {tracks.length > 0 && (
           <div className="track-select-row" ref={dropdownRef}>
             <button
@@ -705,8 +776,61 @@ export default function Leaderboard() {
         )}
 
         {!loading && !error && rows.length > 0 && (
-          <div className="table-wrap">
-            <table className="f1-table">
+          <>
+            {leader && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) auto",
+                  gap: 14,
+                  alignItems: "center",
+                  margin: "16px 0",
+                  padding: 16,
+                  borderRadius: 8,
+                  border: "1px solid rgba(168,85,247,0.45)",
+                  background:
+                    "linear-gradient(90deg, rgba(168,85,247,0.18), rgba(34,197,94,0.08))",
+                }}
+              >
+                <div>
+                  <div style={{ color: "#c4b5fd", fontSize: 13, fontWeight: 800 }}>
+                    {SCOPE_OPTIONS.find((option) => option.key === scope)?.label || "All Time"} Leader
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 900, color: "white" }}>
+                    {leader.username || "Unknown Driver"}
+                  </div>
+                  <div style={{ color: "#94a3b8", marginTop: 4 }}>
+                    {activeTrack?.trackName || leader.trackName || "Selected Track"} | Lap {leader.lapNumber ?? "-"} | {formatDate(leader.recordedAt || leader.sessionStartedAt)}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ color: "#22c55e", fontSize: 28, fontWeight: 900 }}>
+                    {leader.lapTime || formatLapTime(leader.lapTimeMs)}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const path = lapAnalysisPath(leader);
+                      if (path) navigate(path);
+                    }}
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.18)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "white",
+                      cursor: "pointer",
+                    }}
+                  >
+                    View Lap
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="table-wrap">
+              <table className="f1-table">
               <thead>
                 <tr>
                   <th>Rank</th>
@@ -788,8 +912,9 @@ export default function Leaderboard() {
                   );
                 })}
               </tbody>
-            </table>
-          </div>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>

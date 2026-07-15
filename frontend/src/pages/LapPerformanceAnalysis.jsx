@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -136,15 +136,6 @@ const GRAPH_METRICS = [
     color: "#a78bfa",
     max: 8,
     defaultVisible: true,
-    stepped: true,
-  },
-  {
-    key: "drsAvailable",
-    label: "DRS Ready",
-    unit: "",
-    color: "#22c55e",
-    max: 1,
-    defaultVisible: false,
     stepped: true,
   },
   {
@@ -873,6 +864,7 @@ function CombinedTelemetryGraph({
 
 export default function LapPerformanceAnalysis() {
   const { sessionId, lapId } = useParams();
+  const location = useLocation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -988,6 +980,11 @@ export default function LapPerformanceAnalysis() {
   const replayPosition = replayPositionForTime(replayTimeline, replayTimeMs);
   const activeSampleIndex = hoveredSampleIndex ?? replayPosition ?? replayIndex;
   const activeSample = interpolateReplaySample(traces, activeSampleIndex);
+  const backToSession = new URLSearchParams(location.search).get("from") === "session";
+  const backPath = backToSession
+    ? `/session/${encodeURIComponent(sessionId)}`
+    : "/leaderboard";
+  const backLabel = backToSession ? "Back to Session" : "Back to Leaderboard";
 
   useEffect(() => {
     setIsReplaying(false);
@@ -1100,7 +1097,7 @@ export default function LapPerformanceAnalysis() {
           </div>
         </div>
         <Link
-          to="/leaderboard"
+          to={backPath}
           style={{
             color: "white",
             textDecoration: "none",
@@ -1110,7 +1107,7 @@ export default function LapPerformanceAnalysis() {
             background: "rgba(255,255,255,0.05)",
           }}
         >
-          Back to Leaderboard
+          {backLabel}
         </Link>
       </div>
 

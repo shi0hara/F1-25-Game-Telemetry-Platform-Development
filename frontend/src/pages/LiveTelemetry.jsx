@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { doc, onSnapshot } from "firebase/firestore";
 import {
   Chart as ChartJS,
@@ -15,6 +16,7 @@ import TrackTelemetryMap from "../components/TrackTelemetryMap";
 import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
 import useActiveSession from "../hooks/useActiveSession";
+import { isActiveSession, latestSessionId, sortSessionsForDisplay } from "../utils/sessionUtils";
 
 ChartJS.register(
   CategoryScale,
@@ -233,6 +235,9 @@ function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
 }
 
 export default function LiveTelemetry({ currentUser }) {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedSessionId = searchParams.get("session");
   const isAdmin =
     currentUser?.isAdmin === true || currentUser?.role === "admin";
   const ownUsername = currentUser?.username || "";
@@ -259,6 +264,9 @@ export default function LiveTelemetry({ currentUser }) {
     loading,
     error,
   } = useActiveSession(activeUsername);
+
+  const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
+  const latestId = useMemo(() => latestSessionId(sessions), [sessions]);
 
   function resetSpeedTrace() {
     lastTelemetryFreshnessRef.current = null;
@@ -296,13 +304,20 @@ export default function LiveTelemetry({ currentUser }) {
     }
 
     setSelectedSessionId((prev) => {
+      if (
+        requestedSessionId &&
+        sessions.some((session) => session.id === requestedSessionId)
+      ) {
+        return requestedSessionId;
+      }
+
       if (prev && sessions.some((session) => session.id === prev)) {
         return prev;
       }
 
       return autoSessionId;
     });
-  }, [autoSessionId, sessions]);
+  }, [autoSessionId, requestedSessionId, sessions]);
 
   useEffect(() => {
     resetSpeedTrace();
@@ -547,43 +562,77 @@ export default function LiveTelemetry({ currentUser }) {
       <div className="card" style={{ marginBottom: 20 }}>
         <h2>Sessions</h2>
 
-        {sessions.length === 0 ? (
+        {displaySessions.length === 0 ? (
           <p>No sessions found.</p>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
-            {sessions.map((session) => {
+            {displaySessions.map((session) => {
               const isSelected = selectedSessionId === session.id;
               const summary = session.processedSummary || {};
+              const active = isActiveSession(session);
+              const latest = session.id === latestId;
 
               return (
                 <button
                   key={session.id}
                   onClick={() => {
-                    const isDifferentSession = selectedSessionId !== session.id;
-                    setSelectedSessionId(session.id);
-                    setSelectedSession(session);
-                    setSelectedTelemetry(session.latestTelemetry || null);
-                    resetSpeedTrace();
-                    if (isDifferentSession) {
-                      resetLapSelection();
-                    }
+                    navigate(`/session/${encodeURIComponent(session.id)}`);
                   }}
                   style={{
                     textAlign: "left",
                     padding: 12,
                     border: isSelected
                       ? "2px solid var(--color-accent-blue)"
-                      : "1px solid rgba(255,255,255,0.15)",
+                      : active
+                        ? "1px solid rgba(34,197,94,0.75)"
+                        : "1px solid rgba(255,255,255,0.15)",
                     borderRadius: 8,
-                    background: isSelected
-                      ? "rgba(59,130,246,0.16)"
-                      : "rgba(255,255,255,0.04)",
+                    background: active
+                      ? "linear-gradient(90deg, rgba(34,197,94,0.16), rgba(255,255,255,0.04))"
+                      : isSelected
+                        ? "rgba(59,130,246,0.16)"
+                        : "rgba(255,255,255,0.04)",
+                    boxShadow: latest
+                      ? "inset 3px 0 0 var(--color-accent-yellow)"
+                      : "none",
                     color: "white",
                     cursor: "pointer",
                   }}
                 >
-                  <div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <strong>{session.trackName || "Unknown Track"}</strong>
+                    <span
+                      style={{
+                        padding: "2px 7px",
+                        borderRadius: 999,
+                        border: active
+                          ? "1px solid rgba(34,197,94,0.65)"
+                          : "1px solid rgba(255,255,255,0.16)",
+                        background: active
+                          ? "rgba(34,197,94,0.12)"
+                          : "rgba(255,255,255,0.04)",
+                        color: active ? "#bbf7d0" : "#cbd5e1",
+                        fontSize: 11,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {active ? "Active" : "Ended"}
+                    </span>
+                    {latest && (
+                      <span
+                        style={{
+                          padding: "2px 7px",
+                          borderRadius: 999,
+                          border: "1px solid rgba(250,204,21,0.65)",
+                          background: "rgba(250,204,21,0.12)",
+                          color: "#fef3c7",
+                          fontSize: 11,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Latest
+                      </span>
+                    )}
                   </div>
                   <div>Session ID: {session.id}</div>
                   <div>Track Key: {getTrackKey(session) || "-"}</div>
