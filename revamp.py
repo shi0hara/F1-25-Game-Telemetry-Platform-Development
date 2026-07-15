@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import socket
 import time
 import ctypes
@@ -27,6 +27,7 @@ SESSION_PACKET_ID = 1
 LAP_DATA_PACKET_ID = 2
 EVENT_PACKET_ID = 3
 TELEMETRY_PACKET_ID = 6
+CAR_STATUS_PACKET_ID = 7
 FINAL_CLASS_PACKET_ID = 8
 SESSION_HISTORY_PACKET_ID = 11
 
@@ -1020,10 +1021,56 @@ def post_latest_telemetry(sample_body):
         0,
     ))
 
+def update_drs_status_from_packet(header, pkt):
+    global CURRENT_DRS_AVAILABLE, CURRENT_DRS_ACTIVATION_DISTANCE_M
+    global DRS_AVAILABLE_SINCE_MONO, DRS_AVAILABLE_SINCE_LAP_DISTANCE_M, DRS_ACTIVATION_PENDING
+
+    arr = get_attr_loose(pkt, "car_status_data", "carStatusData", "m_carStatusData", "m_car_status_data", default=None)
+    if arr is None or len(arr) == 0:
+        return
+
+    player_idx = get_player_car_index(header)
+    if not (0 <= player_idx < len(arr)):
+        player_idx = 0
+
+    status = arr[player_idx]
+    allowed_raw = get_attr_loose(
+        status,
+        "drs_allowed",
+        "drsAllowed",
+        "m_drsAllowed",
+        "m_drs_allowed",
+        "m_DRSAllowed",
+        default=None,
+    )
+    activation_distance = parse_number(get_attr_loose(
+        status,
+        "drs_activation_distance",
+        "drsActivationDistance",
+        "m_drsActivationDistance",
+        "m_drs_activation_distance",
+        default=None,
+    ), None)
+
+    available = bool(int(parse_int(allowed_raw, 0) or 0))
+    now = time.time()
+
+    if available and not CURRENT_DRS_AVAILABLE:
+        DRS_AVAILABLE_SINCE_MONO = now
+        DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = CURRENT_LAP_DISTANCE_M
+        DRS_ACTIVATION_PENDING = True
+    elif not available:
+        DRS_AVAILABLE_SINCE_MONO = None
+        DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
+        DRS_ACTIVATION_PENDING = False
+
+    CURRENT_DRS_AVAILABLE = available
+    CURRENT_DRS_ACTIVATION_DISTANCE_M = activation_distance
 def post_telemetry_sample(header, pkt):
     global LAST_SAMPLE_SENT_AT, LAST_SAMPLE_TIMESTAMP
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
     global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z, CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
+    global DRS_ACTIVATION_PENDING, LAST_DRS_ACTIVE
 
     if not SESSION_ID or pkt is None:
         return
@@ -1049,6 +1096,15 @@ def post_telemetry_sample(header, pkt):
     rpm = int(parse_int(get_attr(t, "engineRPM", "m_engineRPM", "rpm", default=0), 0) or 0)
     gear = int(parse_int(get_attr(t, "gear", "m_gear", default=0), 0) or 0)
     drs = bool(int(parse_int(get_attr(t, "drs", "m_drs", default=0), 0) or 0))
+    drs_activation_delay_ms = None
+    drs_activation_delay_distance_m = None
+    if CURRENT_DRS_AVAILABLE and drs and not LAST_DRS_ACTIVE and DRS_ACTIVATION_PENDING:
+        if DRS_AVAILABLE_SINCE_MONO is not None:
+            drs_activation_delay_ms = int(max(0, (now - DRS_AVAILABLE_SINCE_MONO) * 1000))
+        if DRS_AVAILABLE_SINCE_LAP_DISTANCE_M is not None and CURRENT_LAP_DISTANCE_M is not None:
+            drs_activation_delay_distance_m = max(0.0, float(CURRENT_LAP_DISTANCE_M) - float(DRS_AVAILABLE_SINCE_LAP_DISTANCE_M))
+        DRS_ACTIVATION_PENDING = False
+    LAST_DRS_ACTIVE = drs
 
     cornering_speed = speed if abs(steering) >= 0.25 else None
 
@@ -1098,6 +1154,10 @@ def post_telemetry_sample(header, pkt):
         "corneringSpeed": cornering_speed,
         "brakingDistance": braking_distance,
         "drs": drs,
+        "drsAvailable": CURRENT_DRS_AVAILABLE,
+        "drsActivationDistanceM": CURRENT_DRS_ACTIVATION_DISTANCE_M,
+        "drsActivationDelayMs": drs_activation_delay_ms,
+        "drsActivationDelayDistanceM": drs_activation_delay_distance_m,
         "playerCarIndex": player_idx,
         "currentSector": CURRENT_SECTOR,
         "pitStatus": CURRENT_PIT_STATUS,
@@ -1174,6 +1234,10 @@ def main():
                 "cornering_speed",
                 "braking_distance",
                 "drs",
+                "drs_available",
+                "drs_activation_distance_m",
+                "drs_activation_delay_ms",
+                "drs_activation_delay_distance_m",
             ])
 
             print("\nListening for telemetry... (CTRL+C to stop)")
@@ -1216,6 +1280,10 @@ def main():
                 if pid == SESSION_HISTORY_PACKET_ID and pkt is not None:
                     handle_session_history_packet(header, pkt)
 
+
+                if pid == CAR_STATUS_PACKET_ID and pkt is not None:
+                    update_drs_status_from_packet(header, pkt)
+
                 if pid == TELEMETRY_PACKET_ID and pkt is not None:
                     post_telemetry_sample(header, pkt)
 
@@ -1255,6 +1323,10 @@ def main():
                             speed if abs(steering) >= 0.25 else None,
                             BRAKE_START_DISTANCE_M if brake > 0.05 else None,
                             drs,
+                            CURRENT_DRS_AVAILABLE,
+                            CURRENT_DRS_ACTIVATION_DISTANCE_M,
+                            None,
+                            None,
                         ])
 
                         if len(rows_buffer) >= CSV_FLUSH_EVERY_ROWS:
@@ -1308,3 +1380,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+

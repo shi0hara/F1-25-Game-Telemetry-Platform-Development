@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   Chart as ChartJS,
@@ -139,6 +139,15 @@ const GRAPH_METRICS = [
     stepped: true,
   },
   {
+    key: "drsAvailable",
+    label: "DRS Ready",
+    unit: "",
+    color: "#22c55e",
+    max: 1,
+    defaultVisible: false,
+    stepped: true,
+  },
+  {
     key: "drs",
     label: "DRS",
     unit: "",
@@ -155,6 +164,7 @@ function graphRawValue(metricKey, sample) {
   if (metricKey === "brake") return sample.brakePct ?? null;
   if (metricKey === "rpm") return sample.rpm ?? null;
   if (metricKey === "gear") return sample.gear ?? null;
+  if (metricKey === "drsAvailable") return sample.drsAvailable ? 1 : 0;
   if (metricKey === "drs") return sample.drs ? 1 : 0;
   return null;
 }
@@ -162,7 +172,7 @@ function graphRawValue(metricKey, sample) {
 function graphValueLabel(metric, raw) {
   if (raw === null || raw === undefined) return "-";
 
-  if (metric.key === "drs") {
+  if (metric.key === "drs" || metric.key === "drsAvailable") {
     return raw ? "On" : "Off";
   }
 
@@ -180,7 +190,7 @@ function graphScaledValue(metric, sample) {
   const raw = graphRawValue(metric.key, sample);
   if (raw === null || raw === undefined) return null;
 
-  if (metric.key === "drs") {
+  if (metric.key === "drs" || metric.key === "drsAvailable") {
     return raw ? 100 : 0;
   }
 
@@ -1159,6 +1169,22 @@ export default function LapPerformanceAnalysis() {
                 color={lap.valid ? "#22c55e" : "#f87171"}
               />
               <StatBox label="Track" value={session.trackName || "-"} />
+              <StatBox
+                label="DRS Reaction"
+                value={
+                  stats.drs?.avgActivationDelayMs != null
+                    ? formatNumber(stats.drs.avgActivationDelayMs / 1000, 2, " s")
+                    : "-"
+                }
+                subvalue={
+                  stats.drs?.activationCount
+                    ? stats.drs.activationCount +
+                      " activations, ready " +
+                      formatNumber(stats.drs.availablePct, 1, "%") +
+                      " of samples"
+                    : "Needs DRS-ready telemetry"
+                }
+              />
               {!isBeginnerView && (
                 <StatBox
                   label="Cornering Speed"
@@ -1224,7 +1250,7 @@ export default function LapPerformanceAnalysis() {
                 aria-expanded={extrasExpanded}
               >
                 <span>Extras</span>
-                <span className={`lap-extras-chevron ${extrasExpanded ? "open" : ""}`}>▾</span>
+                <span className={`lap-extras-chevron ${extrasExpanded ? "open" : ""}`}>â–¾</span>
               </button>
 
               {extrasExpanded && (
@@ -1332,3 +1358,4 @@ export default function LapPerformanceAnalysis() {
     </div>
   );
 }
+
