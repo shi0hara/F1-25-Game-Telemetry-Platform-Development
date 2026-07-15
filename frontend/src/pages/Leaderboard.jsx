@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   collection,
@@ -12,10 +12,15 @@ import { db } from "../firebase";
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
-const FALLBACK_SESSION_LIMIT = 120;
+const FALLBACK_SESSION_LIMIT = 180;
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
 const SECTOR_BEST_PURPLE = "#a855f7";
+const LEADERBOARD_SCOPES = [
+  { key: "all", label: "All Time", shortLabel: "All" },
+  { key: "weekly", label: "Weekly", shortLabel: "Week" },
+  { key: "daily", label: "Daily", shortLabel: "Day" },
+];
 
 function formatLapTime(ms) {
   if (!Number.isFinite(Number(ms)) || Number(ms) <= 0) return "-";
@@ -106,6 +111,37 @@ function formatDate(value) {
   const ms = toMillis(value);
   if (!ms) return "-";
   return new Date(ms).toLocaleDateString();
+}
+
+function scopeOption(scopeKey) {
+  return (
+    LEADERBOARD_SCOPES.find((scope) => scope.key === scopeKey) ||
+    LEADERBOARD_SCOPES[0]
+  );
+}
+
+function scopeStartMs(scopeKey) {
+  const now = Date.now();
+  if (scopeKey === "daily") return now - 24 * 60 * 60 * 1000;
+  if (scopeKey === "weekly") return now - 7 * 24 * 60 * 60 * 1000;
+  return null;
+}
+
+function leaderboardActivityMs(entry) {
+  return (
+    Number(entry?.sortRecordedAtMs) ||
+    Number(entry?.recordedAtMs) ||
+    toMillis(entry?.recordedAt) ||
+    Number(entry?.sortStartedAtMs) ||
+    toMillis(entry?.sessionStartedAt) ||
+    0
+  );
+}
+
+function isEntryInScope(entry, scopeKey) {
+  const startMs = scopeStartMs(scopeKey);
+  if (!startMs) return true;
+  return leaderboardActivityMs(entry) >= startMs;
 }
 
 function shortSessionId(value) {
@@ -234,7 +270,7 @@ function buildFallbackEntry(session, lap) {
 function rankEntries(entries) {
   const sorted = [...entries].sort((a, b) => {
     if (a.lapTimeMs !== b.lapTimeMs) return a.lapTimeMs - b.lapTimeMs;
-    return b.sortRecordedAtMs - a.sortRecordedAtMs;
+    return leaderboardActivityMs(b) - leaderboardActivityMs(a);
   });
 
   const leaderTime = sorted[0]?.lapTimeMs ?? null;
@@ -246,11 +282,12 @@ function rankEntries(entries) {
   }));
 }
 
-function buildTrackScopedPayload(entries, selectedTrackKey = null) {
+function buildTrackScopedPayload(entries, selectedTrackKey = null, timeScope = "all") {
   const trackStats = new Map();
   const bestByTrackAndUser = new Map();
 
   for (const entry of entries) {
+    if (!isEntryInScope(entry, timeScope)) continue;
     if (!entry.trackKey) continue;
 
     if (!trackStats.has(entry.trackKey)) {
@@ -329,6 +366,8 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
     activeTrackKey,
     meta: {
       source: "firestore_fallback",
+      timeScope,
+      timeScopeLabel: scopeOption(timeScope).label,
       leaderboardType: "best_valid_actual_lap_per_user_per_track",
       trackScoped: true,
       trackCount: tracks.length,
@@ -338,7 +377,7 @@ function buildTrackScopedPayload(entries, selectedTrackKey = null) {
   };
 }
 
-async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
+async function loadLeaderboardFromFirestore(selectedTrackKey = null, timeScope = "all") {
   const sessionsQuery = query(
     collection(db, "sessions"),
     orderBy("startedAt", "desc"),
@@ -360,7 +399,7 @@ async function loadLeaderboardFromFirestore(selectedTrackKey = null) {
     });
   }
 
-  const payload = buildTrackScopedPayload(entries, selectedTrackKey);
+  const payload = buildTrackScopedPayload(entries, selectedTrackKey, timeScope);
   return {
     ...payload,
     meta: {
@@ -388,7 +427,7 @@ function normalizePayloadTrackKeys(payload, selectedTrackKey) {
   const tracks = payload.tracks || [];
   const rows = payload.rows || [];
 
-  // Build a mapping from original trackKey → canonical trackKey
+  // Build a mapping from original trackKey to canonical trackKey
   const keyMap = new Map();
   const mergedTracks = new Map();
 
@@ -456,6 +495,7 @@ export default function Leaderboard() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [meta, setMeta] = useState(null);
+  const [timeScope, setTimeScope] = useState("all");
   const navigate = useNavigate();
 
   // Store all entries so track switching can happen client-side without re-fetching
@@ -474,7 +514,12 @@ export default function Leaderboard() {
         let payload = null;
 
         try {
-          const url = `${API_BASE}/leaderboard?limit=50`;
+          const params = new URLSearchParams({
+            limit: "50",
+            scanLimit: "500",
+            scope: timeScope,
+          });
+          const url = `${API_BASE}/leaderboard?${params.toString()}`;
           const res = await fetch(url);
           const contentType = res.headers.get("content-type") || "";
           const data = contentType.includes("application/json")
@@ -489,6 +534,11 @@ export default function Leaderboard() {
 
           if (!isTrackScopedPayload(data)) {
             throw new Error("Backend leaderboard is not track-scoped yet.");
+          }
+
+          const backendScope = data.meta?.timeScope || data.filters?.scope || "all";
+          if (backendScope !== timeScope) {
+            throw new Error("Backend leaderboard does not support this time period yet.");
           }
 
           // Backend must return rows for all tracks for client-side switching.
@@ -507,7 +557,7 @@ export default function Leaderboard() {
           payload = data;
         } catch (backendErr) {
           console.warn("Backend leaderboard failed, using Firestore fallback:", backendErr);
-          payload = await loadLeaderboardFromFirestore(null);
+          payload = await loadLeaderboardFromFirestore(null, timeScope);
           setNotice("");
         }
 
@@ -522,9 +572,16 @@ export default function Leaderboard() {
         setAllEntries(Array.isArray(payload.rows) ? payload.rows : []);
         setMeta(payload.meta || null);
 
-        if (!selectedTrackKey && payload.activeTrackKey) {
-          setSelectedTrackKey(payload.activeTrackKey);
-        }
+        setSelectedTrackKey((previousTrackKey) => {
+          if (
+            previousTrackKey &&
+            payload.tracks?.some((track) => track.trackKey === previousTrackKey)
+          ) {
+            return previousTrackKey;
+          }
+
+          return payload.activeTrackKey || payload.tracks?.[0]?.trackKey || "";
+        });
       } catch (err) {
         if (cancelled) return;
         console.error("Leaderboard load error:", err);
@@ -539,7 +596,7 @@ export default function Leaderboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [timeScope]);
 
   // Client-side track switching: re-derive rows whenever selectedTrackKey changes
   useEffect(() => {
@@ -571,6 +628,9 @@ export default function Leaderboard() {
 
   const leader = useMemo(() => rows[0] || null, [rows]);
   const bestSectorCells = useMemo(() => findBestSectorCells(rows), [rows]);
+  const activeScope = scopeOption(timeScope);
+  const activeDriverCount = activeTrack?.userCount ?? rows.length;
+  const activeValidLapCount = activeTrack?.validLaps ?? meta?.validLaps ?? 0;
 
   // Custom searchable dropdown state
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -624,16 +684,34 @@ export default function Leaderboard() {
           <div>
             <h2>{activeTrack?.trackName || "Fastest Valid Laps"}</h2>
             <p className="muted-copy">
-              Rankings are separated by track. One placement per driver, using their best real valid lap.
+              Rankings are separated by track and time period. One placement per driver, using their best real valid lap.
             </p>
           </div>
 
           {meta && (
             <div className="meta-copy">
-              {meta.userCount ?? rows.length} drivers | {meta.validLaps ?? 0} valid laps
+              {activeScope.label} | {activeDriverCount} drivers | {activeValidLapCount} valid laps
             </div>
           )}
         </div>
+
+        <div className="leaderboard-controls">
+          <div className="scope-toggle" aria-label="Leaderboard time period">
+            {LEADERBOARD_SCOPES.map((scope) => (
+              <button
+                key={scope.key}
+                type="button"
+                className={
+                  timeScope === scope.key
+                    ? "scope-toggle-btn active"
+                    : "scope-toggle-btn"
+                }
+                onClick={() => setTimeScope(scope.key)}
+              >
+                {scope.label}
+              </button>
+            ))}
+          </div>
 
         {tracks.length > 0 && (
           <div className="track-select-row" ref={dropdownRef}>
@@ -695,6 +773,7 @@ export default function Leaderboard() {
             )}
           </div>
         )}
+        </div>
 
         {loading && <p>Loading leaderboard...</p>}
         {notice && !error && <p className="notice-message">{notice}</p>}
@@ -702,6 +781,29 @@ export default function Leaderboard() {
 
         {!loading && !error && rows.length === 0 && (
           <p className="empty-state">No valid lap times found for this track yet.</p>
+        )}
+
+        {!loading && !error && leader && (
+          <div className="leader-banner">
+            <div>
+              <span className="leader-banner-kicker">
+                {activeScope.label} #{leader.rank || 1} on {activeTrack?.trackName || leader.trackName || "this track"}
+              </span>
+              <h2>{leader.username || "Unknown Driver"}</h2>
+              <p>
+                {leader.lapTime || formatLapTime(leader.lapTimeMs)} | Lap {leader.lapNumber ?? "-"} | {formatDate(leader.sessionStartedAt)}
+              </p>
+            </div>
+            {lapAnalysisPath(leader) && (
+              <button
+                type="button"
+                className="leader-banner-action"
+                onClick={() => navigate(lapAnalysisPath(leader))}
+              >
+                View lap
+              </button>
+            )}
+          </div>
         )}
 
         {!loading && !error && rows.length > 0 && (
@@ -795,3 +897,4 @@ export default function Leaderboard() {
     </div>
   );
 }
+
