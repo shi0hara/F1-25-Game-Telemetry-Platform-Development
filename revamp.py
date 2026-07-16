@@ -34,7 +34,6 @@ SESSION_HISTORY_PACKET_ID = 11
 RACE_SESSION_TYPES = {15, 16, 17}
 MIN_EVENT_END_AFTER_START_SEC = 10.0
 SESSION_END_GRACE_PERIOD_SEC = float(os.getenv("SESSION_END_GRACE_PERIOD_SEC", "3.0"))
-SESSION_IDLE_END_TIMEOUT_SEC = float(os.getenv("SESSION_IDLE_END_TIMEOUT_SEC", "12.0"))
 
 REQUEST_TIMEOUT = (5.0, 10.0)
 LATEST_REQUEST_TIMEOUT = (1.0, 2.0)
@@ -561,8 +560,11 @@ SESSION_END_DETECTED_AT = None
 SESSION_END_DETECTED_MONO = None
 SESSION_END_REASON = None
 SESSION_END_PACKET_TYPE = None
-LAST_PACKET_MONO = None
 LAST_SAMPLE_TIMESTAMP = None
+CURRENT_GAME_SESSION_UID = None
+LAST_CLOSED_GAME_SESSION_UID = None
+LAST_CLOSED_SESSION_SIGNATURE = None
+LAST_CLOSED_SESSION_MONO = None
 
 STOP_EVENT = threading.Event()
 
@@ -661,26 +663,34 @@ def queue_worker(qobj, label):
         if label == "latest":
             while True:
                 try:
-                    endpoint, body, retries_left = qobj.get_nowait()
+                    next_endpoint, next_body, next_retries_left = qobj.get_nowait()
                 except queue.Empty:
                     break
+                qobj.task_done()
+                endpoint, body, retries_left = next_endpoint, next_body, next_retries_left
 
         delay = 0.25 if label == "latest" else 0.5
         timeout = LATEST_REQUEST_TIMEOUT if label == "latest" else REQUEST_TIMEOUT
 
-        for attempt in range(retries_left + 1):
-            try:
-                post_json(endpoint, body, timeout=timeout)
-                break
-            except Exception as e:
-                if attempt >= retries_left:
-                    print(f"API error on {label} {endpoint} after {retries_left} retries: {e}")
-                else:
-                    time.sleep(delay)
-                    delay = min(delay * 2.0, 5.0)
+        try:
+            for attempt in range(retries_left + 1):
+                try:
+                    post_json(endpoint, body, timeout=timeout)
+                    break
+                except Exception as e:
+                    if attempt >= retries_left:
+                        print(f"API error on {label} {endpoint} after {retries_left} retries: {e}")
+                    else:
+                        time.sleep(delay)
+                        delay = min(delay * 2.0, 5.0)
+        finally:
+            qobj.task_done()
 
-def create_user_and_session():
-    global USER_ID, SESSION_ID
+def ensure_user():
+    global USER_ID
+
+    if USER_ID:
+        return USER_ID
 
     while not STOP_EVENT.is_set():
         try:
@@ -697,25 +707,181 @@ def create_user_and_session():
             user_res.raise_for_status()
             user_data = user_res.json()
             USER_ID = user_data["id"]
+            print("Driver account ready:", DRIVER_USERNAME, "| USER ID:", USER_ID)
+            return USER_ID
+        except Exception as e:
+            print(f"API not ready, retrying in 5s... ({e})")
+            time.sleep(5)
 
+    return None
+
+
+def reset_session_end_state():
+    global SESSION_END_DETECTED_AT, SESSION_END_DETECTED_MONO
+    global SESSION_END_REASON, SESSION_END_PACKET_TYPE
+
+    SESSION_END_DETECTED_AT = None
+    SESSION_END_DETECTED_MONO = None
+    SESSION_END_REASON = None
+    SESSION_END_PACKET_TYPE = None
+
+
+def reset_runtime_state_for_session():
+    global LAST_SAMPLE_TIMESTAMP, LAST_SAMPLE_SENT_AT
+    global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
+    global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR, CURRENT_PIT_STATUS
+    global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z, CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
+    global LAST_MOTION_PACKET_AT, LAST_VALID_MOTION_AT, LAST_TELEMETRY_NO_MOTION_WARN_AT
+    global CORNER_ACTIVE, CORNER_START, CORNER_COUNTER
+    global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME
+    global CURRENT_DRS_AVAILABLE, CURRENT_DRS_ACTIVATION_DISTANCE_M
+    global DRS_AVAILABLE_SINCE_MONO, DRS_AVAILABLE_SINCE_LAP_DISTANCE_M, DRS_ACTIVATION_PENDING, LAST_DRS_ACTIVE
+    global LAST_HISTORY_NUM_LAPS, LAST_SESSION_META_SYNCED, CURRENT_GAME_SESSION_UID
+
+    TELEMETRY_BATCH.clear()
+    SENT_LAP_HISTORY_SET.clear()
+    LAST_HISTORY_NUM_LAPS = 0
+
+    LAST_SAMPLE_TIMESTAMP = None
+    LAST_SAMPLE_SENT_AT = 0.0
+    CURRENT_LAP_NUM = None
+    BEST_LAP_TIME_MS = None
+    LAST_DELTA_TO_PB_MS = None
+
+    CURRENT_LAP_DISTANCE_M = None
+    CURRENT_TOTAL_DISTANCE_M = None
+    CURRENT_SECTOR = None
+    CURRENT_PIT_STATUS = None
+
+    CURRENT_WORLD_X = None
+    CURRENT_WORLD_Y = None
+    CURRENT_WORLD_Z = None
+    CURRENT_YAW = None
+    CURRENT_PITCH = None
+    CURRENT_ROLL = None
+    LAST_MOTION_PACKET_AT = None
+    LAST_VALID_MOTION_AT = None
+    LAST_TELEMETRY_NO_MOTION_WARN_AT = 0.0
+
+    CORNER_ACTIVE = False
+    CORNER_START = None
+    CORNER_COUNTER = 0
+
+    BRAKE_ACTIVE = False
+    BRAKE_START_DISTANCE_M = 0.0
+    LAST_BRAKE_SAMPLE_TIME = None
+
+    CURRENT_DRS_AVAILABLE = False
+    CURRENT_DRS_ACTIVATION_DISTANCE_M = None
+    DRS_AVAILABLE_SINCE_MONO = None
+    DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
+    DRS_ACTIVATION_PENDING = False
+    LAST_DRS_ACTIVE = False
+
+    CURRENT_GAME_SESSION_UID = None
+    LAST_SESSION_META_SYNCED = {
+        "trackId": None,
+        "trackName": None,
+        "sessionType": None,
+    }
+
+
+def get_game_session_uid(header):
+    raw = get_attr_loose(
+        header,
+        "session_uid",
+        "sessionUID",
+        "sessionUid",
+        "m_sessionUID",
+        "m_sessionUid",
+        "m_session_uid",
+        default=None,
+    )
+    if raw is None:
+        return None
+    try:
+        return str(int(raw))
+    except Exception:
+        return str(raw)
+
+
+def is_game_session_packet(session_type, track_id):
+    if session_type is None or session_type <= 0:
+        return False
+    if track_id is None:
+        return False
+    try:
+        return int(track_id) >= 0
+    except Exception:
+        return False
+
+
+def is_recently_closed_session_packet(game_session_uid, session_type, track_id):
+    if game_session_uid and LAST_CLOSED_GAME_SESSION_UID:
+        return game_session_uid == LAST_CLOSED_GAME_SESSION_UID
+
+    if game_session_uid:
+        return False
+
+    if LAST_CLOSED_SESSION_SIGNATURE != (track_id, session_type):
+        return False
+
+    if LAST_CLOSED_SESSION_MONO is None:
+        return False
+
+    return (time.time() - LAST_CLOSED_SESSION_MONO) < max(10.0, SESSION_END_GRACE_PERIOD_SEC + 2.0)
+
+
+def start_backend_session(game_session_uid=None):
+    global SESSION_ID, CURRENT_GAME_SESSION_UID, LAST_SESSION_META_SYNCED
+    global LAST_CLOSED_GAME_SESSION_UID, LAST_CLOSED_SESSION_SIGNATURE, LAST_CLOSED_SESSION_MONO
+
+    if SESSION_ID:
+        return SESSION_ID
+
+    user_id = ensure_user()
+    if not user_id:
+        return None
+
+    reset_runtime_state_for_session()
+    reset_session_end_state()
+    CURRENT_GAME_SESSION_UID = game_session_uid
+    LAST_CLOSED_GAME_SESSION_UID = None
+    LAST_CLOSED_SESSION_SIGNATURE = None
+    LAST_CLOSED_SESSION_MONO = None
+
+    while not STOP_EVENT.is_set():
+        try:
+            session_payload = {
+                "userId": USER_ID,
+                "trackName": TRACK_NAME,
+                "trackId": TRACK_ID,
+                "sessionType": SESSION_TYPE,
+            }
             session_res = http.post(
                 f"{API_BASE}/sessions",
-                json={
-                    "userId": USER_ID,
-                    "trackName": TRACK_NAME,
-                    "trackId": TRACK_ID,
-                    "sessionType": SESSION_TYPE,
-                },
+                json=session_payload,
                 timeout=REQUEST_TIMEOUT,
             )
             session_res.raise_for_status()
             SESSION_ID = session_res.json()["id"]
-
-            print("SUCCESS! USERNAME:", DRIVER_USERNAME, "| USER ID:", USER_ID, "| SESSION ID:", SESSION_ID)
-            break
+            LAST_SESSION_META_SYNCED = {
+                "trackId": TRACK_ID,
+                "trackName": TRACK_NAME,
+                "sessionType": SESSION_TYPE,
+            }
+            print("Game session started. SESSION ID:", SESSION_ID, "| Track:", TRACK_NAME or TRACK_ID)
+            return SESSION_ID
         except Exception as e:
-            print(f"API not ready, retrying in 5s... ({e})")
+            print(f"Could not create game session yet, retrying in 5s... ({e})")
             time.sleep(5)
+
+    return None
+
+
+def create_user_and_session():
+    ensure_user()
+    return start_backend_session()
 
 def mark_session_end(reason, packet_type=None, detected_at=None):
     global SESSION_END_DETECTED_AT, SESSION_END_DETECTED_MONO
@@ -732,39 +898,12 @@ def mark_session_end(reason, packet_type=None, detected_at=None):
     return True
 
 
-def maybe_mark_idle_session_end(race_active, race_started_at):
-    if SESSION_END_DETECTED_AT is not None or not SESSION_ID:
-        return race_active, race_started_at
-
-    if LAST_PACKET_MONO is None:
-        return race_active, race_started_at
-
-    if not race_active and LAST_SAMPLE_TIMESTAMP is None:
-        return race_active, race_started_at
-
-    if race_started_at is not None and (time.time() - race_started_at) < MIN_EVENT_END_AFTER_START_SEC:
-        return race_active, race_started_at
-
-    idle_for = time.time() - LAST_PACKET_MONO
-    if idle_for >= SESSION_IDLE_END_TIMEOUT_SEC:
-        mark_session_end(
-            f"udp_idle_timeout_{SESSION_IDLE_END_TIMEOUT_SEC:.1f}s",
-            "listener_idle_timeout",
-            detected_at=LAST_SAMPLE_TIMESTAMP,
-        )
-        return False, None
-
-    return race_active, race_started_at
-
-
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
         return True
 
     ended_at = SESSION_END_DETECTED_AT or LAST_SAMPLE_TIMESTAMP or iso_now()
-    if SESSION_END_PACKET_TYPE == "listener_idle_timeout":
-        end_source = "last_telemetry_sample_idle_timeout"
-    elif SESSION_END_DETECTED_AT:
+    if SESSION_END_DETECTED_AT:
         end_source = "game_packet"
     elif LAST_SAMPLE_TIMESTAMP:
         end_source = "last_telemetry_sample"
@@ -809,35 +948,132 @@ def end_session_once(session_closed):
         print("Ended at:", ended_at, "| Source:", end_source)
     except Exception as e:
         print("Session end API error:", e)
+        return False
     return True
+
+
+def wait_for_queue_empty(qobj, label, timeout_sec=8.0):
+    deadline = time.time() + timeout_sec
+    while getattr(qobj, "unfinished_tasks", 0) > 0 and time.time() < deadline:
+        time.sleep(0.05)
+
+    remaining = getattr(qobj, "unfinished_tasks", 0)
+    if remaining > 0:
+        print(f"Warning: {remaining} queued {label} item(s) were still pending before session end.")
+
+
+def flush_pending_telemetry_batch_sync():
+    if not SESSION_ID or not TELEMETRY_BATCH:
+        return
+
+    samples = list(TELEMETRY_BATCH)
+    TELEMETRY_BATCH.clear()
+
+    try:
+        post_json(
+            "/telemetry/batch",
+            {
+                "sessionId": SESSION_ID,
+                "samples": samples,
+            },
+            timeout=(5.0, 30.0),
+        )
+    except Exception as e:
+        print("Telemetry batch flush error, queueing for retry:", e)
+        safe_enqueue(BATCH_QUEUE, (
+            "/telemetry/batch",
+            {
+                "sessionId": SESSION_ID,
+                "samples": samples,
+            },
+            2,
+        ))
+
+
+def close_current_backend_session(reason=None, packet_type=None, detected_at=None):
+    global SESSION_ID, LAST_CLOSED_GAME_SESSION_UID, LAST_CLOSED_SESSION_SIGNATURE, LAST_CLOSED_SESSION_MONO
+
+    if not SESSION_ID:
+        reset_session_end_state()
+        reset_runtime_state_for_session()
+        return True
+
+    closed_game_session_uid = CURRENT_GAME_SESSION_UID
+    closed_session_signature = (TRACK_ID, SESSION_TYPE)
+
+    if reason and SESSION_END_DETECTED_AT is None:
+        mark_session_end(reason, packet_type, detected_at=detected_at)
+
+    flush_pending_telemetry_batch_sync()
+    flush_active_corner(end_reason=SESSION_END_REASON or reason or "session_end")
+
+    wait_for_queue_empty(BATCH_QUEUE, "telemetry batch")
+    wait_for_queue_empty(LAP_QUEUE, "lap")
+    wait_for_queue_empty(CORNER_QUEUE, "corner")
+
+    closed = end_session_once(False)
+    if closed:
+        SESSION_ID = None
+        reset_session_end_state()
+        reset_runtime_state_for_session()
+        LAST_CLOSED_GAME_SESSION_UID = closed_game_session_uid
+        LAST_CLOSED_SESSION_SIGNATURE = closed_session_signature
+        LAST_CLOSED_SESSION_MONO = time.time()
+        print("Listener is still active. Waiting for the next game session...")
+
+    return closed
 
 def get_lap_array(pkt):
     return get_attr(pkt, "lap_data", "m_lapData")
 
-def handle_session_packet(pid, data, pkt_cls, race_active, race_started_at):
-    global TRACK_ID, TRACK_NAME, SESSION_TYPE
+def handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_at):
+    global TRACK_ID, TRACK_NAME, SESSION_TYPE, CURRENT_GAME_SESSION_UID
 
     if pid != SESSION_PACKET_ID or pkt_cls is None:
         return race_active, race_started_at
 
     sess_pkt = pkt_cls.from_buffer_copy(data)
     session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
-    SESSION_TYPE = session_type
 
     track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
+    game_session_uid = get_game_session_uid(header)
+    is_active_game_session = is_game_session_packet(session_type, track_id)
+
+    if (
+        SESSION_ID
+        and CURRENT_GAME_SESSION_UID
+        and game_session_uid
+        and game_session_uid != CURRENT_GAME_SESSION_UID
+    ):
+        mark_session_end("new_game_session_detected", "session_packet")
+        if close_current_backend_session():
+            race_active = False
+            race_started_at = None
+
+    SESSION_TYPE = session_type
     TRACK_ID = track_id
     TRACK_NAME = track_name
 
-    sync_session_metadata()
+    if is_active_game_session:
+        if SESSION_ID and SESSION_END_DETECTED_AT is not None:
+            return race_active, race_started_at
 
-    is_race_session = session_type in RACE_SESSION_TYPES
+        if not SESSION_ID:
+            if is_recently_closed_session_packet(game_session_uid, session_type, track_id):
+                return False, None
+            start_backend_session(game_session_uid)
+        elif game_session_uid and CURRENT_GAME_SESSION_UID is None:
+            CURRENT_GAME_SESSION_UID = game_session_uid
 
-    if is_race_session and not race_active:
-        print("Grand Prix session started.")
-        return True, time.time()
+        sync_session_metadata()
 
-    if not is_race_session and race_active:
-        mark_session_end("session_type_changed", "session_packet")
+        if not race_active:
+            print("Game session detected.")
+            return True, time.time()
+        return True, race_started_at or time.time()
+
+    if SESSION_ID and race_active:
+        mark_session_end("left_game_session", "session_packet")
         return False, None
 
     return race_active, race_started_at
@@ -1244,7 +1480,7 @@ def post_telemetry_sample(header, pkt):
         TELEMETRY_BATCH.clear()
 
 def main():
-    global DRIVER_USERNAME, LAST_PACKET_MONO
+    global DRIVER_USERNAME
 
     prompt_identity()
 
@@ -1268,11 +1504,11 @@ def main():
     lap_thread.start()
     corner_thread.start()
 
-    create_user_and_session()
+    ensure_user()
+    print("Waiting for an active F1 game session...")
 
     race_active = False
     race_started_at = None
-    session_closed = False
     rows_buffer = []
 
     try:
@@ -1311,16 +1547,15 @@ def main():
                 try:
                     data, addr = sock.recvfrom(4096)
                 except socket.timeout:
-                    race_active, race_started_at = maybe_mark_idle_session_end(race_active, race_started_at)
                     if (
                         SESSION_END_DETECTED_MONO is not None
                         and time.time() - SESSION_END_DETECTED_MONO >= SESSION_END_GRACE_PERIOD_SEC
                     ):
-                        print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing listener session.")
-                        STOP_EVENT.set()
+                        print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing current game session.")
+                        if close_current_backend_session():
+                            race_active = False
+                            race_started_at = None
                     continue
-
-                LAST_PACKET_MONO = time.time()
 
                 header_size = ctypes.sizeof(PacketHeader)
                 if len(data) < header_size:
@@ -1341,7 +1576,7 @@ def main():
                     except Exception:
                         pkt = None
 
-                race_active, race_started_at = handle_session_packet(pid, data, pkt_cls, race_active, race_started_at)
+                race_active, race_started_at = handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_final_class_packet(pid, race_active, race_started_at)
 
@@ -1438,26 +1673,15 @@ def main():
                     SESSION_END_DETECTED_MONO is not None
                     and time.time() - SESSION_END_DETECTED_MONO >= SESSION_END_GRACE_PERIOD_SEC
                 ):
-                    print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing listener session.")
-                    STOP_EVENT.set()
+                    print(f"End grace window complete ({SESSION_END_GRACE_PERIOD_SEC:.1f}s). Closing current game session.")
+                    if close_current_backend_session():
+                        race_active = False
+                        race_started_at = None
 
     except KeyboardInterrupt:
         print("\nStopped. Saving resources...")
 
     finally:
-        if TELEMETRY_BATCH and SESSION_ID:
-            safe_enqueue(BATCH_QUEUE, (
-                "/telemetry/batch",
-                {
-                    "sessionId": SESSION_ID,
-                    "samples": list(TELEMETRY_BATCH),
-                },
-                1,
-            ))
-            TELEMETRY_BATCH.clear()
-
-        flush_active_corner(end_reason="shutdown")
-
         if rows_buffer:
             try:
                 with open(CSV_PATH, "a", newline="", encoding="utf-8") as f:
@@ -1465,6 +1689,11 @@ def main():
                     w.writerows(rows_buffer)
             except Exception:
                 pass
+
+        if SESSION_ID and SESSION_END_DETECTED_AT is None:
+            mark_session_end("listener_stopped", "listener_shutdown", detected_at=LAST_SAMPLE_TIMESTAMP or iso_now())
+
+        close_current_backend_session(reason="listener_stopped", packet_type="listener_shutdown")
 
         STOP_EVENT.set()
         try:
@@ -1475,7 +1704,6 @@ def main():
         except Exception:
             pass
 
-        session_closed = end_session_once(session_closed)
         sock.close()
 
         # Auto-generate post-session report and send to AI coach
