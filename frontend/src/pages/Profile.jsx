@@ -13,7 +13,13 @@ import { db } from "../firebase";
 import ListenerTokenPanel from "../components/ListenerTokenPanel";
 import "../components/ListenerTokenPanel.css";
 import "./Profile.css";
-import { isActiveSession, latestSessionId, sortSessionsForDisplay } from "../utils/sessionUtils";
+import {
+  getSessionEndedAt,
+  getSessionStartedAt,
+  isActiveSession,
+  latestSessionId,
+  sortSessionsForDisplay,
+} from "../utils/sessionUtils";
 
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
 
@@ -297,8 +303,8 @@ export default function Profile({ username }) {
                     {latest && <span className="session-pill latest">Latest</span>}
                   </div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
-                  <div>Started: {formatDate(session.startedAt)}</div>
-                  <div>Ended: {formatDate(session.endedAt)}</div>
+                  <div>Started: {formatDate(getSessionStartedAt(session))}</div>
+                  <div>Ended: {formatDate(getSessionEndedAt(session))}</div>
                   <div>
                     Best Lap:{" "}
                     <span className="session-best-lap">

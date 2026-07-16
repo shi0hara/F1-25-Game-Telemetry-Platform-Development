@@ -16,7 +16,13 @@ import TrackTelemetryMap from "../components/TrackTelemetryMap";
 import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
 import useActiveSession from "../hooks/useActiveSession";
-import { isActiveSession, latestSessionId, sortSessionsForDisplay } from "../utils/sessionUtils";
+import {
+  getSessionEndedAt,
+  getSessionStartedAt,
+  isActiveSession,
+  latestSessionId,
+  sortSessionsForDisplay,
+} from "../utils/sessionUtils";
 
 ChartJS.register(
   CategoryScale,
@@ -637,8 +643,8 @@ export default function LiveTelemetry({ currentUser }) {
                   <div>Session ID: {session.id}</div>
                   <div>Track Key: {getTrackKey(session) || "-"}</div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
-                  <div>Started: {formatDate(session.startedAt)}</div>
-                  <div>Ended: {formatDate(session.endedAt)}</div>
+                  <div>Started: {formatDate(getSessionStartedAt(session))}</div>
+                  <div>Ended: {formatDate(getSessionEndedAt(session))}</div>
                   <div>Best Lap: {formatLapTime(summary.bestLapTimeMs)}</div>
                   <div>Top Speed: {summary.topSpeedKph ?? 0} km/h</div>
                   <div>Total Laps: {summary.totalLaps ?? 0}</div>
@@ -666,10 +672,10 @@ export default function LiveTelemetry({ currentUser }) {
               </p>
               <p>
                 <strong>Started:</strong>{" "}
-                {formatDate(selectedSession.startedAt)}
+                {formatDate(getSessionStartedAt(selectedSession))}
               </p>
               <p>
-                <strong>Ended:</strong> {formatDate(selectedSession.endedAt)}
+                <strong>Ended:</strong> {formatDate(getSessionEndedAt(selectedSession))}
               </p>
             </div>
 

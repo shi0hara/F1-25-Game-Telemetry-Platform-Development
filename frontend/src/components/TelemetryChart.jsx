@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import AssistIcons from "./AssistIcons";
 
 function formatTime(ms) {
   if (ms == null || ms <= 0) return "-";
@@ -196,6 +197,10 @@ export default function TelemetryChart({
               <strong>Valid</strong>
               <div>{isLapValid(selectedLap.valid) ? "Yes" : "No"}</div>
             </div>
+            <div>
+              <strong>Assists</strong>
+              <AssistIcons assists={selectedLap.assists} />
+            </div>
           </div>
         ) : (
           <p style={{ margin: 0, color: "#cbd5e1" }}>
@@ -230,6 +235,7 @@ export default function TelemetryChart({
                 <th style={{ padding: "8px 10px" }}>Sector 3</th>
                 <th style={{ padding: "8px 10px" }}>Lap Time</th>
                 <th style={{ padding: "8px 10px" }}>Valid</th>
+                <th style={{ padding: "8px 10px" }}>Assists</th>
               </tr>
             </thead>
             <tbody>
@@ -293,6 +299,9 @@ export default function TelemetryChart({
                       ) : (
                         <span style={{ color: "#ef4444" }}>No</span>
                       )}
+                    </td>
+                    <td style={{ padding: "8px 10px" }}>
+                      <AssistIcons assists={lap.assists} />
                     </td>
                   </tr>
                 );

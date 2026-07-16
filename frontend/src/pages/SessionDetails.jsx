@@ -15,7 +15,14 @@ import { db } from "../firebase";
 import TrackTelemetryMap from "../components/TrackTelemetryMap";
 import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
-import { getTrackKeyFromSession, isActiveSession, toMillis } from "../utils/sessionUtils";
+import AssistIcons from "../components/AssistIcons";
+import {
+  getSessionEndedAt,
+  getSessionStartedAt,
+  getTrackKeyFromSession,
+  isActiveSession,
+  toMillis,
+} from "../utils/sessionUtils";
 
 ChartJS.register(
   CategoryScale,
@@ -89,6 +96,7 @@ function normalizeLapDoc(lapDoc, bestLapTimeMs = null) {
     sector2Ms: Number.isFinite(Number(lapDoc.sector2Ms)) ? Number(lapDoc.sector2Ms) : null,
     sector3Ms: Number.isFinite(Number(lapDoc.sector3Ms)) ? Number(lapDoc.sector3Ms) : null,
     valid: lapDoc.valid === true,
+    assists: lapDoc.assists || null,
     recordedAt: lapDoc.recordedAt || null,
     gapToBestMs:
       bestLapTimeMs != null && normalizedLapTime != null
@@ -563,7 +571,8 @@ function LiveSessionPanel({ session }) {
           <h2>Session Info</h2>
           <p><strong>Driver:</strong> {session.username || "-"}</p>
           <p><strong>Track:</strong> {session.trackName || "-"}</p>
-          <p><strong>Started:</strong> {formatDateTime(session.startedAt)}</p>
+          <p><strong>Started:</strong> {formatDateTime(getSessionStartedAt(session))}</p>
+          <p><strong>Ended:</strong> {formatDateTime(getSessionEndedAt(session))}</p>
           <p><strong>Latest update:</strong> {formatDateTime(session.latestTelemetryAt || session.updatedAt)}</p>
         </div>
       </div>
@@ -709,6 +718,7 @@ function PostSessionPanel({ details }) {
                   <th>S2</th>
                   <th>S3</th>
                   <th>Valid</th>
+                  <th>Assists</th>
                   <th>Recorded</th>
                 </tr>
               </thead>
@@ -739,6 +749,7 @@ function PostSessionPanel({ details }) {
                       <td style={{ color: lap.valid ? "#22c55e" : "#f87171" }}>
                         {lap.valid ? "Yes" : "No"}
                       </td>
+                      <td><AssistIcons assists={lap.assists} /></td>
                       <td>{formatDateTime(lap.recordedAt)}</td>
                     </tr>
                   );
@@ -882,7 +893,7 @@ export default function SessionDetails() {
             Session <span className={active ? "text-green" : "text-blue"}>{active ? "Live" : "Review"}</span>
           </h1>
           <p style={{ color: "#94a3b8", marginTop: 4 }}>
-            {shownSession.trackName || "Unknown Track"} | {shownSession.username || "Unknown Driver"} | Started {formatDateTime(shownSession.startedAt)}
+            {shownSession.trackName || "Unknown Track"} | {shownSession.username || "Unknown Driver"} | Started {formatDateTime(getSessionStartedAt(shownSession))}
           </p>
         </div>
 

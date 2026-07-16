@@ -589,6 +589,17 @@ DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
 DRS_ACTIVATION_PENDING = False
 LAST_DRS_ACTIVE = False
 
+CURRENT_TRACTION_CONTROL = None
+CURRENT_ANTI_LOCK_BRAKES = None
+CURRENT_GEARBOX_ASSIST = None
+CURRENT_DRS_ASSIST = None
+CURRENT_STEERING_ASSIST = None
+CURRENT_BRAKING_ASSIST = None
+CURRENT_PIT_ASSIST = None
+CURRENT_PIT_RELEASE_ASSIST = None
+CURRENT_ERS_ASSIST = None
+CURRENT_DYNAMIC_RACING_LINE = None
+
 def prompt_identity():
     global DRIVER_USERNAME, DRIVER_EMAIL
 
@@ -726,7 +737,7 @@ def reset_session_end_state():
     SESSION_END_PACKET_TYPE = None
 
 
-def reset_runtime_state_for_session():
+def reset_runtime_state_for_session(reset_assists=True):
     global LAST_SAMPLE_TIMESTAMP, LAST_SAMPLE_SENT_AT
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
     global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR, CURRENT_PIT_STATUS
@@ -737,6 +748,10 @@ def reset_runtime_state_for_session():
     global CURRENT_DRS_AVAILABLE, CURRENT_DRS_ACTIVATION_DISTANCE_M
     global DRS_AVAILABLE_SINCE_MONO, DRS_AVAILABLE_SINCE_LAP_DISTANCE_M, DRS_ACTIVATION_PENDING, LAST_DRS_ACTIVE
     global LAST_HISTORY_NUM_LAPS, LAST_SESSION_META_SYNCED, CURRENT_GAME_SESSION_UID
+    global CURRENT_TRACTION_CONTROL, CURRENT_ANTI_LOCK_BRAKES, CURRENT_GEARBOX_ASSIST
+    global CURRENT_DRS_ASSIST, CURRENT_STEERING_ASSIST, CURRENT_BRAKING_ASSIST
+    global CURRENT_PIT_ASSIST, CURRENT_PIT_RELEASE_ASSIST, CURRENT_ERS_ASSIST
+    global CURRENT_DYNAMIC_RACING_LINE
 
     TELEMETRY_BATCH.clear()
     SENT_LAP_HISTORY_SET.clear()
@@ -777,6 +792,18 @@ def reset_runtime_state_for_session():
     DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
     DRS_ACTIVATION_PENDING = False
     LAST_DRS_ACTIVE = False
+
+    if reset_assists:
+        CURRENT_TRACTION_CONTROL = None
+        CURRENT_ANTI_LOCK_BRAKES = None
+        CURRENT_GEARBOX_ASSIST = None
+        CURRENT_DRS_ASSIST = None
+        CURRENT_STEERING_ASSIST = None
+        CURRENT_BRAKING_ASSIST = None
+        CURRENT_PIT_ASSIST = None
+        CURRENT_PIT_RELEASE_ASSIST = None
+        CURRENT_ERS_ASSIST = None
+        CURRENT_DYNAMIC_RACING_LINE = None
 
     CURRENT_GAME_SESSION_UID = None
     LAST_SESSION_META_SYNCED = {
@@ -843,7 +870,7 @@ def start_backend_session(game_session_uid=None):
     if not user_id:
         return None
 
-    reset_runtime_state_for_session()
+    reset_runtime_state_for_session(reset_assists=False)
     reset_session_end_state()
     CURRENT_GAME_SESSION_UID = game_session_uid
     LAST_CLOSED_GAME_SESSION_UID = None
@@ -1033,6 +1060,8 @@ def handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_
         return race_active, race_started_at
 
     sess_pkt = pkt_cls.from_buffer_copy(data)
+    update_assists_from_session_packet(sess_pkt)
+
     session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
 
     track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
@@ -1150,6 +1179,7 @@ def update_lap_state_from_packet(header, pkt):
                         "sector3Ms": None,
                         "trackName": TRACK_NAME,
                         "trackId": TRACK_ID,
+                        "assists": build_assist_profile(),
                     },
                     3,
                 ))
@@ -1245,6 +1275,7 @@ def handle_session_history_packet(header, pkt):
             "valid": bool(lap_valid_flags & 0x01) if lap_valid_flags is not None else True,
             "trackName": TRACK_NAME,
             "trackId": TRACK_ID,
+            "assists": build_assist_profile(),
         }
 
         safe_enqueue(LAP_QUEUE, (
@@ -1292,6 +1323,204 @@ def post_latest_telemetry(sample_body):
         0,
     ))
 
+def parse_assist_int(value):
+    return parse_int(value, None)
+
+def assist_bool(value):
+    parsed = parse_int(value, None)
+    if parsed is None:
+        return None
+    return parsed != 0
+
+def traction_control_label(value):
+    if value is None:
+        return "Unknown"
+    return {
+        0: "Off",
+        1: "Medium",
+        2: "Full",
+    }.get(value, f"Level {value}")
+
+def gearbox_assist_label(value):
+    if value is None:
+        return "Unknown"
+    return {
+        0: "Manual",
+        1: "Manual",
+        2: "Suggested",
+        3: "Automatic",
+    }.get(value, f"Mode {value}")
+
+def build_assist_profile():
+    automatic_gearbox = None
+    suggested_gear = None
+    if CURRENT_GEARBOX_ASSIST is not None:
+        automatic_gearbox = CURRENT_GEARBOX_ASSIST >= 3
+        suggested_gear = CURRENT_GEARBOX_ASSIST == 2
+
+    return {
+        "tractionControl": CURRENT_TRACTION_CONTROL,
+        "tractionControlLabel": traction_control_label(CURRENT_TRACTION_CONTROL),
+        "tractionControlActive": CURRENT_TRACTION_CONTROL is not None and CURRENT_TRACTION_CONTROL > 0,
+        "antiLockBrakes": CURRENT_ANTI_LOCK_BRAKES,
+        "antiLockBrakesActive": CURRENT_ANTI_LOCK_BRAKES is True,
+        "gearboxAssist": CURRENT_GEARBOX_ASSIST,
+        "gearboxAssistLabel": gearbox_assist_label(CURRENT_GEARBOX_ASSIST),
+        "automaticGearbox": automatic_gearbox,
+        "suggestedGear": suggested_gear,
+        "drsAssist": CURRENT_DRS_ASSIST,
+        "drsAssistActive": CURRENT_DRS_ASSIST is True,
+        "steeringAssist": CURRENT_STEERING_ASSIST,
+        "steeringAssistActive": CURRENT_STEERING_ASSIST is True,
+        "brakingAssist": CURRENT_BRAKING_ASSIST,
+        "brakingAssistActive": CURRENT_BRAKING_ASSIST is True,
+        "pitAssist": CURRENT_PIT_ASSIST,
+        "pitAssistActive": CURRENT_PIT_ASSIST is True,
+        "pitReleaseAssist": CURRENT_PIT_RELEASE_ASSIST,
+        "pitReleaseAssistActive": CURRENT_PIT_RELEASE_ASSIST is True,
+        "ersAssist": CURRENT_ERS_ASSIST,
+        "ersAssistActive": CURRENT_ERS_ASSIST is True,
+        "dynamicRacingLine": CURRENT_DYNAMIC_RACING_LINE,
+        "dynamicRacingLineActive": CURRENT_DYNAMIC_RACING_LINE is not None and CURRENT_DYNAMIC_RACING_LINE > 0,
+    }
+
+def update_assists_from_session_packet(sess_pkt):
+    global CURRENT_TRACTION_CONTROL, CURRENT_ANTI_LOCK_BRAKES, CURRENT_GEARBOX_ASSIST
+    global CURRENT_DRS_ASSIST, CURRENT_STEERING_ASSIST, CURRENT_BRAKING_ASSIST
+    global CURRENT_PIT_ASSIST, CURRENT_PIT_RELEASE_ASSIST, CURRENT_ERS_ASSIST
+    global CURRENT_DYNAMIC_RACING_LINE
+
+    traction = parse_assist_int(get_attr_loose(
+        sess_pkt,
+        "traction_control",
+        "tractionControl",
+        "m_tractionControl",
+        "m_traction_control",
+        default=None,
+    ))
+    anti_lock = assist_bool(get_attr_loose(
+        sess_pkt,
+        "anti_lock_brakes",
+        "antiLockBrakes",
+        "m_antiLockBrakes",
+        "m_anti_lock_brakes",
+        default=None,
+    ))
+    gearbox = parse_assist_int(get_attr_loose(
+        sess_pkt,
+        "gearbox_assist",
+        "gearboxAssist",
+        "m_gearboxAssist",
+        "m_gearbox_assist",
+        default=None,
+    ))
+    drs_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "drs_assist",
+        "drsAssist",
+        "DRSAssist",
+        "m_drsAssist",
+        "m_DRSAssist",
+        "m_drs_assist",
+        default=None,
+    ))
+    steering_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "steering_assist",
+        "steeringAssist",
+        "m_steeringAssist",
+        "m_steering_assist",
+        default=None,
+    ))
+    braking_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "braking_assist",
+        "brakingAssist",
+        "m_brakingAssist",
+        "m_braking_assist",
+        default=None,
+    ))
+    pit_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "pit_assist",
+        "pitAssist",
+        "m_pitAssist",
+        "m_pit_assist",
+        default=None,
+    ))
+    pit_release_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "pit_release_assist",
+        "pitReleaseAssist",
+        "m_pitReleaseAssist",
+        "m_pit_release_assist",
+        default=None,
+    ))
+    ers_assist = assist_bool(get_attr_loose(
+        sess_pkt,
+        "ers_assist",
+        "ersAssist",
+        "ERSAssist",
+        "m_ersAssist",
+        "m_ERSAssist",
+        "m_ers_assist",
+        default=None,
+    ))
+    racing_line = parse_assist_int(get_attr_loose(
+        sess_pkt,
+        "dynamic_racing_line",
+        "dynamicRacingLine",
+        "m_dynamicRacingLine",
+        "m_dynamic_racing_line",
+        default=None,
+    ))
+
+    if traction is not None:
+        CURRENT_TRACTION_CONTROL = traction
+    if anti_lock is not None:
+        CURRENT_ANTI_LOCK_BRAKES = anti_lock
+    if gearbox is not None:
+        CURRENT_GEARBOX_ASSIST = gearbox
+    if drs_assist is not None:
+        CURRENT_DRS_ASSIST = drs_assist
+    if steering_assist is not None:
+        CURRENT_STEERING_ASSIST = steering_assist
+    if braking_assist is not None:
+        CURRENT_BRAKING_ASSIST = braking_assist
+    if pit_assist is not None:
+        CURRENT_PIT_ASSIST = pit_assist
+    if pit_release_assist is not None:
+        CURRENT_PIT_RELEASE_ASSIST = pit_release_assist
+    if ers_assist is not None:
+        CURRENT_ERS_ASSIST = ers_assist
+    if racing_line is not None:
+        CURRENT_DYNAMIC_RACING_LINE = racing_line
+
+def update_assists_from_car_status(status):
+    global CURRENT_TRACTION_CONTROL, CURRENT_ANTI_LOCK_BRAKES
+
+    traction = parse_assist_int(get_attr_loose(
+        status,
+        "traction_control",
+        "tractionControl",
+        "m_tractionControl",
+        "m_traction_control",
+        default=None,
+    ))
+    anti_lock = assist_bool(get_attr_loose(
+        status,
+        "anti_lock_brakes",
+        "antiLockBrakes",
+        "m_antiLockBrakes",
+        "m_anti_lock_brakes",
+        default=None,
+    ))
+
+    if traction is not None:
+        CURRENT_TRACTION_CONTROL = traction
+    if anti_lock is not None:
+        CURRENT_ANTI_LOCK_BRAKES = anti_lock
+
 def update_drs_status_from_packet(header, pkt):
     global CURRENT_DRS_AVAILABLE, CURRENT_DRS_ACTIVATION_DISTANCE_M
     global DRS_AVAILABLE_SINCE_MONO, DRS_AVAILABLE_SINCE_LAP_DISTANCE_M, DRS_ACTIVATION_PENDING
@@ -1305,6 +1534,8 @@ def update_drs_status_from_packet(header, pkt):
         player_idx = 0
 
     status = arr[player_idx]
+    update_assists_from_car_status(status)
+
     allowed_raw = get_attr_loose(
         status,
         "drs_allowed",
@@ -1459,6 +1690,7 @@ def post_telemetry_sample(header, pkt):
         "drsActivationDistance": drs_activation_distance,
         "drsActivationDelayMs": drs_activation_delay_ms,
         "drsActivationDelayDistanceM": drs_activation_delay_distance_m,
+        "assists": build_assist_profile(),
         "playerCarIndex": player_idx,
         "currentSector": CURRENT_SECTOR,
         "pitStatus": CURRENT_PIT_STATUS,

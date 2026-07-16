@@ -632,6 +632,7 @@ export default function TrackTelemetryMap({
   const lapTrailLoadSeqRef = useRef(0);
   const livePositionLoadSeqRef = useRef(0);
   const latestLivePointFreshnessRef = useRef(null);
+  const liveTrailActiveRef = useRef(false);
 
   const [trackMap, setTrackMap] = useState(null);
   const [sessionMap, setSessionMap] = useState(null);
@@ -666,9 +667,30 @@ export default function TrackTelemetryMap({
     currentLapTrailRef.current = [];
     currentLapNumberRef.current = null;
     latestLivePointFreshnessRef.current = null;
+    liveTrailActiveRef.current = false;
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
     setCompletedLapTrails([]);
+  }
+
+  function mergeCompletedLapTrails(previous, incoming) {
+    const byKey = new Map();
+
+    for (const trail of previous || []) {
+      byKey.set(trail.key, trail);
+    }
+
+    for (const trail of incoming || []) {
+      const existing = byKey.get(trail.key);
+      const existingPoints = existing?.points?.length || 0;
+      const incomingPoints = trail?.points?.length || 0;
+
+      if (!existing || incomingPoints >= existingPoints) {
+        byKey.set(trail.key, trail);
+      }
+    }
+
+    return [...byKey.values()].sort((a, b) => a.lapNumber - b.lapNumber);
   }
 
   function appendToCurrentLapTrail(latest) {
@@ -756,9 +778,13 @@ export default function TrackTelemetryMap({
     function applyTrails(trails) {
       if (!isCurrentRequest()) return;
 
-      setCompletedLapTrails(trails);
+      setCompletedLapTrails((prev) => mergeCompletedLapTrails(prev, trails));
 
-      if (trails.length > 0) {
+      if (
+        trails.length > 0 &&
+        !liveTrailActiveRef.current &&
+        currentLapTrailRef.current.length < 2
+      ) {
         const latestTrail = trails[trails.length - 1];
         currentLapNumberRef.current = latestTrail.lapNumber;
         currentLapTrailRef.current = latestTrail.points;
@@ -909,11 +935,11 @@ export default function TrackTelemetryMap({
             saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
 
             currentLapTrailRef.current = [];
-            setCurrentLapTrail([]);
             currentLapNumberRef.current = nextLapNumber;
             setCurrentLapNumber(nextLapNumber);
           }
 
+          liveTrailActiveRef.current = true;
           appendToCurrentLapTrail(latest);
         } else {
           setSessionMap(data);

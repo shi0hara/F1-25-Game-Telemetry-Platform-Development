@@ -533,6 +533,55 @@ textarea:focus {
   font-weight: 700;
 }
 
+.assist-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 210px;
+}
+
+.assist-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: rgba(15, 23, 42, 0.68);
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.assist-pill.active {
+  border-color: rgba(34, 197, 94, 0.62);
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+}
+
+.assist-pill.off {
+  border-color: rgba(71, 85, 105, 0.7);
+  background: rgba(15, 23, 42, 0.38);
+  color: #64748b;
+}
+
+.assist-pill.unknown {
+  border-color: rgba(250, 204, 21, 0.36);
+  background: rgba(250, 204, 21, 0.08);
+  color: #fde68a;
+}
+
+.assist-pill-label {
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.assist-pill-value {
+  opacity: 0.88;
+}
+
 .info-card {
   max-width: 760px;
 }

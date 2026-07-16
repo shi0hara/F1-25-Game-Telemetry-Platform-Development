@@ -8,6 +8,7 @@ import {
   query,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import AssistIcons from "../components/AssistIcons";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
@@ -191,10 +192,6 @@ function isEntryInScope(entry, scope) {
   return activityMs >= window.startMs && activityMs <= window.endMs;
 }
 
-function shortSessionId(value) {
-  return value ? String(value).slice(0, 8) : "-";
-}
-
 function lapAnalysisPath(row) {
   if (!row?.sessionId || !row?.lapId) return "";
   return (
@@ -295,10 +292,12 @@ function buildFallbackEntry(session, lap) {
     toMillis(lap.completedAt),
     toMillis(lap.createdAt)
   );
-  const sortStartedAtMs = toMillis(session.startedAt);
+  const sessionStartedAt = session.startedAt || session.startedAtIso || session.createdAt || session.createdAtIso || null;
+  const sessionEndedAt = session.endedAt || session.endedAtIso || null;
+  const sortStartedAtMs = toMillis(sessionStartedAt);
   const sortActivityMs = Math.max(
     sortRecordedAtMs,
-    toMillis(session.endedAt),
+    toMillis(sessionEndedAt),
     toMillis(session.latestTelemetryAt),
     toMillis(session.updatedAt),
     sortStartedAtMs,
@@ -318,11 +317,12 @@ function buildFallbackEntry(session, lap) {
     sector2Ms: lap.sector2Ms ?? null,
     sector3Ms: lap.sector3Ms ?? null,
     valid: true,
+    assists: lap.assists || null,
     trackName,
     trackId,
     trackKey,
-    sessionStartedAt: session.startedAt || null,
-    sessionEndedAt: session.endedAt || null,
+    sessionStartedAt,
+    sessionEndedAt,
     sessionLatestTelemetryAt: session.latestTelemetryAt || null,
     sessionUpdatedAt: session.updatedAt || null,
     sessionCreatedAt: session.createdAt || null,
@@ -955,7 +955,7 @@ export default function Leaderboard() {
                   <th>S1</th>
                   <th>S2</th>
                   <th>S3</th>
-                  <th>Session</th>
+                  <th>Assists</th>
                 </tr>
               </thead>
               <tbody>
@@ -1019,9 +1019,7 @@ export default function Leaderboard() {
                       <td style={bestSectorStyle(row, "sector3Ms", bestSectorCells)}>
                         {formatSector(row.sector3Ms)}
                       </td>
-                      <td title={row.sessionId}>
-                        {shortSessionId(row.sessionId)} | {formatDate(row.sessionStartedAt)}
-                      </td>
+                      <td><AssistIcons assists={row.assists} /></td>
                     </tr>
                   );
                 })}

@@ -21,7 +21,15 @@ export function hasEndedAt(value) {
 }
 
 export function isActiveSession(session) {
-  return Boolean(session) && !hasEndedAt(session.endedAt);
+  return Boolean(session) && !hasEndedAt(session.endedAt) && !hasEndedAt(session.endedAtIso);
+}
+
+export function getSessionStartedAt(session) {
+  return session?.startedAt || session?.startedAtIso || session?.createdAt || session?.createdAtIso || null;
+}
+
+export function getSessionEndedAt(session) {
+  return session?.endedAt || session?.endedAtIso || null;
 }
 
 export function getSessionFreshness(session) {
@@ -30,7 +38,7 @@ export function getSessionFreshness(session) {
     toMillis(session?.latestTelemetry?.timestamp) ||
     toMillis(session?.latestTelemetryAt) ||
     toMillis(session?.updatedAt) ||
-    toMillis(session?.startedAt)
+    toMillis(getSessionStartedAt(session))
   );
 }
 
