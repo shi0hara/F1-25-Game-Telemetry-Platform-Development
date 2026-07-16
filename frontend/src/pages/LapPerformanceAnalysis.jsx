@@ -468,7 +468,6 @@ function ReplayControls({
   replayDurationMs,
   replaySpeed,
   isReplaying,
-  activeSample,
   onPlayPause,
   onRestart,
   onSeekBy,
@@ -604,13 +603,18 @@ function ReplayControls({
           }}
         />
       </div>
+    </div>
+  );
+}
 
+function ReplayDriverPanel({ activeSample, containerStyle }) {
+  return (
+    <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
           gap: 16,
-          marginTop: 14,
           alignItems: "center",
         }}
       >
@@ -859,7 +863,7 @@ function CombinedTelemetryGraph({
       </div>
 
       <div ref={scrollRef} style={{ overflowX: "auto" }} onMouseLeave={() => onHoverIndex(null)}>
-        <div style={{ minWidth: chartMinWidth, height: 430 }}>
+        <div style={{ minWidth: chartMinWidth, height: 260 }}>
           <Line
             data={chartData}
             options={options}
@@ -1295,41 +1299,48 @@ export default function LapPerformanceAnalysis() {
 
               {extrasExpanded && (
                 <div className="lap-extras-body">
-                  <div className="lap-analysis-triple-grid">
-                    <div className="lap-analysis-grid-item replay-panel">
-                      <ReplayControls
-                        traces={traces}
-                        replayTimeMs={replayTimeMs}
-                        replayDurationMs={replayDurationMs}
-                        replaySpeed={replaySpeed}
-                        isReplaying={isReplaying}
-                        activeSample={activeSample}
-                        onPlayPause={handleReplayPlayPause}
-                        onRestart={handleReplayRestart}
-                        onSeekBy={handleReplaySeekBy}
-                        onSeekTo={handleReplaySeekTo}
-                        onSpeedStep={handleReplaySpeedStep}
-                        containerStyle={{ height: "100%" }}
-                      />
+                  <div className="lap-analysis-two-col-grid">
+                    <div className="lap-analysis-column lap-analysis-column-left">
+                      <div className="lap-analysis-grid-item map-panel">
+                        <PostLapTelemetryMap
+                          apiBase={API_BASE}
+                          trackKey={session.trackKey}
+                          traces={traces}
+                          activeIndex={activeSampleIndex}
+                          sectorBoundaries={sectorBoundaries}
+                          containerStyle={{ height: "100%" }}
+                        />
+                      </div>
+
+                      <div className="lap-analysis-grid-item replay-panel">
+                        <ReplayControls
+                          traces={traces}
+                          replayTimeMs={replayTimeMs}
+                          replayDurationMs={replayDurationMs}
+                          replaySpeed={replaySpeed}
+                          isReplaying={isReplaying}
+                          onPlayPause={handleReplayPlayPause}
+                          onRestart={handleReplayRestart}
+                          onSeekBy={handleReplaySeekBy}
+                          onSeekTo={handleReplaySeekTo}
+                          onSpeedStep={handleReplaySpeedStep}
+                          containerStyle={{ height: "100%" }}
+                        />
+                      </div>
                     </div>
 
-                    <div className="lap-analysis-grid-item map-panel">
-                      <PostLapTelemetryMap
-                        apiBase={API_BASE}
-                        trackKey={session.trackKey}
-                        traces={traces}
-                        activeIndex={activeSampleIndex}
-                        sectorBoundaries={sectorBoundaries}
-                        containerStyle={{ height: "100%" }}
-                      />
-                    </div>
+                    <div className="lap-analysis-column lap-analysis-column-right">
+                      <div className="lap-analysis-grid-item telemetry-panel">
+                        {renderTelemetryPanel({
+                          metrics: beginnerMetrics,
+                          visible: beginnerVisibleMetrics,
+                          onToggle: toggleBeginnerMetric,
+                        })}
+                      </div>
 
-                    <div className="lap-analysis-grid-item telemetry-panel">
-                      {renderTelemetryPanel({
-                        metrics: beginnerMetrics,
-                        visible: beginnerVisibleMetrics,
-                        onToggle: toggleBeginnerMetric,
-                      })}
+                      <div className="lap-analysis-grid-item driver-panel">
+                        <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%" }} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1338,41 +1349,48 @@ export default function LapPerformanceAnalysis() {
           )}
 
           {!isBeginnerView && (
-            <div className="lap-analysis-triple-grid">
-              <div className="lap-analysis-grid-item replay-panel">
-                <ReplayControls
-                  traces={traces}
-                  replayTimeMs={replayTimeMs}
-                  replayDurationMs={replayDurationMs}
-                  replaySpeed={replaySpeed}
-                  isReplaying={isReplaying}
-                  activeSample={activeSample}
-                  onPlayPause={handleReplayPlayPause}
-                  onRestart={handleReplayRestart}
-                  onSeekBy={handleReplaySeekBy}
-                  onSeekTo={handleReplaySeekTo}
-                  onSpeedStep={handleReplaySpeedStep}
-                  containerStyle={{ height: "100%" }}
-                />
+            <div className="lap-analysis-two-col-grid">
+              <div className="lap-analysis-column lap-analysis-column-left">
+                <div className="lap-analysis-grid-item map-panel">
+                  <PostLapTelemetryMap
+                    apiBase={API_BASE}
+                    trackKey={session.trackKey}
+                    traces={traces}
+                    activeIndex={activeSampleIndex}
+                    sectorBoundaries={sectorBoundaries}
+                    containerStyle={{ height: "100%" }}
+                  />
+                </div>
+
+                <div className="lap-analysis-grid-item replay-panel">
+                  <ReplayControls
+                    traces={traces}
+                    replayTimeMs={replayTimeMs}
+                    replayDurationMs={replayDurationMs}
+                    replaySpeed={replaySpeed}
+                    isReplaying={isReplaying}
+                    onPlayPause={handleReplayPlayPause}
+                    onRestart={handleReplayRestart}
+                    onSeekBy={handleReplaySeekBy}
+                    onSeekTo={handleReplaySeekTo}
+                    onSpeedStep={handleReplaySpeedStep}
+                    containerStyle={{ height: "100%" }}
+                  />
+                </div>
               </div>
 
-              <div className="lap-analysis-grid-item map-panel">
-                <PostLapTelemetryMap
-                  apiBase={API_BASE}
-                  trackKey={session.trackKey}
-                  traces={traces}
-                  activeIndex={activeSampleIndex}
-                  sectorBoundaries={sectorBoundaries}
-                  containerStyle={{ height: "100%" }}
-                />
-              </div>
+              <div className="lap-analysis-column lap-analysis-column-right">
+                <div className="lap-analysis-grid-item telemetry-panel">
+                  {renderTelemetryPanel({
+                    metrics: GRAPH_METRICS,
+                    visible: visibleMetrics,
+                    onToggle: toggleMetric,
+                  })}
+                </div>
 
-              <div className="lap-analysis-grid-item telemetry-panel">
-                {renderTelemetryPanel({
-                  metrics: GRAPH_METRICS,
-                  visible: visibleMetrics,
-                  onToggle: toggleMetric,
-                })}
+                <div className="lap-analysis-grid-item driver-panel">
+                  <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%" }} />
+                </div>
               </div>
             </div>
           )}
