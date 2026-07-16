@@ -17,6 +17,7 @@ import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
 import AssistIcons from "../components/AssistIcons";
 import {
+  formatSessionFlag,
   getSessionEndedAt,
   getSessionStartedAt,
   getTrackKeyFromSession,
@@ -571,6 +572,8 @@ function LiveSessionPanel({ session }) {
           <h2>Session Info</h2>
           <p><strong>Driver:</strong> {session.username || "-"}</p>
           <p><strong>Track:</strong> {session.trackName || "-"}</p>
+          <p><strong>Custom Setup:</strong> {formatSessionFlag(session.customSetup)}</p>
+          <p><strong>Equal Performance:</strong> {formatSessionFlag(session.equalPerformance)}</p>
           <p><strong>Started:</strong> {formatDateTime(getSessionStartedAt(session))}</p>
           <p><strong>Ended:</strong> {formatDateTime(getSessionEndedAt(session))}</p>
           <p><strong>Latest update:</strong> {formatDateTime(session.latestTelemetryAt || session.updatedAt)}</p>

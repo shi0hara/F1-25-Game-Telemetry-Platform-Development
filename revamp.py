@@ -84,6 +84,8 @@ TRACK_ID_TO_NAME = {
 TRACK_NAME = None
 TRACK_ID = None
 SESSION_TYPE = None
+CUSTOM_SETUP = None
+EQUAL_PERFORMANCE = None
 
 CURRENT_LAP_DISTANCE_M = None
 CURRENT_TOTAL_DISTANCE_M = None
@@ -306,6 +308,8 @@ def sync_session_metadata():
         "trackId": TRACK_ID,
         "trackName": TRACK_NAME,
         "sessionType": SESSION_TYPE,
+        "customSetup": CUSTOM_SETUP,
+        "equalPerformance": EQUAL_PERFORMANCE,
     }
 
     if payload == LAST_SESSION_META_SYNCED:
@@ -752,6 +756,7 @@ def reset_runtime_state_for_session(reset_assists=True):
     global CURRENT_DRS_ASSIST, CURRENT_STEERING_ASSIST, CURRENT_BRAKING_ASSIST
     global CURRENT_PIT_ASSIST, CURRENT_PIT_RELEASE_ASSIST, CURRENT_ERS_ASSIST
     global CURRENT_DYNAMIC_RACING_LINE
+    global CUSTOM_SETUP, EQUAL_PERFORMANCE
 
     TELEMETRY_BATCH.clear()
     SENT_LAP_HISTORY_SET.clear()
@@ -804,6 +809,8 @@ def reset_runtime_state_for_session(reset_assists=True):
         CURRENT_PIT_RELEASE_ASSIST = None
         CURRENT_ERS_ASSIST = None
         CURRENT_DYNAMIC_RACING_LINE = None
+        CUSTOM_SETUP = None
+        EQUAL_PERFORMANCE = None
 
     CURRENT_GAME_SESSION_UID = None
     LAST_SESSION_META_SYNCED = {
@@ -884,6 +891,8 @@ def start_backend_session(game_session_uid=None):
                 "trackName": TRACK_NAME,
                 "trackId": TRACK_ID,
                 "sessionType": SESSION_TYPE,
+                "customSetup": CUSTOM_SETUP,
+                "equalPerformance": EQUAL_PERFORMANCE,
             }
             session_res = http.post(
                 f"{API_BASE}/sessions",
@@ -896,6 +905,8 @@ def start_backend_session(game_session_uid=None):
                 "trackId": TRACK_ID,
                 "trackName": TRACK_NAME,
                 "sessionType": SESSION_TYPE,
+                "customSetup": CUSTOM_SETUP,
+                "equalPerformance": EQUAL_PERFORMANCE,
             }
             print("Game session started. SESSION ID:", SESSION_ID, "| Track:", TRACK_NAME or TRACK_ID)
             return SESSION_ID
@@ -1061,6 +1072,7 @@ def handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_
 
     sess_pkt = pkt_cls.from_buffer_copy(data)
     update_assists_from_session_packet(sess_pkt)
+    update_session_settings_from_packet(sess_pkt)
 
     session_type = int(get_attr(sess_pkt, "session_type", "mSessionType", "m_sessionType", default=0) or 0)
 
@@ -1332,6 +1344,9 @@ def assist_bool(value):
         return None
     return parsed != 0
 
+def session_bool(value):
+    return assist_bool(value)
+
 def traction_control_label(value):
     if value is None:
         return "Unknown"
@@ -1495,6 +1510,44 @@ def update_assists_from_session_packet(sess_pkt):
         CURRENT_ERS_ASSIST = ers_assist
     if racing_line is not None:
         CURRENT_DYNAMIC_RACING_LINE = racing_line
+
+def update_session_settings_from_packet(sess_pkt):
+    global CUSTOM_SETUP, EQUAL_PERFORMANCE
+
+    custom_setup = session_bool(get_attr_loose(
+        sess_pkt,
+        "custom_setup",
+        "customSetup",
+        "customSetups",
+        "is_custom_setup",
+        "isCustomSetup",
+        "using_custom_setup",
+        "usingCustomSetup",
+        "m_customSetup",
+        "m_custom_setup",
+        "m_customSetups",
+        "m_isCustomSetup",
+        "m_usingCustomSetup",
+        "m_using_custom_setup",
+        default=None,
+    ))
+    equal_performance = session_bool(get_attr_loose(
+        sess_pkt,
+        "equal_performance",
+        "equalPerformance",
+        "equal_car_performance",
+        "equalCarPerformance",
+        "m_equalPerformance",
+        "m_equal_performance",
+        "m_equalCarPerformance",
+        "m_equal_car_performance",
+        default=None,
+    ))
+
+    if custom_setup is not None:
+        CUSTOM_SETUP = custom_setup
+    if equal_performance is not None:
+        EQUAL_PERFORMANCE = equal_performance
 
 def update_assists_from_car_status(status):
     global CURRENT_TRACTION_CONTROL, CURRENT_ANTI_LOCK_BRAKES

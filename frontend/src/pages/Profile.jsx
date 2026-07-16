@@ -14,6 +14,7 @@ import ListenerTokenPanel from "../components/ListenerTokenPanel";
 import "../components/ListenerTokenPanel.css";
 import "./Profile.css";
 import {
+  formatSessionFlag,
   getSessionEndedAt,
   getSessionStartedAt,
   isActiveSession,
@@ -303,6 +304,8 @@ export default function Profile({ username }) {
                     {latest && <span className="session-pill latest">Latest</span>}
                   </div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
+                  <div>Custom Setup: {formatSessionFlag(session.customSetup)}</div>
+                  <div>Equal Performance: {formatSessionFlag(session.equalPerformance)}</div>
                   <div>Started: {formatDate(getSessionStartedAt(session))}</div>
                   <div>Ended: {formatDate(getSessionEndedAt(session))}</div>
                   <div>

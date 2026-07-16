@@ -32,6 +32,12 @@ export function getSessionEndedAt(session) {
   return session?.endedAt || session?.endedAtIso || null;
 }
 
+export function formatSessionFlag(value) {
+  if (value === true || value === 1 || value === "1" || value === "true") return "Yes";
+  if (value === false || value === 0 || value === "0" || value === "false") return "No";
+  return "-";
+}
+
 export function getSessionFreshness(session) {
   return (
     toMillis(session?.latestMapPosition?.timestamp) ||

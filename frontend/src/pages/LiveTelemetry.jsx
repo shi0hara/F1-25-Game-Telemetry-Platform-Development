@@ -17,6 +17,7 @@ import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
 import useActiveSession from "../hooks/useActiveSession";
 import {
+  formatSessionFlag,
   getSessionEndedAt,
   getSessionStartedAt,
   isActiveSession,
@@ -643,6 +644,8 @@ export default function LiveTelemetry({ currentUser }) {
                   <div>Session ID: {session.id}</div>
                   <div>Track Key: {getTrackKey(session) || "-"}</div>
                   <div>Session Type: {session.sessionType ?? "-"}</div>
+                  <div>Custom Setup: {formatSessionFlag(session.customSetup)}</div>
+                  <div>Equal Performance: {formatSessionFlag(session.equalPerformance)}</div>
                   <div>Started: {formatDate(getSessionStartedAt(session))}</div>
                   <div>Ended: {formatDate(getSessionEndedAt(session))}</div>
                   <div>Best Lap: {formatLapTime(summary.bestLapTimeMs)}</div>
@@ -669,6 +672,12 @@ export default function LiveTelemetry({ currentUser }) {
               </p>
               <p>
                 <strong>Track Key:</strong> {activeTrackKey ?? "-"}
+              </p>
+              <p>
+                <strong>Custom Setup:</strong> {formatSessionFlag(selectedSession.customSetup)}
+              </p>
+              <p>
+                <strong>Equal Performance:</strong> {formatSessionFlag(selectedSession.equalPerformance)}
               </p>
               <p>
                 <strong>Started:</strong>{" "}
