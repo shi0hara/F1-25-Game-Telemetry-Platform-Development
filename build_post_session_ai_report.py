@@ -2,14 +2,38 @@ import argparse
 import csv
 import json
 import math
+import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 
 DEFAULT_INPUT = "telemetry_live.csv"
 DEFAULT_MARKDOWN_OUTPUT = "post_session_ai_report.md"
 DEFAULT_JSON_OUTPUT = "post_session_ai_report.json"
+DEFAULT_AI_OUTPUT = "ai_coach_response.md"
+
+API_BASE = os.getenv("F1_API_BASE", "https://f1-telementry-1.onrender.com")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
+
+AI_COACH_SYSTEM_PROMPT = (
+    "You are an expert F1 driving coach analyzing post-session telemetry data. "
+    "The driver is playing F1 25 (the video game) and wants to improve their lap times.\n\n"
+    "Respond with:\n"
+    "1. Session overview in 3 short bullets.\n"
+    "2. Top 3 improvements, each backed by specific telemetry evidence from the report "
+    "(reference lap numbers, distances, speeds, and percentages).\n"
+    "3. One lap-specific coaching note.\n"
+    "4. One drill or focus area for the next session.\n"
+    "5. A short confidence score (low/medium/high) explaining how complete the telemetry data was "
+    "and whether you had enough information to give reliable advice."
+)
 
 
 def parse_float(value, default=None):
@@ -129,6 +153,62 @@ def load_samples(csv_path):
         for sample in samples
         if sample["lapNumber"] is not None and sample["speedKph"] is not None
     ]
+
+
+def load_samples_from_api(session_id, max_samples=2000):
+    """Fetch telemetry samples from the backend API using a session ID."""
+    if requests is None:
+        raise SystemExit("Cannot fetch from API: 'requests' library not installed. Run: pip install requests")
+
+    url = f"{API_BASE}/sessions/{session_id}/performance?maxSamples={max_samples}"
+    print(f"Fetching session {session_id} from {API_BASE}...")
+
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise SystemExit(f"API error: {e} — {e.response.text[:300] if e.response else ''}")
+    except requests.exceptions.RequestException as e:
+        raise SystemExit(f"Failed to reach API: {e}")
+
+    data = response.json()
+    traces = data.get("traces") or []
+
+    if not traces:
+        raise SystemExit(f"No telemetry traces found for session {session_id}.")
+
+    print(f"  Got {len(traces)} samples from API.")
+
+    samples = []
+    for index, row in enumerate(traces, start=1):
+        sample = {
+            "index": index,
+            "timestamp": parse_timestamp(row.get("timestamp")),
+            "timestampRaw": row.get("timestamp"),
+            "lapNumber": parse_int(row.get("lapNumber")),
+            "sector": parse_int(row.get("sector") or row.get("currentSector")),
+            "lapDistanceM": parse_float(row.get("lapDistance") or row.get("distanceM")),
+            "totalDistanceM": parse_float(row.get("totalDistance") or row.get("distanceM")),
+            "speedKph": parse_float(row.get("speedKph") or row.get("speed")),
+            "throttle": parse_float(row.get("throttle")),
+            "brake": parse_float(row.get("brake")),
+            "steering": parse_float(row.get("steering") or row.get("steer")),
+            "rpm": parse_int(row.get("rpm")),
+            "gear": parse_int(row.get("gear")),
+            "deltaToPbMs": parse_float(row.get("deltaToPB") or row.get("deltaToPb")),
+            "corneringSpeedKph": parse_float(row.get("corneringSpeed")),
+            "brakingDistanceM": parse_float(row.get("brakingDistance")),
+            "drs": bool(row.get("drs")),
+            "drsActivationDistance": parse_float(row.get("drsActivationDistance")),
+        }
+        if sample["lapNumber"] is not None and sample["speedKph"] is not None:
+            samples.append(sample)
+
+    if not samples:
+        raise SystemExit("No usable telemetry samples in API response.")
+
+    print(f"  {len(samples)} usable samples after filtering.")
+    return samples
 
 
 def duration_seconds(samples):
@@ -637,31 +717,104 @@ def make_json_safe(value):
     return value
 
 
+def send_to_ai_coach(report_markdown):
+    """Send the generated report to an AI coach via OpenRouter and return the response text."""
+    if requests is None:
+        print("Skipping AI coach: 'requests' library not installed. Run: pip install requests")
+        return None
+
+    if not OPENROUTER_API_KEY:
+        print("Skipping AI coach: OPENROUTER_API_KEY environment variable not set.")
+        return None
+
+    print(f"Sending report to AI coach ({OPENROUTER_MODEL}) via OpenRouter...")
+
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "system", "content": AI_COACH_SYSTEM_PROMPT},
+                    {"role": "user", "content": report_markdown},
+                ],
+            },
+            timeout=90,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        reply = data["choices"][0]["message"]["content"]
+        print("AI coach response received.")
+        return reply
+
+    except requests.exceptions.Timeout:
+        print("AI coach request timed out.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        print(f"AI coach HTTP error: {e}")
+        if e.response is not None:
+            print(f"  Response body: {e.response.text[:500]}")
+        return None
+    except Exception as e:
+        print(f"AI coach error: {e}")
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build an AI-friendly F1 post-session telemetry report.")
-    parser.add_argument("--csv", default=DEFAULT_INPUT, help="Input telemetry CSV path.")
+    parser.add_argument("--csv", default=None, help="Input telemetry CSV path (default: telemetry_live.csv).")
+    parser.add_argument("--session", default=None, help="Session ID to fetch telemetry from the backend API instead of CSV.")
+    parser.add_argument("--max-samples", type=int, default=2000, help="Max samples to fetch from API (default: 2000).")
     parser.add_argument("--md", default=DEFAULT_MARKDOWN_OUTPUT, help="Output Markdown report path.")
     parser.add_argument("--json", default=DEFAULT_JSON_OUTPUT, help="Output JSON report path.")
+    parser.add_argument("--ai", action="store_true", help="Send report to AI coach via OpenRouter after generating.")
+    parser.add_argument("--model", default=None, help="Override OpenRouter model (e.g. google/gemini-2.5-flash, anthropic/claude-sonnet-4).")
+    parser.add_argument("--ai-output", default=DEFAULT_AI_OUTPUT, help="Output path for AI coach response.")
     args = parser.parse_args()
 
-    csv_path = Path(args.csv)
-    if not csv_path.exists():
-        raise SystemExit(f"Input CSV not found: {csv_path}")
+    # Override model if provided via CLI
+    global OPENROUTER_MODEL
+    if args.model:
+        OPENROUTER_MODEL = args.model
 
-    samples = load_samples(csv_path)
+    # Load samples from API or CSV
+    if args.session:
+        samples = load_samples_from_api(args.session, max_samples=args.max_samples)
+    else:
+        csv_path = Path(args.csv or DEFAULT_INPUT)
+        if not csv_path.exists():
+            raise SystemExit(f"Input CSV not found: {csv_path}")
+        samples = load_samples(csv_path)
+
     if not samples:
-        raise SystemExit("No usable telemetry samples found in the CSV.")
+        raise SystemExit("No usable telemetry samples found.")
 
     report = summarize_session(samples)
 
     markdown_path = Path(args.md)
     json_path = Path(args.json)
 
-    markdown_path.write_text(render_markdown(report), encoding="utf-8")
+    report_markdown = render_markdown(report)
+    markdown_path.write_text(report_markdown, encoding="utf-8")
     json_path.write_text(json.dumps(make_json_safe(report), indent=2), encoding="utf-8")
 
     print(f"Wrote {markdown_path}")
     print(f"Wrote {json_path}")
+
+    # Send to AI coach if requested
+    if args.ai:
+        ai_response = send_to_ai_coach(report_markdown)
+        if ai_response:
+            ai_output_path = Path(args.ai_output)
+            ai_output_path.write_text(ai_response, encoding="utf-8")
+            print(f"Wrote {ai_output_path}")
+        else:
+            print("No AI coach response was generated.")
 
 
 if __name__ == "__main__":

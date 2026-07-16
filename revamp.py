@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import socket
 import time
 import ctypes
@@ -1477,6 +1477,25 @@ def main():
 
         session_closed = end_session_once(session_closed)
         sock.close()
+
+        # Auto-generate post-session report and send to AI coach
+        try:
+            from pathlib import Path as _Path
+            csv_file = _Path(CSV_PATH)
+            if csv_file.exists() and csv_file.stat().st_size > 100:
+                print("\nGenerating post-session AI report...")
+                import subprocess
+                import sys
+                cmd = [sys.executable, "build_post_session_ai_report.py", "--csv", CSV_PATH, "--ai"]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.stdout:
+                    print(result.stdout)
+                if result.returncode != 0 and result.stderr:
+                    print("Report generation error:", result.stderr[-500:])
+            else:
+                print("No telemetry CSV to process (empty or missing).")
+        except Exception as e:
+            print(f"Post-session report auto-generation failed: {e}")
 
 if __name__ == "__main__":
     main()
