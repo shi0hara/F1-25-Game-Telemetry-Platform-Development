@@ -1290,7 +1290,7 @@ export default function LapPerformanceAnalysis() {
                 aria-expanded={extrasExpanded}
               >
                 <span>Extras</span>
-                <span className={`lap-extras-chevron ${extrasExpanded ? "open" : ""}`}>â–¾</span>
+                <span className={`lap-extras-chevron ${extrasExpanded ? "open" : ""}`}>v</span>
               </button>
 
               {extrasExpanded && (
