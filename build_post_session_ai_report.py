@@ -19,6 +19,7 @@ DEFAULT_JSON_OUTPUT = "post_session_ai_report.json"
 DEFAULT_AI_OUTPUT = "ai_coach_response.md"
 
 API_BASE = os.getenv("F1_API_BASE", "https://f1-telementry-1.onrender.com")
+F1_AUTH_TOKEN = os.getenv("F1_AUTH_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
@@ -31,7 +32,9 @@ AI_COACH_SYSTEM_PROMPT = (
     "(reference lap numbers, distances, speeds, and percentages).\n"
     "3. One lap-specific coaching note.\n"
     "4. One drill or focus area for the next session.\n"
-    "5. A short confidence score (low/medium/high) explaining how complete the telemetry data was "
+    "5. If driving assists are active, include a specific recommendation on which assist to "
+    "disable next and why it will help the driver improve.\n"
+    "6. A short confidence score (low/medium/high) explaining how complete the telemetry data was "
     "and whether you had enough information to give reliable advice."
 )
 
@@ -155,16 +158,26 @@ def load_samples(csv_path):
     ]
 
 
-def load_samples_from_api(session_id, max_samples=2000):
+def load_samples_from_api(session_id, max_samples=2000, auth_token=None):
     """Fetch telemetry samples from the backend API using a session ID."""
     if requests is None:
         raise SystemExit("Cannot fetch from API: 'requests' library not installed. Run: pip install requests")
 
+    token = auth_token or F1_AUTH_TOKEN
+    if not token:
+        raise SystemExit(
+            "API requires authentication. Set F1_AUTH_TOKEN environment variable or pass --token.\n"
+            "To get your token: open the web app, open browser DevTools → Console, run:\n"
+            "  localStorage.getItem('f1AuthToken')"
+        )
+
     url = f"{API_BASE}/sessions/{session_id}/performance?maxSamples={max_samples}"
     print(f"Fetching session {session_id} from {API_BASE}...")
 
+    headers = {"Authorization": f"Bearer {token}"}
+
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         raise SystemExit(f"API error: {e} — {e.response.text[:300] if e.response else ''}")
@@ -173,14 +186,29 @@ def load_samples_from_api(session_id, max_samples=2000):
 
     data = response.json()
     traces = data.get("traces") or []
+    api_laps = data.get("laps") or []
 
     if not traces:
         raise SystemExit(f"No telemetry traces found for session {session_id}.")
 
     print(f"  Got {len(traces)} samples from API.")
 
+    # Extract assist profile from laps (most reliable source)
+    session_assists = None
+    for lap in api_laps:
+        lap_assists = lap.get("assists")
+        if lap_assists and isinstance(lap_assists, dict):
+            session_assists = lap_assists
+            break
+
     samples = []
     for index, row in enumerate(traces, start=1):
+        # API returns throttlePct/brakePct (0-100), convert to 0-1 fractions
+        throttle_pct = parse_float(row.get("throttlePct"))
+        brake_pct = parse_float(row.get("brakePct"))
+        throttle = throttle_pct / 100.0 if throttle_pct is not None else parse_float(row.get("throttle"))
+        brake = brake_pct / 100.0 if brake_pct is not None else parse_float(row.get("brake"))
+
         sample = {
             "index": index,
             "timestamp": parse_timestamp(row.get("timestamp")),
@@ -190,13 +218,13 @@ def load_samples_from_api(session_id, max_samples=2000):
             "lapDistanceM": parse_float(row.get("lapDistance") or row.get("distanceM")),
             "totalDistanceM": parse_float(row.get("totalDistance") or row.get("distanceM")),
             "speedKph": parse_float(row.get("speedKph") or row.get("speed")),
-            "throttle": parse_float(row.get("throttle")),
-            "brake": parse_float(row.get("brake")),
+            "throttle": throttle,
+            "brake": brake,
             "steering": parse_float(row.get("steering") or row.get("steer")),
             "rpm": parse_int(row.get("rpm")),
             "gear": parse_int(row.get("gear")),
             "deltaToPbMs": parse_float(row.get("deltaToPB") or row.get("deltaToPb")),
-            "corneringSpeedKph": parse_float(row.get("corneringSpeed")),
+            "corneringSpeedKph": parse_float(row.get("corneringSpeedKph") or row.get("corneringSpeed")),
             "brakingDistanceM": parse_float(row.get("brakingDistance")),
             "drs": bool(row.get("drs")),
             "drsActivationDistance": parse_float(row.get("drsActivationDistance")),
@@ -208,7 +236,7 @@ def load_samples_from_api(session_id, max_samples=2000):
         raise SystemExit("No usable telemetry samples in API response.")
 
     print(f"  {len(samples)} usable samples after filtering.")
-    return samples
+    return samples, session_assists
 
 
 def duration_seconds(samples):
@@ -263,9 +291,9 @@ def segment_runs(samples, predicate, min_points=3):
 
 
 def summarize_segment(run):
-    speeds = [sample["speedKph"] for sample in run]
-    brakes = [sample["brake"] for sample in run]
-    throttles = [sample["throttle"] for sample in run]
+    speeds = [sample["speedKph"] for sample in run if sample["speedKph"] is not None]
+    brakes = [sample["brake"] for sample in run if sample["brake"] is not None]
+    throttles = [sample["throttle"] for sample in run if sample["throttle"] is not None]
     steerings = [abs(sample["steering"] or 0) for sample in run]
 
     return {
@@ -345,10 +373,10 @@ def compute_drs_reaction_times(samples):
 
 
 def summarize_lap(lap_number, samples):
-    speeds = [sample["speedKph"] for sample in samples]
-    throttles = [sample["throttle"] for sample in samples]
-    brakes = [sample["brake"] for sample in samples]
-    steerings = [sample["steering"] for sample in samples]
+    speeds = [sample["speedKph"] for sample in samples if sample["speedKph"] is not None]
+    throttles = [sample["throttle"] for sample in samples if sample["throttle"] is not None]
+    brakes = [sample["brake"] for sample in samples if sample["brake"] is not None]
+    steerings = [sample["steering"] for sample in samples if sample["steering"] is not None]
     deltas = [sample["deltaToPbMs"] for sample in samples if sample["deltaToPbMs"] is not None]
 
     braking_runs = segment_runs(samples, lambda s: (s["brake"] or 0) >= 0.08)
@@ -398,7 +426,7 @@ def summarize_lap(lap_number, samples):
     }
 
 
-def summarize_session(samples):
+def summarize_session(samples, assists=None):
     by_lap = defaultdict(list)
     for sample in samples:
         by_lap[sample["lapNumber"]].append(sample)
@@ -427,13 +455,59 @@ def summarize_session(samples):
         "schema": "f1-post-session-ai-report-v1",
         "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "session": session,
+        "assists": assists,
         "laps": lap_summaries,
-        "coachSignals": build_coach_signals(lap_summaries),
+        "coachSignals": build_coach_signals(lap_summaries, assists),
     }
 
 
-def build_coach_signals(laps):
+def build_coach_signals(laps, assists=None):
     signals = []
+
+    # Assist-related signals (session-level, not per-lap)
+    if assists and isinstance(assists, dict):
+        active_assists = []
+
+        if assists.get("tractionControlActive"):
+            label = assists.get("tractionControlLabel", "On")
+            active_assists.append(f"Traction Control ({label})")
+
+        if assists.get("antiLockBrakesActive"):
+            active_assists.append("ABS (Anti-Lock Brakes)")
+
+        if assists.get("automaticGearbox"):
+            active_assists.append("Automatic Gearbox")
+        elif assists.get("suggestedGear"):
+            active_assists.append("Suggested Gear")
+
+        if assists.get("brakingAssistActive"):
+            active_assists.append("Braking Assist")
+
+        if assists.get("steeringAssistActive"):
+            active_assists.append("Steering Assist")
+
+        if assists.get("drsAssistActive"):
+            active_assists.append("DRS Assist")
+
+        if assists.get("ersAssistActive"):
+            active_assists.append("ERS Assist")
+
+        if assists.get("dynamicRacingLineActive"):
+            active_assists.append("Dynamic Racing Line")
+
+        if active_assists:
+            signals.append({
+                "severity": "info",
+                "area": "driving assists",
+                "lap": "all",
+                "evidence": f"Active assists: {', '.join(active_assists)}.",
+                "coachingAngle": (
+                    "The driver is using driving assists. To improve long-term pace and car control, "
+                    "consider gradually reducing assists. Start by disabling one at a time: "
+                    "racing line first, then ABS, then traction control. "
+                    "Manual inputs give finer control over braking points, throttle application, and corner entry."
+                ),
+            })
 
     for lap in laps:
         lap_label = f"Lap {lap['lapNumber']}"
@@ -548,12 +622,59 @@ def render_markdown(report):
         f"- Top speed: {format_number(session['maxSpeedKph'], 0, ' kph')}",
         f"- Lap duration spread: {format_number(session['lapDurationSpreadSec'], 2, ' sec')}",
         "",
+    ]
+
+    # Assists section
+    assists = report.get("assists")
+    if assists and isinstance(assists, dict):
+        active_list = []
+        inactive_list = []
+
+        assist_checks = [
+            ("Traction Control", assists.get("tractionControlActive"), assists.get("tractionControlLabel")),
+            ("ABS", assists.get("antiLockBrakesActive"), None),
+            ("Gearbox", assists.get("automaticGearbox") or assists.get("suggestedGear"), assists.get("gearboxAssistLabel")),
+            ("Braking Assist", assists.get("brakingAssistActive"), None),
+            ("Steering Assist", assists.get("steeringAssistActive"), None),
+            ("DRS Assist", assists.get("drsAssistActive"), None),
+            ("ERS Assist", assists.get("ersAssistActive"), None),
+            ("Dynamic Racing Line", assists.get("dynamicRacingLineActive"), None),
+        ]
+
+        for name, is_active, label in assist_checks:
+            display = f"{name} ({label})" if label and label != "Unknown" else name
+            if is_active:
+                active_list.append(display)
+            else:
+                inactive_list.append(name)
+
+        lines.extend([
+            "## Driving Assists",
+            "",
+        ])
+        if active_list:
+            lines.append(f"- **Active:** {', '.join(active_list)}")
+        else:
+            lines.append("- **Active:** None (fully manual)")
+        if inactive_list:
+            lines.append(f"- **Disabled:** {', '.join(inactive_list)}")
+        lines.append("")
+    else:
+        lines.extend([
+            "## Driving Assists",
+            "",
+            "- Assist data not available for this session.",
+            "",
+        ])
+
+    lines.extend([
         "## How To Coach From This File",
         "",
         "- Prioritize high severity coach signals first.",
         "- Compare laps against each other, not against a generic ideal lap.",
         "- Look for patterns: long coasting, throttle/brake overlap, low full-throttle percentage, and heavy braking time.",
         "- Give specific, actionable tips: where to brake, where to release brake, when to commit to throttle, and how to smooth steering.",
+        "- If driving assists are active, suggest a path to gradually reducing them.",
         "",
         "## Lap Summary",
         "",
@@ -575,7 +696,7 @@ def render_markdown(report):
         "",
         "## Coach Signals",
         "",
-    ]
+    ])
 
     if signals:
         for index, signal in enumerate(signals, start=1):
@@ -769,6 +890,7 @@ def main():
     parser = argparse.ArgumentParser(description="Build an AI-friendly F1 post-session telemetry report.")
     parser.add_argument("--csv", default=None, help="Input telemetry CSV path (default: telemetry_live.csv).")
     parser.add_argument("--session", default=None, help="Session ID to fetch telemetry from the backend API instead of CSV.")
+    parser.add_argument("--token", default=None, help="Auth token for the backend API (or set F1_AUTH_TOKEN env var).")
     parser.add_argument("--max-samples", type=int, default=2000, help="Max samples to fetch from API (default: 2000).")
     parser.add_argument("--md", default=DEFAULT_MARKDOWN_OUTPUT, help="Output Markdown report path.")
     parser.add_argument("--json", default=DEFAULT_JSON_OUTPUT, help="Output JSON report path.")
@@ -784,17 +906,18 @@ def main():
 
     # Load samples from API or CSV
     if args.session:
-        samples = load_samples_from_api(args.session, max_samples=args.max_samples)
+        samples, session_assists = load_samples_from_api(args.session, max_samples=args.max_samples, auth_token=args.token)
     else:
         csv_path = Path(args.csv or DEFAULT_INPUT)
         if not csv_path.exists():
             raise SystemExit(f"Input CSV not found: {csv_path}")
         samples = load_samples(csv_path)
+        session_assists = None
 
     if not samples:
         raise SystemExit("No usable telemetry samples found.")
 
-    report = summarize_session(samples)
+    report = summarize_session(samples, assists=session_assists)
 
     markdown_path = Path(args.md)
     json_path = Path(args.json)
