@@ -386,3 +386,31 @@ Use this when the app feels confused:
 7. Complete one valid lap.
 8. Leave the F1 session.
 9. Check session details and leaderboard.
+
+## Website does not pair with listener after login
+
+Expected flow:
+
+- Listener is already running.
+- Website login checks `http://127.0.0.1:51377/health`.
+- Website creates a listener token.
+- Website sends it to `http://127.0.0.1:51377/pair`.
+
+Check listener health from PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:51377/health"
+```
+
+If it fails:
+
+- Start `revamp.py`.
+- Make sure no other app is using port `51377`.
+- Set `VITE_LOCAL_LISTENER_URL` if you changed the port.
+
+If it pairs to the wrong account:
+
+1. Log out on the website.
+2. Delete `.listener-config.json` if needed.
+3. Start listener again.
+4. Log in as the correct user.

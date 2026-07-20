@@ -7,6 +7,7 @@ This project is a full telemetry platform for F1 25. It captures live UDP teleme
 - Account sign up and login with backend password hashing.
 - Normal user and admin roles.
 - Listener tokens for connecting a local PC telemetry listener.
+- Website-to-listener auto pairing after login, with logout unpairing.
 - Live telemetry dashboard with speed, throttle, brake, RPM, gear, DRS, steering, and map position.
 - Lap trails that reset per lap and can be viewed later.
 - Session review pages for live and completed sessions.

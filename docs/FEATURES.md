@@ -64,6 +64,23 @@ The profile page includes a listener token panel where users can:
 
 The listener can still create or resolve a user using username/email, but token-based identity is safer for shared systems because passwords are not entered into the listener.
 
+## Website Listener Pairing
+
+The listener can stay running in the background while the website controls which account it records under.
+
+Flow:
+
+1. Start `revamp.py`.
+2. The listener opens a local-only pairing API at `http://127.0.0.1:51377`.
+3. User logs in on the website.
+4. The website checks whether the local listener is running.
+5. If it is running, the website creates a listener token and sends it to the local listener.
+6. The listener resolves the token with the backend and records under that logged-in account.
+7. If the user logs out, the website tells the listener to unpair.
+8. If another user logs in, the website pairs the listener to the new account.
+
+The website still cannot receive F1 UDP telemetry directly. The local listener remains required because browsers cannot bind to the game's UDP telemetry port.
+
 ## Live Telemetry
 
 Route: `/live`

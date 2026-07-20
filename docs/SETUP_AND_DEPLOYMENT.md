@@ -53,6 +53,7 @@ Optional frontend `.env`:
 ```env
 VITE_API_BASE=https://f1-telementry-1.onrender.com
 VITE_FUNCTIONS_URL=https://asia-southeast1-f1telementrydatabase.cloudfunctions.net/generateRacingSuit
+VITE_LOCAL_LISTENER_URL=http://127.0.0.1:51377
 ```
 
 If `VITE_API_BASE` is wrong, login or admin calls may return HTML instead of JSON.
@@ -195,6 +196,23 @@ The listener binds to:
 ```text
 0.0.0.0:20777
 ```
+
+The website pairing API binds locally to:
+
+```text
+127.0.0.1:51377
+```
+
+Optional listener environment variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `API_BASE` | Override backend URL |
+| `LISTENER_CONFIG_PATH` | Override saved pairing config path |
+| `LOCAL_PAIR_HOST` | Override local pairing host |
+| `LOCAL_PAIR_PORT` | Override local pairing port |
+| `LISTENER_RESET_CONFIG=1` | Ignore saved pairing config for one run |
+| `ALLOW_MANUAL_LISTENER_LOGIN=true` | Re-enable terminal username/email prompts |
 
 ## Test Accounts
 

@@ -17,6 +17,10 @@ import AdminUsers from "./pages/AdminUsers";
 import useActiveSession from "./hooks/useActiveSession";
 import TrackCalibration from "./pages/TrackCalibration";
 import { auth } from "./firebase";
+import {
+  notifyLocalListenerLogout,
+  pairLocalListenerAfterLogin,
+} from "./services/localListenerService";
 
 function getStoredUser() {
   try {
@@ -145,6 +149,15 @@ export default function App() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const authToken = localStorage.getItem("f1AuthToken");
+    if (!authToken) return;
+
+    pairLocalListenerAfterLogin({ user, authToken }).catch(() => {});
+  }, [user]);
+
   const handleLogin = (nextUser, token) => {
     const normalizedUser =
       typeof nextUser === "string"
@@ -159,6 +172,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    await notifyLocalListenerLogout();
     await signOut(auth).catch(() => {});
     setUser(null);
   };

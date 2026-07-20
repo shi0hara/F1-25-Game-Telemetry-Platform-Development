@@ -5,8 +5,10 @@ import ctypes
 import queue
 import threading
 import os
+import json
 import getpass
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -14,10 +16,16 @@ from urllib3.util.retry import Retry
 
 from f1.packets import PacketHeader, HEADER_FIELD_TO_PACKET_TYPE
 
-API_BASE = "https://f1-telementry-1.onrender.com"
+API_BASE = os.getenv("API_BASE", "https://f1-telementry-1.onrender.com")
 UDP_IP = "0.0.0.0"
 UDP_PORT = 20777
 CSV_PATH = "telemetry_live.csv"
+LISTENER_CONFIG_PATH = os.getenv(
+    "LISTENER_CONFIG_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".listener-config.json"),
+)
+LOCAL_PAIR_HOST = os.getenv("LOCAL_PAIR_HOST", "127.0.0.1")
+LOCAL_PAIR_PORT = int(os.getenv("LOCAL_PAIR_PORT", "51377"))
 
 PRINT_HEADERS = False
 HEADER_PRINT_EVERY_SEC = 0.5
@@ -48,6 +56,8 @@ PARTICIPANTS_PACKET_ID = 4
 
 DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
+LISTENER_TOKEN = os.getenv("LISTENER_TOKEN") or os.getenv("F1_LISTENER_TOKEN")
+LISTENER_CONFIG_LOADED = False
 
 PLAYER_NAME_DETECTED = False
 
@@ -316,7 +326,12 @@ def sync_session_metadata():
         return
 
     try:
-        res = http.patch(f"{API_BASE}/sessions/{SESSION_ID}", json=payload, timeout=REQUEST_TIMEOUT)
+        res = http.patch(
+            f"{API_BASE}/sessions/{SESSION_ID}",
+            headers=listener_auth_headers(),
+            json=payload,
+            timeout=REQUEST_TIMEOUT,
+        )
         res.raise_for_status()
         LAST_SESSION_META_SYNCED = dict(payload)
     except Exception as e:
@@ -571,6 +586,7 @@ LAST_CLOSED_SESSION_SIGNATURE = None
 LAST_CLOSED_SESSION_MONO = None
 
 STOP_EVENT = threading.Event()
+IDENTITY_LOCK = threading.Lock()
 
 LATEST_QUEUE = queue.Queue(maxsize=1)
 BATCH_QUEUE = queue.Queue(maxsize=2000)
@@ -604,16 +620,265 @@ CURRENT_PIT_RELEASE_ASSIST = None
 CURRENT_ERS_ASSIST = None
 CURRENT_DYNAMIC_RACING_LINE = None
 
+def clean_config_text(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+def load_listener_config():
+    global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, LISTENER_CONFIG_LOADED
+
+    if LISTENER_CONFIG_LOADED:
+        return
+
+    LISTENER_CONFIG_LOADED = True
+
+    if os.getenv("LISTENER_RESET_CONFIG") == "1":
+        print("Listener config skipped because LISTENER_RESET_CONFIG=1.")
+        return
+
+    if not os.path.exists(LISTENER_CONFIG_PATH):
+        return
+
+    try:
+        with open(LISTENER_CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"Could not read listener config at {LISTENER_CONFIG_PATH}: {e}")
+        return
+
+    if not DRIVER_USERNAME:
+        DRIVER_USERNAME = clean_config_text(data.get("username"))
+    if not DRIVER_EMAIL:
+        DRIVER_EMAIL = clean_config_text(data.get("email"))
+    if not LISTENER_TOKEN:
+        LISTENER_TOKEN = clean_config_text(data.get("listenerToken"))
+
+def save_listener_config():
+    data = {}
+    if DRIVER_USERNAME:
+        data["username"] = DRIVER_USERNAME
+    if DRIVER_EMAIL:
+        data["email"] = DRIVER_EMAIL
+    if LISTENER_TOKEN:
+        data["listenerToken"] = LISTENER_TOKEN
+
+    if not data:
+        return
+
+    try:
+        with open(LISTENER_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        try:
+            os.chmod(LISTENER_CONFIG_PATH, 0o600)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"Could not save listener config at {LISTENER_CONFIG_PATH}: {e}")
+
+def delete_listener_config():
+    try:
+        if os.path.exists(LISTENER_CONFIG_PATH):
+            os.remove(LISTENER_CONFIG_PATH)
+    except Exception as e:
+        print(f"Could not delete listener config at {LISTENER_CONFIG_PATH}: {e}")
+
+def clear_listener_identity():
+    global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, USER_ID
+
+    with IDENTITY_LOCK:
+        DRIVER_USERNAME = None
+        DRIVER_EMAIL = None
+        LISTENER_TOKEN = None
+        USER_ID = None
+        delete_listener_config()
+
+def listener_auth_headers():
+    if not LISTENER_TOKEN:
+        return {}
+    return {"x-listener-token": LISTENER_TOKEN}
+
+def resolve_listener_token(token):
+    global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, USER_ID
+
+    token = clean_config_text(token)
+    if not token:
+        raise ValueError("listener token is required")
+
+    res = http.post(
+        f"{API_BASE}/listener/resolve",
+        headers={"x-listener-token": token},
+        json={},
+        timeout=REQUEST_TIMEOUT,
+    )
+    res.raise_for_status()
+    data = res.json()
+    user = data.get("user") or data
+    user_id = clean_config_text(user.get("id"))
+    username = clean_config_text(user.get("username"))
+    email = clean_config_text(user.get("email"))
+
+    if not user_id:
+        raise ValueError("listener token resolved without a user id")
+
+    with IDENTITY_LOCK:
+        LISTENER_TOKEN = token
+        USER_ID = user_id
+        if username:
+            DRIVER_USERNAME = username
+        if email:
+            DRIVER_EMAIL = email
+        save_listener_config()
+
+    return {
+        "id": USER_ID,
+        "username": DRIVER_USERNAME,
+        "email": DRIVER_EMAIL,
+    }
+
+class ListenerPairingHandler(BaseHTTPRequestHandler):
+    server_version = "F1TelemetryListener/1.0"
+
+    def log_message(self, format, *args):
+        return
+
+    def send_cors_headers(self):
+        origin = self.headers.get("Origin") or "*"
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+
+    def write_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_cors_headers()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def read_json_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(min(length, 1024 * 32))
+        if not raw:
+            return {}
+        return json.loads(raw.decode("utf-8"))
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path != "/health":
+            self.write_json(404, {"ok": False, "error": "not found"})
+            return
+
+        self.write_json(200, {
+            "ok": True,
+            "paired": bool(LISTENER_TOKEN or USER_ID),
+            "username": DRIVER_USERNAME,
+            "email": DRIVER_EMAIL,
+            "userId": USER_ID,
+            "sessionId": SESSION_ID,
+            "apiBase": API_BASE,
+        })
+
+    def do_POST(self):
+        if self.path == "/unpair":
+            previous_username = DRIVER_USERNAME
+            if SESSION_ID:
+                try:
+                    close_current_backend_session(
+                        reason="website_logout",
+                        packet_type="website_pairing",
+                        detected_at=iso_now(),
+                    )
+                except Exception as e:
+                    print("Could not close active session during website logout:", e)
+
+            clear_listener_identity()
+            print("Website logged out. Listener account pairing cleared.")
+            self.write_json(200, {
+                "ok": True,
+                "paired": False,
+                "previousUsername": previous_username,
+            })
+            return
+
+        if self.path != "/pair":
+            self.write_json(404, {"ok": False, "error": "not found"})
+            return
+
+        try:
+            body = self.read_json_body()
+            token = clean_config_text(body.get("listenerToken"))
+            previous_user_id = USER_ID
+            user = resolve_listener_token(token)
+            if SESSION_ID and previous_user_id and previous_user_id != user.get("id"):
+                try:
+                    close_current_backend_session(
+                        reason="website_user_changed",
+                        packet_type="website_pairing",
+                        detected_at=iso_now(),
+                    )
+                except Exception as e:
+                    print("Could not close active session during website user switch:", e)
+            print(f"Website paired listener as: {user.get('username') or user.get('id')}")
+            self.write_json(200, {
+                "ok": True,
+                "paired": True,
+                "user": user,
+            })
+        except Exception as e:
+            self.write_json(400, {
+                "ok": False,
+                "error": str(e),
+            })
+
+def start_local_pairing_server():
+    try:
+        server = ThreadingHTTPServer((LOCAL_PAIR_HOST, LOCAL_PAIR_PORT), ListenerPairingHandler)
+    except OSError as e:
+        print(f"Local website pairing server unavailable on {LOCAL_PAIR_HOST}:{LOCAL_PAIR_PORT}: {e}")
+        return None
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"Website pairing enabled at http://{LOCAL_PAIR_HOST}:{LOCAL_PAIR_PORT}/health")
+    return server
+
 def prompt_identity():
     global DRIVER_USERNAME, DRIVER_EMAIL
 
-    if not DRIVER_USERNAME:
-        DRIVER_USERNAME = input("Username: ").strip()
-    if not DRIVER_EMAIL:
-        DRIVER_EMAIL = input("Email: ").strip()
+    load_listener_config()
 
-    if not DRIVER_USERNAME:
-        raise ValueError("Username is required")
+    if LISTENER_TOKEN:
+        print("Using saved listener token. The website account is already paired.")
+        return
+
+    if DRIVER_USERNAME:
+        print("Using saved listener username:", DRIVER_USERNAME)
+        return
+
+    if os.getenv("ALLOW_MANUAL_LISTENER_LOGIN", "false").lower() in ("1", "true", "yes", "on"):
+        if not DRIVER_USERNAME:
+            DRIVER_USERNAME = input("Username: ").strip()
+        if not DRIVER_EMAIL:
+            DRIVER_EMAIL = input("Email: ").strip()
+
+        if not DRIVER_USERNAME:
+            raise ValueError("Username is required")
+
+        save_listener_config()
+        return
+
+    print("No listener account paired yet. Log in on the website while this listener is running.")
 
 def sniff_player_name(sock, timeout_sec=10.0):
     global PLAYER_NAME_DETECTED
@@ -664,7 +929,7 @@ def sniff_player_name(sock, timeout_sec=10.0):
 
 def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
     url = f"{API_BASE}{endpoint}"
-    res = http.post(url, json=body, timeout=timeout)
+    res = http.post(url, headers=listener_auth_headers(), json=body, timeout=timeout)
     res.raise_for_status()
     return res
 
@@ -702,26 +967,50 @@ def queue_worker(qobj, label):
             qobj.task_done()
 
 def ensure_user():
-    global USER_ID
+    global USER_ID, DRIVER_USERNAME, DRIVER_EMAIL
 
     if USER_ID:
         return USER_ID
 
-    while not STOP_EVENT.is_set():
-        try:
-            print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
+    last_wait_notice = 0
 
-            user_res = http.post(
-                f"{API_BASE}/users/ensure",
-                json={
-                    "username": DRIVER_USERNAME,
-                    "email": DRIVER_EMAIL,
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
+    while not STOP_EVENT.is_set():
+        load_listener_config()
+
+        if not LISTENER_TOKEN and not DRIVER_USERNAME:
+            now = time.time()
+            if now - last_wait_notice >= 5:
+                print("Waiting for website login to pair this listener...")
+                last_wait_notice = now
+            time.sleep(0.25)
+            continue
+
+        try:
+            if LISTENER_TOKEN:
+                print(f"Connecting to backend at {API_BASE} using paired listener token ...")
+                user_res = http.post(
+                    f"{API_BASE}/users/ensure",
+                    headers=listener_auth_headers(),
+                    json={},
+                    timeout=REQUEST_TIMEOUT,
+                )
+            else:
+                print(f"Connecting to backend at {API_BASE} as '{DRIVER_USERNAME}' ...")
+                user_res = http.post(
+                    f"{API_BASE}/users/ensure",
+                    json={
+                        "username": DRIVER_USERNAME,
+                        "email": DRIVER_EMAIL,
+                    },
+                    timeout=REQUEST_TIMEOUT,
+                )
+
             user_res.raise_for_status()
             user_data = user_res.json()
             USER_ID = user_data["id"]
+            DRIVER_USERNAME = clean_config_text(user_data.get("username")) or DRIVER_USERNAME
+            DRIVER_EMAIL = clean_config_text(user_data.get("email")) or DRIVER_EMAIL
+            save_listener_config()
             print("Driver account ready:", DRIVER_USERNAME, "| USER ID:", USER_ID)
             return USER_ID
         except Exception as e:
@@ -896,6 +1185,7 @@ def start_backend_session(game_session_uid=None):
             }
             session_res = http.post(
                 f"{API_BASE}/sessions",
+                headers=listener_auth_headers(),
                 json=session_payload,
                 timeout=REQUEST_TIMEOUT,
             )
@@ -954,6 +1244,7 @@ def end_session_once(session_closed):
     try:
         res = http.post(
             f"{API_BASE}/sessions/{SESSION_ID}/end",
+            headers=listener_auth_headers(),
             json={
                 "endedAt": ended_at,
                 "endedAtSource": end_source,
@@ -1767,6 +2058,7 @@ def post_telemetry_sample(header, pkt):
 def main():
     global DRIVER_USERNAME
 
+    start_local_pairing_server()
     prompt_identity()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1776,8 +2068,10 @@ def main():
     detected_name = sniff_player_name(sock, timeout_sec=10.0)
     if detected_name and not is_fake_name(detected_name):
         print("Detected in-game player name:", detected_name)
-    else:
+    elif DRIVER_USERNAME:
         print("Using username:", DRIVER_USERNAME)
+    else:
+        print("No account paired yet. Listener will wait for website login before sending telemetry.")
 
     live_thread = threading.Thread(target=queue_worker, args=(LATEST_QUEUE, "latest"), daemon=True)
     batch_thread = threading.Thread(target=queue_worker, args=(BATCH_QUEUE, "batch"), daemon=True)

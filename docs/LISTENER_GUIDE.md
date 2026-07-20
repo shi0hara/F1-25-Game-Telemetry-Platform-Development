@@ -49,20 +49,35 @@ The listener itself binds to:
 python .\revamp.py
 ```
 
-The script prompts for:
+The listener no longer needs to prompt for account details during the normal website flow.
 
-- Username.
-- Email.
+It starts a local-only website pairing API:
 
-Current listener behavior does not require the account password. This is intentional because the listener should not need to know user passwords.
+```text
+http://127.0.0.1:51377
+```
+
+When the user logs in on the website, the website pairs the listener to that account automatically.
+
+When the user logs out on the website, the website tells the listener to clear the active account.
 
 Preferred identity flow:
 
 1. User logs in through frontend.
-2. User generates a listener token from the profile page.
-3. Listener token is used to connect the listener to that account.
+2. Frontend detects the local listener.
+3. Frontend creates a listener token.
+4. Frontend sends the token to the local listener.
+5. Listener stores the token in `.listener-config.json`.
+6. Listener uses the token for future backend identity until logout/unpair.
 
-If token support is not entered through the listener prompt yet, the fallback username/email flow ensures a user record exists.
+Manual username/email prompts can be re-enabled only for debugging:
+
+```powershell
+$env:ALLOW_MANUAL_LISTENER_LOGIN="true"
+python .\revamp.py
+```
+
+The listener should never ask for or store the account password.
 
 ## Session Start Detection
 

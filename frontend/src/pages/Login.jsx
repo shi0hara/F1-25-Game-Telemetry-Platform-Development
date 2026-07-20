@@ -2,6 +2,7 @@ import { useState } from "react";
 import { signInWithCustomToken } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { auth } from "../firebase";
+import { pairLocalListenerAfterLogin } from "../services/localListenerService";
 import "../App.css";
 
 const API_BASE =
@@ -92,6 +93,11 @@ export default function Login({ onLogin }) {
       if (data.firebaseToken) {
         await signInWithCustomToken(auth, data.firebaseToken);
       }
+
+      await pairLocalListenerAfterLogin({
+        user: data.user,
+        authToken: data.token,
+      }).catch(() => {});
 
       setIsLaunching(true);
       await new Promise((resolve) => setTimeout(resolve, 700));
