@@ -263,6 +263,7 @@ function buildSectorBoundaries(traces, lap) {
 
 const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4];
 const REPLAY_SEEK_MS = 5000;
+const REPLAY_THUMB_WIDTH = 64;
 
 function sampleTimestampMs(sample) {
   const value = sample?.timestamp;
@@ -485,8 +486,12 @@ function ReplayControls({
       ? "Resume"
       : "Replay Lap";
 
+  // Calculate progress bar position accounting for thumb offset
+  const thumbHalfWidth = REPLAY_THUMB_WIDTH / 2;
+  const progressBarLeft = `calc(${progress}% * (100% - ${REPLAY_THUMB_WIDTH}px) / 100% + ${thumbHalfWidth}px)`;
+
   return (
-    <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
+    <div className="card" style={{ marginBottom: 24, ...containerStyle }}>
       <div
         style={{
           display: "flex",
@@ -579,27 +584,49 @@ function ReplayControls({
         value={clampReplayTime(replayTimeMs, replayDurationMs)}
         disabled={disabled}
         onChange={(event) => onSeekTo(Number(event.target.value))}
+        className="replay-range-slider"
         style={{
           width: "100%",
-          accentColor: "#a855f7",
           cursor: disabled ? "not-allowed" : "pointer",
         }}
       />
 
       <div
         style={{
+          position: "relative",
+          width: "100%",
+          minWidth: 0,
           height: 5,
           borderRadius: 999,
           background: "rgba(255,255,255,0.08)",
           overflow: "hidden",
-          marginTop: 8,
+          marginTop: 16,
         }}
       >
         <div
           style={{
-            width: progress + "%",
+            position: "absolute",
+            left: `${thumbHalfWidth}px`,
+            top: 0,
+            width: `calc((100% - ${REPLAY_THUMB_WIDTH}px) * ${progress} / 100)`,
             height: "100%",
             background: "linear-gradient(90deg, #22c55e, #a855f7)",
+            borderRadius: "999px 0 0 999px",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: progressBarLeft,
+            top: "50%",
+            transform: "translate(-50%, -50%)",
+            width: "14px",
+            height: "14px",
+            borderRadius: "50%",
+            background: "white",
+            border: "2px solid #a855f7",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            pointerEvents: "none",
           }}
         />
       </div>
@@ -609,7 +636,7 @@ function ReplayControls({
 
 function ReplayDriverPanel({ activeSample, containerStyle }) {
   return (
-    <div className="card" style={{ marginBottom: 20, ...containerStyle }}>
+    <div className="card" style={{ marginBottom: 20, marginTop: 24, ...containerStyle }}>
       <div
         style={{
           display: "grid",
@@ -653,44 +680,52 @@ const telemetryGuidesPlugin = {
   afterDatasetsDraw(chart, _args, options) {
     const xScale = chart.scales.x;
     const chartArea = chart.chartArea;
-    if (!xScale || !chartArea) return;
+    if (!xScale || !chartArea || !chart.ctx) return;
+    
+    // Additional safety check for chart dimensions
+    if (chartArea.bottom <= chartArea.top || chartArea.right <= chartArea.left) return;
+    
     const ctx = chart.ctx;
 
-    for (const boundary of options.boundaries || []) {
-      const x = xScale.getPixelForValue(boundary.index);
-      if (!Number.isFinite(x)) continue;
+    try {
+      for (const boundary of options.boundaries || []) {
+        const x = xScale.getPixelForValue(boundary.index);
+        if (!Number.isFinite(x)) continue;
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.setLineDash([7, 6]);
-      ctx.moveTo(x, chartArea.top);
-      ctx.lineTo(x, chartArea.bottom);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = boundary.color;
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = boundary.color;
-      ctx.font = "700 12px Arial";
-      ctx.fillText(
-        boundary.label + (boundary.approximate ? " ~" : ""),
-        x + 5,
-        chartArea.top + 15
-      );
-      ctx.restore();
-    }
-
-    if (Number.isFinite(Number(options.activeIndex))) {
-      const x = chartPixelForIndex(xScale, options.activeIndex);
-      if (Number.isFinite(x)) {
         ctx.save();
         ctx.beginPath();
+        ctx.setLineDash([7, 6]);
         ctx.moveTo(x, chartArea.top);
         ctx.lineTo(x, chartArea.bottom);
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = boundary.color;
         ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = boundary.color;
+        ctx.font = "700 12px Arial";
+        ctx.fillText(
+          boundary.label + (boundary.approximate ? " ~" : ""),
+          x + 5,
+          chartArea.top + 15
+        );
         ctx.restore();
       }
+
+      if (Number.isFinite(Number(options.activeIndex))) {
+        const x = chartPixelForIndex(xScale, options.activeIndex);
+        if (Number.isFinite(x)) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(x, chartArea.top);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = "rgba(255,255,255,0.8)";
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    } catch (err) {
+      console.warn("telemetryGuides plugin error:", err);
     }
   },
 };
@@ -862,13 +897,19 @@ function CombinedTelemetryGraph({
         </div>
       </div>
 
-      <div ref={scrollRef} style={{ overflowX: "auto" }} onMouseLeave={() => onHoverIndex(null)}>
-        <div style={{ minWidth: chartMinWidth, height: 260 }}>
-          <Line
-            data={chartData}
-            options={options}
-            plugins={[telemetryGuidesPlugin]}
-          />
+      <div ref={scrollRef} style={{ overflowX: "auto", minHeight: "260px" }} onMouseLeave={() => onHoverIndex(null)} className="telemetry-chart-scroll">
+        <div style={{ minWidth: chartMinWidth, height: 260, minHeight: 260 }}>
+          {traces.length > 0 && labels.length > 0 ? (
+            <Line
+              data={chartData}
+              options={options}
+              plugins={[telemetryGuidesPlugin]}
+            />
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8" }}>
+              No data to display
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -887,6 +928,24 @@ export default function LapPerformanceAnalysis() {
   const [isReplaying, setIsReplaying] = useState(false);
   const [replayTimeMs, setReplayTimeMs] = useState(0);
   const [replaySpeed, setReplaySpeed] = useState(1);
+
+  // Force visibility after component mounts (fixes blank screen on some browsers)
+  useEffect(() => {
+    console.log('LapPerformanceAnalysis mounted');
+    const timer = setTimeout(() => {
+      const shell = document.querySelector('.route-transition-shell');
+      if (shell) {
+        shell.classList.add('loaded');
+        console.log('Added loaded class to route-transition-shell');
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Log when extras expand or view changes
+  useEffect(() => {
+    console.log('View changed:', analysisView, 'Extras expanded:', extrasExpanded);
+  }, [analysisView, extrasExpanded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1074,6 +1133,27 @@ export default function LapPerformanceAnalysis() {
           <h2>Telemetry Overview</h2>
           <p style={{ color: "#94a3b8" }}>
             No raw telemetry samples were saved for this lap, so only timing data is available.
+          </p>
+        </div>
+      );
+    }
+
+    // Additional safety check - ensure we have at least some valid data
+    const hasValidData = traces.some(sample => 
+      sample && (
+        Number.isFinite(sample.speedKph) ||
+        Number.isFinite(sample.throttlePct) ||
+        Number.isFinite(sample.brakePct) ||
+        Number.isFinite(sample.rpm)
+      )
+    );
+
+    if (!hasValidData) {
+      return (
+        <div className="card" style={{ height: "100%" }}>
+          <h2>Telemetry Overview</h2>
+          <p style={{ color: "#94a3b8" }}>
+            Telemetry samples exist but contain no valid data points for charting.
           </p>
         </div>
       );
@@ -1298,7 +1378,7 @@ export default function LapPerformanceAnalysis() {
               </button>
 
               {extrasExpanded && (
-                <div className="lap-extras-body">
+                <div className="lap-extras-body" key="extras-expanded">
                   <div className="lap-analysis-two-col-grid">
                     <div className="lap-analysis-column lap-analysis-column-left">
                       <div className="lap-analysis-grid-item map-panel">
@@ -1308,7 +1388,7 @@ export default function LapPerformanceAnalysis() {
                           traces={traces}
                           activeIndex={activeSampleIndex}
                           sectorBoundaries={sectorBoundaries}
-                          containerStyle={{ height: "100%" }}
+                          containerStyle={{ height: "100%", minHeight: "300px" }}
                         />
                       </div>
 
@@ -1324,7 +1404,7 @@ export default function LapPerformanceAnalysis() {
                           onSeekBy={handleReplaySeekBy}
                           onSeekTo={handleReplaySeekTo}
                           onSpeedStep={handleReplaySpeedStep}
-                          containerStyle={{ height: "100%" }}
+                          containerStyle={{ height: "100%", minHeight: "200px" }}
                         />
                       </div>
                     </div>
@@ -1339,7 +1419,7 @@ export default function LapPerformanceAnalysis() {
                       </div>
 
                       <div className="lap-analysis-grid-item driver-panel">
-                        <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%" }} />
+                        <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%", minHeight: "180px" }} />
                       </div>
                     </div>
                   </div>
@@ -1349,7 +1429,7 @@ export default function LapPerformanceAnalysis() {
           )}
 
           {!isBeginnerView && (
-            <div className="lap-analysis-two-col-grid">
+            <div className="lap-analysis-two-col-grid" key="advanced-mode">
               <div className="lap-analysis-column lap-analysis-column-left">
                 <div className="lap-analysis-grid-item map-panel">
                   <PostLapTelemetryMap
@@ -1358,7 +1438,7 @@ export default function LapPerformanceAnalysis() {
                     traces={traces}
                     activeIndex={activeSampleIndex}
                     sectorBoundaries={sectorBoundaries}
-                    containerStyle={{ height: "100%" }}
+                    containerStyle={{ height: "100%", minHeight: "300px" }}
                   />
                 </div>
 
@@ -1374,7 +1454,7 @@ export default function LapPerformanceAnalysis() {
                     onSeekBy={handleReplaySeekBy}
                     onSeekTo={handleReplaySeekTo}
                     onSpeedStep={handleReplaySpeedStep}
-                    containerStyle={{ height: "100%" }}
+                    containerStyle={{ height: "100%", minHeight: "200px" }}
                   />
                 </div>
               </div>
@@ -1389,7 +1469,7 @@ export default function LapPerformanceAnalysis() {
                 </div>
 
                 <div className="lap-analysis-grid-item driver-panel">
-                  <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%" }} />
+                  <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%", minHeight: "180px" }} />
                 </div>
               </div>
             </div>
