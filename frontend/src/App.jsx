@@ -16,6 +16,7 @@ import NotFound from "./pages/NotFound";
 import AdminUsers from "./pages/AdminUsers";
 import useActiveSession from "./hooks/useActiveSession";
 import TrackCalibration from "./pages/TrackCalibration";
+import RecommendedSetups from "./pages/RecommendedSetups";
 import { auth } from "./firebase";
 import {
   notifyLocalListenerLogout,
@@ -82,6 +83,7 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
           }
         />
         <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/setups" element={<RecommendedSetups />} />
         <Route
           path="/analysis/:sessionId/lap/:lapId"
           element={<LapPerformanceAnalysis />}

@@ -1,0 +1,51 @@
+/* Responsive adjustments for RecommendedSetups page */
+
+@media (max-width: 768px) {
+  .setup-bar-grid {
+    grid-template-columns: 1fr auto !important;
+    grid-template-rows: auto auto;
+    gap: 6px 12px !important;
+  }
+
+  .setup-bar-label {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+  }
+
+  .setup-bar-wrapper {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .setup-bar-value {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 50px;
+  }
+
+  .track-dropdown-trigger {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .track-dropdown-menu {
+    left: 0;
+    right: 0;
+    width: 100%;
+    min-width: unset;
+  }
+}
+
+@media (max-width: 480px) {
+  .setup-section-title {
+    font-size: 1.8rem !important;
+  }
+
+  .setup-bar-label {
+    font-size: 0.88rem;
+  }
+
+  .setup-bar-value {
+    font-size: 0.92rem;
+  }
+}

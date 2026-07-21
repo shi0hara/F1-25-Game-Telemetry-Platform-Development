@@ -8,6 +8,7 @@ export default function Navbar({ username, isAdmin = false, onLogout }) {
     { to: "/", label: "Dashboard" },
     { to: "/live", label: "Live", protected: true },
     { to: "/leaderboard", label: "Leaderboards" },
+    { to: "/setups", label: "Setups" },
     { to: "/profile", label: "Profile", protected: true },
   ];
 
