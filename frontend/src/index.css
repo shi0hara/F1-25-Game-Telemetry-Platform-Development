@@ -448,6 +448,45 @@ textarea:focus {
   gap: 14px;
 }
 
+.dashboard-overview-card {
+  margin-top: 20px;
+}
+
+.dashboard-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.dashboard-overview-grid div {
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dashboard-overview-grid span {
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.dashboard-overview-grid strong {
+  display: block;
+  margin-top: 5px;
+  color: #fff;
+  font-size: 1.12rem;
+}
+
+.dashboard-overview-grid p {
+  margin: 7px 0 0;
+  color: var(--color-text-muted);
+  line-height: 1.38;
+}
+
 .split-head {
   display: flex;
   justify-content: space-between;
@@ -804,6 +843,10 @@ th {
 
   .dashboard-stat-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-overview-grid {
+    grid-template-columns: 1fr;
   }
 
   .meta-copy {
