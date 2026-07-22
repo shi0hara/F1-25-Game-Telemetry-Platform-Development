@@ -43,6 +43,11 @@ function formatDate(value) {
   return new Date(ms).toLocaleDateString();
 }
 
+function formatSessionEnded(session) {
+  if (isActiveSession(session)) return "Still active";
+  return formatDateTime(getSessionEndedAt(session));
+}
+
 function sessionBestLapMs(session) {
   const summary = session?.processedSummary || {};
   return (
@@ -227,7 +232,7 @@ export default function Dashboard({ currentUser }) {
                 </div>
                 <div>
                   <span>Ended</span>
-                  <strong>{formatDateTime(getSessionEndedAt(latestSession))}</strong>
+                  <strong>{formatSessionEnded(latestSession)}</strong>
                 </div>
                 <div>
                   <span>Total Laps</span>

@@ -2,6 +2,7 @@ export function toMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();
   if (typeof value.toDate === "function") return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
   if (typeof value.seconds === "number") {
     return value.seconds * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1000000);
   }
@@ -9,9 +10,25 @@ export function toMillis(value) {
     return value._seconds * 1000 + Math.floor(Number(value._nanoseconds || 0) / 1000000);
   }
   if (typeof value === "number") return value;
+  if (typeof value === "object") {
+    return (
+      toMillis(value.iso) ||
+      toMillis(value.isoString) ||
+      toMillis(value.date) ||
+      toMillis(value.value) ||
+      toMillis(value.timestamp)
+    );
+  }
 
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function firstReadableTimestamp(...values) {
+  for (const value of values) {
+    if (toMillis(value)) return value;
+  }
+  return values.find(Boolean) || null;
 }
 
 export function hasEndedAt(value) {
@@ -25,11 +42,27 @@ export function isActiveSession(session) {
 }
 
 export function getSessionStartedAt(session) {
-  return session?.startedAt || session?.startedAtIso || session?.createdAt || session?.createdAtIso || null;
+  return firstReadableTimestamp(
+    session?.startedAt,
+    session?.startedAtIso,
+    session?.createdAt,
+    session?.createdAtIso,
+    session?.latestTelemetryAt,
+    session?.latestTelemetry?.timestamp,
+    session?.latestMapPosition?.timestamp
+  );
 }
 
 export function getSessionEndedAt(session) {
-  return session?.endedAt || session?.endedAtIso || null;
+  return firstReadableTimestamp(
+    session?.endedAt,
+    session?.endedAtIso,
+    session?.endedAtCorrectedAt,
+    session?.endedAtCorrectedAtIso,
+    session?.endedAtServerReceivedAt,
+    session?.endedAtServerReceivedAtIso,
+    session?.listenerClosedAt
+  );
 }
 
 export function formatSessionFlag(value) {
