@@ -439,6 +439,32 @@ textarea:focus {
   margin-top: auto;
 }
 
+.dashboard-track-select {
+  margin: 0;
+  width: 100%;
+}
+
+.dashboard-track-select .track-dropdown-trigger {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.dashboard-track-select .track-dropdown-menu {
+  width: 100%;
+}
+
+.dashboard-track-select .track-dropdown-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-track-count {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
 .dashboard-overview-card {
   margin-top: 20px;
 }

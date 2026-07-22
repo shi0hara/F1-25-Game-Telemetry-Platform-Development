@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   getSessionEndedAt,
@@ -85,31 +85,105 @@ function sortLeaderboardRows(rows) {
   });
 }
 
-function pickDailyLeader(payload) {
+function trackOptionKey(track) {
+  return (
+    track?.trackKey ||
+    String(track?.trackName || "unknown_track")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+  );
+}
+
+function trackNameKey(track) {
+  return String(track?.trackName || track?.trackKey || "")
+    .trim()
+    .toLowerCase();
+}
+
+function trackLabel(track) {
+  return track?.trackName || track?.trackKey || "Unknown Track";
+}
+
+function mergeDailyTrackOptions(allPayload, dailyPayload) {
+  const dailyTracks = Array.isArray(dailyPayload?.tracks) ? dailyPayload.tracks : [];
+  const allTracks = Array.isArray(allPayload?.tracks) && allPayload.tracks.length
+    ? allPayload.tracks
+    : dailyTracks;
+  const dailyByKey = new Map(dailyTracks.map((track) => [trackOptionKey(track), track]));
+  const dailyByName = new Map(dailyTracks.map((track) => [trackNameKey(track), track]));
+  const seen = new Set();
+
+  const options = allTracks.map((track) => {
+    const key = trackOptionKey(track);
+    const dailyTrack = dailyByKey.get(key) || dailyByName.get(trackNameKey(track)) || null;
+    seen.add(key);
+    if (dailyTrack) seen.add(trackOptionKey(dailyTrack));
+
+    return {
+      ...track,
+      trackKey: key,
+      dailyTrackKey: dailyTrack ? trackOptionKey(dailyTrack) : null,
+      dailyValidLaps: Number(dailyTrack?.validLaps || 0),
+      dailyUserCount: Number(dailyTrack?.userCount || 0),
+      dailyBestLapTimeMs: dailyTrack?.bestLapTimeMs ?? null,
+      dailyBestLapTime: dailyTrack?.bestLapTime ?? "-",
+    };
+  });
+
+  for (const dailyTrack of dailyTracks) {
+    const key = trackOptionKey(dailyTrack);
+    if (seen.has(key)) continue;
+    options.push({
+      ...dailyTrack,
+      trackKey: key,
+      dailyTrackKey: key,
+      dailyValidLaps: Number(dailyTrack.validLaps || 0),
+      dailyUserCount: Number(dailyTrack.userCount || 0),
+      dailyBestLapTimeMs: dailyTrack.bestLapTimeMs ?? null,
+      dailyBestLapTime: dailyTrack.bestLapTime ?? "-",
+    });
+  }
+
+  return options.sort((a, b) => {
+    const aHasDaily = Number(a.dailyValidLaps || 0) > 0 ? 1 : 0;
+    const bHasDaily = Number(b.dailyValidLaps || 0) > 0 ? 1 : 0;
+    if (bHasDaily !== aHasDaily) return bHasDaily - aHasDaily;
+    return trackLabel(a).localeCompare(trackLabel(b));
+  });
+}
+
+function pickDailyLeader(payload, selectedTrackKey = "") {
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
   const tracks = Array.isArray(payload?.tracks) ? payload.tracks : [];
   const activeTrack =
-    payload?.activeTrack ||
+    tracks.find((track) => trackOptionKey(track) === selectedTrackKey) ||
+    (!selectedTrackKey ? payload?.activeTrack : null) ||
     tracks.find((track) => Number(track.validLaps || 0) > 0) ||
     tracks[0] ||
     null;
-  const activeTrackKey = activeTrack?.trackKey || payload?.activeTrackKey || null;
+  const activeTrackKey =
+    selectedTrackKey || trackOptionKey(activeTrack) || payload?.activeTrackKey || null;
   const scopedRows = activeTrackKey
-    ? rows.filter((row) => row.trackKey === activeTrackKey)
+    ? rows.filter((row) => trackOptionKey(row) === activeTrackKey)
     : rows;
-  const leader = sortLeaderboardRows(scopedRows.length ? scopedRows : rows)[0] || null;
+  const leader =
+    sortLeaderboardRows(scopedRows)[0] ||
+    (!selectedTrackKey ? sortLeaderboardRows(rows)[0] : null) ||
+    null;
   const leaderTrack =
     activeTrack ||
-    tracks.find((track) => track.trackKey === leader?.trackKey) ||
+    tracks.find((track) => trackOptionKey(track) === trackOptionKey(leader)) ||
     null;
 
   return { leader, track: leaderTrack };
 }
 
-async function fetchDailyLeaderboard(signal) {
+async function fetchLeaderboard(scope, signal) {
   const params = new URLSearchParams({
     limit: "100",
-    scope: "daily",
+    scope,
     scanLimit: "500",
     tzOffsetMinutes: String(getLocalTimezoneOffsetMinutes()),
   });
@@ -118,9 +192,17 @@ async function fetchDailyLeaderboard(signal) {
   });
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(data?.error || "Failed to load daily leaderboard.");
+    throw new Error(data?.error || `Failed to load ${scope} leaderboard.`);
   }
   return data;
+}
+
+async function fetchDailyLeaderboard(signal) {
+  return fetchLeaderboard("daily", signal);
+}
+
+async function fetchAllTimeLeaderboard(signal) {
+  return fetchLeaderboard("all", signal);
 }
 
 async function fetchPersonalSessions(signal) {
@@ -141,8 +223,14 @@ async function fetchPersonalSessions(signal) {
 export default function Dashboard({ currentUser }) {
   const [sessions, setSessions] = useState([]);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [allLeaderboard, setAllLeaderboard] = useState(null);
+  const [selectedDailyTrackKey, setSelectedDailyTrackKey] = useState("");
+  const [leaderDropdownOpen, setLeaderDropdownOpen] = useState(false);
+  const [leaderTrackSearch, setLeaderTrackSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const leaderDropdownRef = useRef(null);
+  const leaderSearchInputRef = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -153,14 +241,37 @@ export default function Dashboard({ currentUser }) {
         setLoading(true);
         setError("");
 
-        const [sessionList, dailyPayload] = await Promise.all([
+        const [sessionList, dailyPayload, allPayload] = await Promise.all([
           currentUser ? fetchPersonalSessions(controller.signal) : Promise.resolve([]),
           fetchDailyLeaderboard(controller.signal),
+          fetchAllTimeLeaderboard(controller.signal).catch((err) => {
+            console.warn("All-time leaderboard unavailable for dashboard track list:", err);
+            return null;
+          }),
         ]);
 
         if (cancelled) return;
         setSessions(sessionList);
         setLeaderboard(dailyPayload);
+        setAllLeaderboard(allPayload || dailyPayload);
+        setSelectedDailyTrackKey((current) => {
+          const options = mergeDailyTrackOptions(allPayload || dailyPayload, dailyPayload);
+          if (current && options.some((track) => track.trackKey === current)) {
+            return current;
+          }
+
+          const activeDailyKey = dailyPayload?.activeTrackKey || trackOptionKey(dailyPayload?.activeTrack);
+          const activeOption = options.find(
+            (track) => track.dailyTrackKey === activeDailyKey || track.trackKey === activeDailyKey
+          );
+
+          return (
+            activeOption?.trackKey ||
+            options.find((track) => Number(track.dailyValidLaps || 0) > 0)?.trackKey ||
+            options[0]?.trackKey ||
+            ""
+          );
+        });
       } catch (err) {
         if (cancelled || err?.name === "AbortError") return;
         console.error("Dashboard load error:", err);
@@ -178,11 +289,54 @@ export default function Dashboard({ currentUser }) {
     };
   }, [currentUser]);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (leaderDropdownRef.current && !leaderDropdownRef.current.contains(event.target)) {
+        setLeaderDropdownOpen(false);
+        setLeaderTrackSearch("");
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (leaderDropdownOpen && leaderSearchInputRef.current) {
+      leaderSearchInputRef.current.focus();
+    }
+  }, [leaderDropdownOpen]);
+
   const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
   const latestSession = displaySessions[0] || null;
-  const daily = useMemo(() => pickDailyLeader(leaderboard), [leaderboard]);
+  const dailyTrackOptions = useMemo(
+    () => mergeDailyTrackOptions(allLeaderboard, leaderboard),
+    [allLeaderboard, leaderboard]
+  );
+  const selectedDailyTrack = useMemo(
+    () =>
+      dailyTrackOptions.find((track) => track.trackKey === selectedDailyTrackKey) ||
+      dailyTrackOptions[0] ||
+      null,
+    [dailyTrackOptions, selectedDailyTrackKey]
+  );
+  const dailySelectionKey = selectedDailyTrack?.dailyTrackKey || selectedDailyTrackKey;
+  const daily = useMemo(
+    () => pickDailyLeader(leaderboard, dailySelectionKey),
+    [leaderboard, dailySelectionKey]
+  );
+  const filteredDailyTracks = useMemo(() => {
+    if (!leaderTrackSearch.trim()) return dailyTrackOptions;
+    const search = leaderTrackSearch.trim().toLowerCase();
+    return dailyTrackOptions.filter((track) =>
+      trackLabel(track).toLowerCase().includes(search)
+    );
+  }, [dailyTrackOptions, leaderTrackSearch]);
   const dailyLeader = daily.leader;
-  const dailyTrack = daily.track;
+  const dailyTrack = selectedDailyTrack || daily.track;
+  const selectedDailyTrackLabel = dailyTrack
+    ? `${trackLabel(dailyTrack)} (${dailyTrack.dailyUserCount ?? dailyTrack.userCount ?? 0})`
+    : "";
 
   return (
     <div className="page-container dashboard-page">
@@ -295,6 +449,74 @@ export default function Dashboard({ currentUser }) {
             <span className="dashboard-pill purple">Daily</span>
           </div>
 
+          {dailyTrackOptions.length > 0 && (
+            <div className="track-select-row dashboard-track-select" ref={leaderDropdownRef}>
+              <button
+                type="button"
+                className="track-dropdown-trigger"
+                onClick={() => {
+                  setLeaderDropdownOpen((prev) => !prev);
+                  setLeaderTrackSearch("");
+                }}
+                aria-haspopup="listbox"
+                aria-expanded={leaderDropdownOpen}
+              >
+                <span>{selectedDailyTrackLabel || "Select Track"}</span>
+                <svg className="track-dropdown-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+
+              {leaderDropdownOpen && (
+                <div className="track-dropdown-menu" role="listbox">
+                  <div className="track-dropdown-search-wrap">
+                    <input
+                      ref={leaderSearchInputRef}
+                      type="text"
+                      className="track-dropdown-search"
+                      placeholder="Search tracks..."
+                      value={leaderTrackSearch}
+                      onChange={(event) => setLeaderTrackSearch(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setLeaderDropdownOpen(false);
+                          setLeaderTrackSearch("");
+                        }
+                      }}
+                    />
+                  </div>
+                  <ul className="track-dropdown-list">
+                    {filteredDailyTracks.length === 0 && (
+                      <li className="track-dropdown-empty">No tracks found</li>
+                    )}
+                    {filteredDailyTracks.map((track) => {
+                      const isActive = track.trackKey === selectedDailyTrack?.trackKey;
+                      const driverCount = Number(track.dailyUserCount ?? track.userCount ?? 0);
+                      const lapCount = Number(track.dailyValidLaps ?? track.validLaps ?? 0);
+
+                      return (
+                        <li
+                          key={track.trackKey}
+                          role="option"
+                          aria-selected={isActive}
+                          className={isActive ? "track-dropdown-item active" : "track-dropdown-item"}
+                          onClick={() => {
+                            setSelectedDailyTrackKey(track.trackKey);
+                            setLeaderDropdownOpen(false);
+                            setLeaderTrackSearch("");
+                          }}
+                        >
+                          <span>{trackLabel(track)} ({driverCount})</span>
+                          <span className="dashboard-track-count">{lapCount} today</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {loading && !dailyLeader ? (
             <p className="muted-copy">Loading today&apos;s leader...</p>
           ) : dailyLeader ? (
@@ -323,7 +545,8 @@ export default function Dashboard({ currentUser }) {
           ) : (
             <>
               <p className="empty-state">
-                No valid daily laps yet. Once someone records a valid lap today, the leader appears here.
+                No valid daily laps yet for {dailyTrack ? trackLabel(dailyTrack) : "this track"}.
+                Once someone records a valid lap today, the leader appears here.
               </p>
               <Link className="dashboard-link-button" to="/leaderboard">
                 Open Leaderboard
