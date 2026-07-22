@@ -48,11 +48,24 @@ LATEST_REQUEST_TIMEOUT = (1.0, 2.0)
 SOCKET_TIMEOUT_SEC = 1.0
 SAMPLE_MIN_INTERVAL_SEC = 0.1
 CSV_FLUSH_EVERY_ROWS = 25
+PACKET_STATUS_EVERY_SEC = float(os.getenv("LISTENER_PACKET_STATUS_EVERY_SEC", "5.0"))
 
 BATCH_SIZE = 20
 TELEMETRY_BATCH = []
 
 PARTICIPANTS_PACKET_ID = 4
+
+PACKET_ID_LABELS = {
+    MOTION_PACKET_ID: "motion",
+    SESSION_PACKET_ID: "session",
+    LAP_DATA_PACKET_ID: "lap",
+    EVENT_PACKET_ID: "event",
+    PARTICIPANTS_PACKET_ID: "participants",
+    TELEMETRY_PACKET_ID: "telemetry",
+    CAR_STATUS_PACKET_ID: "car-status",
+    FINAL_CLASS_PACKET_ID: "final-classification",
+    SESSION_HISTORY_PACKET_ID: "session-history",
+}
 
 DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
@@ -232,6 +245,26 @@ def safe_enqueue(qobj, item):
 
 def iso_now():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+def packet_label(pid):
+    return PACKET_ID_LABELS.get(pid, f"packet-{pid}")
+
+def format_packet_counts(packet_counts):
+    if not packet_counts:
+        return "-"
+
+    ordered = sorted(packet_counts.items(), key=lambda item: item[1], reverse=True)
+    return ", ".join(
+        f"{packet_label(pid)}:{count}"
+        for pid, count in ordered[:8]
+    )
+
+def describe_header(header):
+    fmt = get_attr_loose(header, "packet_format", "packetFormat", "m_packetFormat", "mPacketFormat", default="?")
+    year = get_attr_loose(header, "game_year", "gameYear", "m_gameYear", "mGameYear", default="?")
+    version = get_attr_loose(header, "packet_version", "packetVersion", "m_packetVersion", "mPacketVersion", default="?")
+    pid = get_attr_loose(header, "packet_id", "packetId", "m_packetId", "mPacketId", default="?")
+    return f"format={fmt}, gameYear={year}, version={version}, packetId={pid}"
 
 def extract_track_info_from_session_packet(pkt):
     track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
@@ -590,6 +623,8 @@ CURRENT_GAME_SESSION_UID = None
 LAST_CLOSED_GAME_SESSION_UID = None
 LAST_CLOSED_SESSION_SIGNATURE = None
 LAST_CLOSED_SESSION_MONO = None
+LAST_SESSION_PACKET_SIGNATURE = None
+LAST_SESSION_PACKET_NOTICE_AT = 0.0
 
 STOP_EVENT = threading.Event()
 IDENTITY_LOCK = threading.Lock()
@@ -1374,6 +1409,7 @@ def get_lap_array(pkt):
 
 def handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_at):
     global TRACK_ID, TRACK_NAME, SESSION_TYPE, CURRENT_GAME_SESSION_UID
+    global LAST_SESSION_PACKET_SIGNATURE, LAST_SESSION_PACKET_NOTICE_AT
 
     if pid != SESSION_PACKET_ID or pkt_cls is None:
         return race_active, race_started_at
@@ -1387,6 +1423,20 @@ def handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_
     track_id, track_name = extract_track_info_from_session_packet(sess_pkt)
     game_session_uid = get_game_session_uid(header)
     is_active_game_session = is_game_session_packet(session_type, track_id)
+    session_signature = (session_type, track_id, track_name, is_active_game_session)
+    now = time.time()
+
+    if (
+        session_signature != LAST_SESSION_PACKET_SIGNATURE
+        or now - LAST_SESSION_PACKET_NOTICE_AT >= PACKET_STATUS_EVERY_SEC
+    ):
+        status = "active" if is_active_game_session else "ignored"
+        print(
+            "Session packet decoded:"
+            f" type={session_type}, track={track_name or track_id}, status={status}"
+        )
+        LAST_SESSION_PACKET_SIGNATURE = session_signature
+        LAST_SESSION_PACKET_NOTICE_AT = now
 
     if (
         SESSION_ID
@@ -2106,6 +2156,11 @@ def main():
     race_active = False
     race_started_at = None
     rows_buffer = []
+    packet_counts = {}
+    last_packet_seen_at = None
+    last_packet_status_at = time.time()
+    last_unknown_packet_notice_at = 0.0
+    last_telemetry_fallback_notice_at = 0.0
 
     try:
         with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
@@ -2143,6 +2198,22 @@ def main():
                 try:
                     data, addr = sock.recvfrom(4096)
                 except socket.timeout:
+                    now = time.time()
+                    if now - last_packet_status_at >= PACKET_STATUS_EVERY_SEC:
+                        if last_packet_seen_at is None:
+                            print(
+                                f"No F1 UDP packets received yet on port {UDP_PORT}. "
+                                "Check F1 25 Telemetry is On and UDP port is 20777."
+                            )
+                        else:
+                            print(
+                                "UDP packets are arriving, but no new packet landed in the last second. "
+                                f"Recent counts: {format_packet_counts(packet_counts)} | "
+                                f"backend session: {SESSION_ID or '-'}"
+                            )
+                            packet_counts.clear()
+                        last_packet_status_at = now
+
                     if (
                         SESSION_END_DETECTED_MONO is not None
                         and time.time() - SESSION_END_DETECTED_MONO >= SESSION_END_GRACE_PERIOD_SEC
@@ -2163,6 +2234,8 @@ def main():
                     continue
 
                 pid = int(get_attr_loose(header, "packet_id", "packetId", "mPacketId", "m_packetId", default=0) or 0)
+                packet_counts[pid] = packet_counts.get(pid, 0) + 1
+                last_packet_seen_at = time.time()
                 pkt_cls = pick_packet_class(header)
 
                 pkt = None
@@ -2171,6 +2244,12 @@ def main():
                         pkt = pkt_cls.from_buffer_copy(data)
                     except Exception:
                         pkt = None
+                elif time.time() - last_unknown_packet_notice_at >= PACKET_STATUS_EVERY_SEC:
+                    print(
+                        f"UDP packet received but parser has no class for {packet_label(pid)}. "
+                        f"Header: {describe_header(header)}"
+                    )
+                    last_unknown_packet_notice_at = time.time()
 
                 race_active, race_started_at = handle_session_packet(header, pid, data, pkt_cls, race_active, race_started_at)
                 race_active, race_started_at = handle_event_packet(pid, data, pkt_cls, race_active, race_started_at)
@@ -2190,6 +2269,16 @@ def main():
                     update_drs_status_from_packet(header, pkt)
 
                 if pid == TELEMETRY_PACKET_ID and pkt is not None:
+                    if not SESSION_ID:
+                        now = time.time()
+                        if now - last_telemetry_fallback_notice_at >= PACKET_STATUS_EVERY_SEC:
+                            print(
+                                "Telemetry packets are arriving before a backend session exists. "
+                                "Starting a session from telemetry fallback..."
+                            )
+                            last_telemetry_fallback_notice_at = now
+                        start_backend_session(get_game_session_uid(header))
+
                     post_telemetry_sample(header, pkt)
 
                     arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData")
@@ -2273,6 +2362,15 @@ def main():
                     if close_current_backend_session():
                         race_active = False
                         race_started_at = None
+
+                now = time.time()
+                if now - last_packet_status_at >= PACKET_STATUS_EVERY_SEC:
+                    print(
+                        f"UDP ok. Recent packets: {format_packet_counts(packet_counts)} | "
+                        f"backend session: {SESSION_ID or '-'}"
+                    )
+                    packet_counts.clear()
+                    last_packet_status_at = now
 
     except KeyboardInterrupt:
         print("\nStopped. Saving resources...")
