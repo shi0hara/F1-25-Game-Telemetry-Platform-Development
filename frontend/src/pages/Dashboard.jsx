@@ -180,14 +180,9 @@ export default function Dashboard({ currentUser }) {
 
   const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
   const latestSession = displaySessions[0] || null;
-  const activeSessionCount = useMemo(
-    () => sessions.filter((session) => isActiveSession(session)).length,
-    [sessions]
-  );
   const daily = useMemo(() => pickDailyLeader(leaderboard), [leaderboard]);
   const dailyLeader = daily.leader;
   const dailyTrack = daily.track;
-  const dailyMeta = leaderboard?.meta || {};
 
   return (
     <div className="page-container dashboard-page">
@@ -308,25 +303,6 @@ export default function Dashboard({ currentUser }) {
               </Link>
             </>
           )}
-        </div>
-      </div>
-
-      <div className="dashboard-stat-row">
-        <div>
-          <span>Active Sessions</span>
-          <strong>{currentUser ? activeSessionCount : "-"}</strong>
-        </div>
-        <div>
-          <span>Your Sessions</span>
-          <strong>{currentUser ? sessions.length : "-"}</strong>
-        </div>
-        <div>
-          <span>Daily Valid Laps</span>
-          <strong>{dailyMeta.validLaps ?? 0}</strong>
-        </div>
-        <div>
-          <span>Daily Tracks</span>
-          <strong>{dailyMeta.trackCount ?? leaderboard?.tracks?.length ?? 0}</strong>
         </div>
       </div>
 
