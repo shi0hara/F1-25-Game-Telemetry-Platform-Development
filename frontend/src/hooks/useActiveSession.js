@@ -9,6 +9,11 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import {
+  getUserDisplayName,
+  getUserId,
+  normalizeUsernameKey,
+} from "../utils/userIdentity";
 
 function toMillis(value) {
   if (!value) return 0;
@@ -98,9 +103,14 @@ function pickBestSession(sessions) {
   return sorted[0];
 }
 
-export default function useActiveSession(username) {
+export default function useActiveSession(userOrUsername) {
+  const knownUserId = useMemo(() => getUserId(userOrUsername), [userOrUsername]);
+  const username = useMemo(
+    () => getUserDisplayName(userOrUsername),
+    [userOrUsername]
+  );
   const normalizedUsername = useMemo(() => {
-    return String(username || "").trim().toLowerCase();
+    return normalizeUsernameKey(username);
   }, [username]);
 
   const [userId, setUserId] = useState(null);
@@ -120,6 +130,19 @@ export default function useActiveSession(username) {
     setSessionId(null);
     setSessionData(null);
     setSessions([]);
+
+    if (knownUserId) {
+      setUserId(knownUserId);
+      setUserData(
+        typeof userOrUsername === "object"
+          ? { ...userOrUsername, id: knownUserId }
+          : { id: knownUserId, username }
+      );
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (!normalizedUsername) {
       setLoading(false);
@@ -169,28 +192,28 @@ export default function useActiveSession(username) {
     return () => {
       cancelled = true;
     };
-  }, [normalizedUsername]);
+  }, [knownUserId, normalizedUsername, userOrUsername, username]);
 
   useEffect(() => {
-    if (normalizedUsername && !userId) {
+    if (!knownUserId && !normalizedUsername) {
+      setLoading(false);
+      setError("");
+      return;
+    }
+
+    if (!userId || (knownUserId && userId !== knownUserId)) {
       return;
     }
 
     setLoading(true);
     setError("");
 
-    const sessionsQuery = normalizedUsername
-      ? query(
-          collection(db, "sessions"),
-          where("userId", "==", userId),
-          orderBy("startedAt", "desc"),
-          limit(50)
-        )
-      : query(
-          collection(db, "sessions"),
-          orderBy("startedAt", "desc"),
-          limit(50)
-        );
+    const sessionsQuery = query(
+      collection(db, "sessions"),
+      where("userId", "==", userId),
+      orderBy("startedAt", "desc"),
+      limit(50)
+    );
 
     const unsubscribe = onSnapshot(
       sessionsQuery,
@@ -219,7 +242,7 @@ export default function useActiveSession(username) {
     );
 
     return unsubscribe;
-  }, [normalizedUsername, userId]);
+  }, [knownUserId, normalizedUsername, userId]);
 
   const activeTrackKey = useMemo(() => {
     return getTrackKeyFromSession(sessionData);

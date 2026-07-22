@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   collection,
+  doc,
+  getDoc,
   query,
   where,
   limit,
@@ -21,6 +23,7 @@ import {
   latestSessionId,
   sortSessionsForDisplay,
 } from "../utils/sessionUtils";
+import { normalizeUsernameKey } from "../utils/userIdentity";
 
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
 
@@ -126,7 +129,7 @@ function formatLapTime(ms) {
     .padStart(3, "0")}`;
 }
 
-export default function Profile({ username }) {
+export default function Profile({ username, currentUser }) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [error, setError] = useState("");
@@ -140,13 +143,66 @@ export default function Profile({ username }) {
   }, [favoriteTeam]);
 
   useEffect(() => {
-    if (!username) return;
+    if (!username && !currentUser?.id) return;
+
+    const applyResolvedProfile = (nextResolvedUser) => {
+      setResolvedUser(nextResolvedUser);
+      setError("");
+
+      const localProfile = loadLocalProfile(username || nextResolvedUser?.username);
+      const teamFromDb = nextResolvedUser.favoriteTeam || nextResolvedUser.favouriteTeam;
+      const photoFromDb = nextResolvedUser.profilePhoto || nextResolvedUser.profileImageOriginal;
+      const aiPhotoFromDb = nextResolvedUser.aiProfilePhoto || nextResolvedUser.profileImageAi;
+      const displayPhotoFromDb = nextResolvedUser.displayPhoto;
+
+      const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
+      const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
+      const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
+      const resolvedDisplayPhoto = displayPhotoFromDb || localProfile?.displayPhoto || "original";
+
+      setFavoriteTeam(resolvedTeam);
+
+      if (resolvedDisplayPhoto === "ai" && resolvedAiPhoto) {
+        setProfilePhoto(resolvedAiPhoto);
+      } else {
+        setProfilePhoto(resolvedPhoto);
+      }
+      setDisplayPhoto(resolvedDisplayPhoto);
+    };
 
     const resolveUser = async () => {
       try {
+        if (currentUser?.id) {
+          let nextResolvedUser = {
+            ...currentUser,
+            id: currentUser.id,
+          };
+
+          try {
+            const userSnap = await getDoc(doc(db, "users", currentUser.id));
+            if (userSnap.exists()) {
+              nextResolvedUser = {
+                id: userSnap.id,
+                ...userSnap.data(),
+              };
+            }
+          } catch (err) {
+            console.warn("Exact user lookup failed; using logged-in account.", err);
+          }
+
+          applyResolvedProfile(nextResolvedUser);
+          return;
+        }
+
+        const usernameKey = normalizeUsernameKey(username);
+        if (!usernameKey) {
+          setError("No user found for that username in database.");
+          return;
+        }
+
         const q = query(
           collection(db, "users"),
-          where("usernameLower", "==", username.trim().toLowerCase()),
+          where("usernameLower", "==", usernameKey),
           limit(1)
         );
 
@@ -158,33 +214,10 @@ export default function Profile({ username }) {
         }
 
         const userDoc = snap.docs[0];
-        const nextResolvedUser = {
+        applyResolvedProfile({
           id: userDoc.id,
           ...userDoc.data(),
-        };
-
-        setResolvedUser(nextResolvedUser);
-
-        const localProfile = loadLocalProfile(username);
-        const teamFromDb = nextResolvedUser.favoriteTeam || nextResolvedUser.favouriteTeam;
-        const photoFromDb = nextResolvedUser.profilePhoto || nextResolvedUser.profileImageOriginal;
-        const aiPhotoFromDb = nextResolvedUser.aiProfilePhoto || nextResolvedUser.profileImageAi;
-        const displayPhotoFromDb = nextResolvedUser.displayPhoto;
-
-        const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
-        const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
-        const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
-        const resolvedDisplayPhoto = displayPhotoFromDb || localProfile?.displayPhoto || "original";
-
-        setFavoriteTeam(resolvedTeam);
-
-        // Set the profile photo based on display preference
-        if (resolvedDisplayPhoto === "ai" && resolvedAiPhoto) {
-          setProfilePhoto(resolvedAiPhoto);
-        } else {
-          setProfilePhoto(resolvedPhoto);
-        }
-        setDisplayPhoto(resolvedDisplayPhoto);
+        });
       } catch (err) {
         console.error("User resolve error:", err);
         setError(err.message || "Failed to resolve user.");
@@ -192,7 +225,7 @@ export default function Profile({ username }) {
     };
 
     resolveUser();
-  }, [username]);
+  }, [username, currentUser]);
 
   useEffect(() => {
     if (!resolvedUser?.id) return;

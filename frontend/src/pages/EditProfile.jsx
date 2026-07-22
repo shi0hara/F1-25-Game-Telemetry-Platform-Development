@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   collection,
   doc,
+  getDoc,
   updateDoc,
   query,
   where,
@@ -13,6 +14,7 @@ import { db } from "../firebase";
 import { useAiRacingSuit } from "../hooks/useAiRacingSuit.js";
 import { validateImageFile } from "../services/fileValidator.js";
 import { downscaleForPersistence } from "../services/imageDownscaler.js";
+import { normalizeUsernameKey } from "../utils/userIdentity.js";
 import "./Profile.css";
 
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
@@ -178,7 +180,7 @@ async function buildAiOutfitImage(baseImageDataUrl, teamKey) {
   return downscaleToJpegDataUrlFromImage(canvas, 0.82);
 }
 
-export default function EditProfile({ username }) {
+export default function EditProfile({ username, currentUser }) {
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [resolvedUser, setResolvedUser] = useState(null);
@@ -229,13 +231,62 @@ export default function EditProfile({ username }) {
   }, [cameraActive]);
 
   useEffect(() => {
-    if (!username) return;
+    if (!username && !currentUser?.id) return;
+
+    const applyResolvedProfile = (nextResolvedUser) => {
+      setResolvedUser(nextResolvedUser);
+      setError("");
+
+      const localProfile = loadLocalProfile(username || nextResolvedUser?.username);
+      const teamFromDb = nextResolvedUser.favoriteTeam || nextResolvedUser.favouriteTeam;
+      const photoFromDb = nextResolvedUser.profilePhoto || nextResolvedUser.profileImageOriginal;
+      const aiPhotoFromDb = nextResolvedUser.aiProfilePhoto || nextResolvedUser.profileImageAi;
+
+      const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
+      const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
+      const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
+      const resolvedDisplayPhoto =
+        nextResolvedUser.displayPhoto || localProfile?.displayPhoto || "original";
+
+      setFavoriteTeam(resolvedTeam);
+      setProfilePhoto(resolvedPhoto);
+      setAiProfilePhoto(resolvedAiPhoto);
+      setDisplayPhoto(resolvedDisplayPhoto);
+    };
 
     const resolveUser = async () => {
       try {
+        if (currentUser?.id) {
+          let nextResolvedUser = {
+            ...currentUser,
+            id: currentUser.id,
+          };
+
+          try {
+            const userSnap = await getDoc(doc(db, "users", currentUser.id));
+            if (userSnap.exists()) {
+              nextResolvedUser = {
+                id: userSnap.id,
+                ...userSnap.data(),
+              };
+            }
+          } catch (err) {
+            console.warn("Exact user lookup failed; using logged-in account.", err);
+          }
+
+          applyResolvedProfile(nextResolvedUser);
+          return;
+        }
+
+        const usernameKey = normalizeUsernameKey(username);
+        if (!usernameKey) {
+          setError("No user found for that username in database.");
+          return;
+        }
+
         const q = query(
           collection(db, "users"),
-          where("usernameLower", "==", username.trim().toLowerCase()),
+          where("usernameLower", "==", usernameKey),
           limit(1)
         );
 
@@ -247,27 +298,10 @@ export default function EditProfile({ username }) {
         }
 
         const userDoc = snap.docs[0];
-        const nextResolvedUser = {
+        applyResolvedProfile({
           id: userDoc.id,
           ...userDoc.data(),
-        };
-
-        setResolvedUser(nextResolvedUser);
-
-        const localProfile = loadLocalProfile(username);
-        const teamFromDb = nextResolvedUser.favoriteTeam || nextResolvedUser.favouriteTeam;
-        const photoFromDb = nextResolvedUser.profilePhoto || nextResolvedUser.profileImageOriginal;
-        const aiPhotoFromDb = nextResolvedUser.aiProfilePhoto || nextResolvedUser.profileImageAi;
-
-        const resolvedTeam = teamFromDb || localProfile?.favoriteTeam || "ferrari";
-        const resolvedPhoto = photoFromDb || localProfile?.profilePhoto || "";
-        const resolvedAiPhoto = aiPhotoFromDb || localProfile?.aiProfilePhoto || "";
-        const resolvedDisplayPhoto = nextResolvedUser.displayPhoto || localProfile?.displayPhoto || "original";
-
-        setFavoriteTeam(resolvedTeam);
-        setProfilePhoto(resolvedPhoto);
-        setAiProfilePhoto(resolvedAiPhoto);
-        setDisplayPhoto(resolvedDisplayPhoto);
+        });
       } catch (err) {
         console.error("User resolve error:", err);
         setError(err.message || "Failed to resolve user.");
@@ -275,7 +309,7 @@ export default function EditProfile({ username }) {
     };
 
     resolveUser();
-  }, [username]);
+  }, [username, currentUser]);
 
   async function persistProfile(nextPayload) {
     setSavingProfile(true);

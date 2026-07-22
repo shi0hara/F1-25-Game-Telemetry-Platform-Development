@@ -100,7 +100,7 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
           path="/profile"
           element={
             <ProtectedRoute user={user}>
-              <Profile username={username} sessionId={sessionId} />
+              <Profile username={username} currentUser={user} sessionId={sessionId} />
             </ProtectedRoute>
           }
         />
@@ -108,7 +108,7 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
           path="/edit-profile"
           element={
             <ProtectedRoute user={user}>
-              <EditProfile username={username} />
+              <EditProfile username={username} currentUser={user} />
             </ProtectedRoute>
           }
         />
@@ -138,7 +138,7 @@ export default function App() {
   const [user, setUser] = useState(getStoredUser);
   const username = user?.username || null;
   const { sessionId, loading: sessionLoading, error: sessionError } =
-    useActiveSession(username);
+    useActiveSession(user);
 
   useEffect(() => {
     if (user) {
