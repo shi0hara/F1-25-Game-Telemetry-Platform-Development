@@ -212,6 +212,7 @@ Optional listener environment variables:
 | `LOCAL_PAIR_HOST` | Override local pairing host |
 | `LOCAL_PAIR_PORT` | Override local pairing port |
 | `LISTENER_RESET_CONFIG=1` | Ignore saved pairing config for one run |
+| `LISTENER_TRUST_SAVED_TOKEN=true` | Let listener immediately reuse a saved token on startup |
 | `ALLOW_MANUAL_LISTENER_LOGIN=true` | Re-enable terminal username/email prompts |
 
 ## Test Accounts

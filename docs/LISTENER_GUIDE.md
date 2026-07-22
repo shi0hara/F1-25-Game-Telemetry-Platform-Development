@@ -70,6 +70,15 @@ Preferred identity flow:
 5. Listener stores the token in `.listener-config.json`.
 6. Listener uses the token for future backend identity until logout/unpair.
 
+By default, the listener waits for the website to confirm the active account on startup. This avoids recording telemetry to an old account if the website was logged out while the listener was closed.
+
+If you want the listener to immediately reuse the last saved token on startup, run it with:
+
+```powershell
+$env:LISTENER_TRUST_SAVED_TOKEN="true"
+python .\revamp.py
+```
+
 Manual username/email prompts can be re-enabled only for debugging:
 
 ```powershell

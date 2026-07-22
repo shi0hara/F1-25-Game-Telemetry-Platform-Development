@@ -58,6 +58,12 @@ DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
 LISTENER_TOKEN = os.getenv("LISTENER_TOKEN") or os.getenv("F1_LISTENER_TOKEN")
 LISTENER_CONFIG_LOADED = False
+TRUST_SAVED_LISTENER_TOKEN = os.getenv("LISTENER_TRUST_SAVED_TOKEN", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 PLAYER_NAME_DETECTED = False
 
@@ -626,6 +632,14 @@ def clean_config_text(value):
     text = str(value).strip()
     return text or None
 
+def manual_listener_login_enabled():
+    return os.getenv("ALLOW_MANUAL_LISTENER_LOGIN", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
 def load_listener_config():
     global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, LISTENER_CONFIG_LOADED
 
@@ -652,8 +666,11 @@ def load_listener_config():
         DRIVER_USERNAME = clean_config_text(data.get("username"))
     if not DRIVER_EMAIL:
         DRIVER_EMAIL = clean_config_text(data.get("email"))
-    if not LISTENER_TOKEN:
-        LISTENER_TOKEN = clean_config_text(data.get("listenerToken"))
+    saved_token = clean_config_text(data.get("listenerToken"))
+    if not LISTENER_TOKEN and saved_token and TRUST_SAVED_LISTENER_TOKEN:
+        LISTENER_TOKEN = saved_token
+    elif saved_token and not TRUST_SAVED_LISTENER_TOKEN:
+        print("Saved listener token found. Waiting for website login to confirm the active account.")
 
 def save_listener_config():
     data = {}
@@ -862,11 +879,11 @@ def prompt_identity():
         print("Using saved listener token. The website account is already paired.")
         return
 
-    if DRIVER_USERNAME:
+    if DRIVER_USERNAME and manual_listener_login_enabled():
         print("Using saved listener username:", DRIVER_USERNAME)
         return
 
-    if os.getenv("ALLOW_MANUAL_LISTENER_LOGIN", "false").lower() in ("1", "true", "yes", "on"):
+    if manual_listener_login_enabled():
         if not DRIVER_USERNAME:
             DRIVER_USERNAME = input("Username: ").strip()
         if not DRIVER_EMAIL:
@@ -977,7 +994,7 @@ def ensure_user():
     while not STOP_EVENT.is_set():
         load_listener_config()
 
-        if not LISTENER_TOKEN and not DRIVER_USERNAME:
+        if not LISTENER_TOKEN and (not manual_listener_login_enabled() or not DRIVER_USERNAME):
             now = time.time()
             if now - last_wait_notice >= 5:
                 print("Waiting for website login to pair this listener...")

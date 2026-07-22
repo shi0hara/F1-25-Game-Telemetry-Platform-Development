@@ -157,7 +157,37 @@ export default function App() {
     const authToken = localStorage.getItem("f1AuthToken");
     if (!authToken) return;
 
-    pairLocalListenerAfterLogin({ user, authToken }).catch(() => {});
+    let cancelled = false;
+    let retryTimer = null;
+    let attempts = 0;
+
+    async function pairWithLocalListener() {
+      attempts += 1;
+      let paired = false;
+
+      try {
+        const result = await pairLocalListenerAfterLogin({ user, authToken });
+        paired = Boolean(result?.paired);
+      } catch {
+        if (cancelled) return;
+      }
+
+      if (cancelled) return;
+
+      if (paired) {
+        attempts = 0;
+      }
+
+      const retryDelayMs = paired ? 10000 : attempts < 8 ? 3000 : 10000;
+      retryTimer = window.setTimeout(pairWithLocalListener, retryDelayMs);
+    }
+
+    pairWithLocalListener();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
   }, [user]);
 
   const handleLogin = (nextUser, token) => {

@@ -6,6 +6,8 @@ test-webapp/node_modules/.cache/default-development/index.pack.old
 node_modules/
 **/node_modules/
 .cache/
+__pycache__/
+*.pyc
 .listener-config.json
 test-webapp/node_modules/.cache/.eslintcache
 test-webapp/node_modules/.cache/default-development/0.pack
