@@ -193,6 +193,33 @@ export default function Dashboard({ currentUser }) {
 
       {error && <p className="error-message">{error}</p>}
 
+      <div className="card dashboard-overview-card">
+        <div>
+          <h2>Platform Overview</h2>
+          <p className="muted-copy">
+            F1 telemetry sessions are recorded by the local listener, saved to Firebase, ranked by valid lap times, and prepared for post-session coaching.
+          </p>
+        </div>
+
+        <div className="dashboard-overview-grid">
+          <div>
+            <span>Recording</span>
+            <strong>Live telemetry</strong>
+            <p>Speed, throttle, brake, steering, RPM, gear, DRS, assists, lap trails, and sector data.</p>
+          </div>
+          <div>
+            <span>Leaderboard</span>
+            <strong>Valid laps only</strong>
+            <p>Daily, weekly, and all-time rankings use one best legitimate lap per driver per track.</p>
+          </div>
+          <div>
+            <span>Analysis</span>
+            <strong>Post-race review</strong>
+            <p>Session and lap pages expose maps, graphs, sector splits, and coaching-ready summaries.</p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid-2">
         <div className="card card-accent-blue dashboard-focus-card">
           <div className="split-head">
@@ -303,33 +330,6 @@ export default function Dashboard({ currentUser }) {
               </Link>
             </>
           )}
-        </div>
-      </div>
-
-      <div className="card dashboard-overview-card">
-        <div>
-          <h2>Platform Overview</h2>
-          <p className="muted-copy">
-            F1 telemetry sessions are recorded by the local listener, saved to Firebase, ranked by valid lap times, and prepared for post-session coaching.
-          </p>
-        </div>
-
-        <div className="dashboard-overview-grid">
-          <div>
-            <span>Recording</span>
-            <strong>Live telemetry</strong>
-            <p>Speed, throttle, brake, steering, RPM, gear, DRS, assists, lap trails, and sector data.</p>
-          </div>
-          <div>
-            <span>Leaderboard</span>
-            <strong>Valid laps only</strong>
-            <p>Daily, weekly, and all-time rankings use one best legitimate lap per driver per track.</p>
-          </div>
-          <div>
-            <span>Analysis</span>
-            <strong>Post-race review</strong>
-            <p>Session and lap pages expose maps, graphs, sector splits, and coaching-ready summaries.</p>
-          </div>
         </div>
       </div>
     </div>
