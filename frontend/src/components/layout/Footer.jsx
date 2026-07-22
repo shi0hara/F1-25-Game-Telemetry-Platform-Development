@@ -15,7 +15,7 @@ export default function Footer() {
           <div className="footer-links">
             <Link to="/contact" className="footer-link">Contact Us</Link>
             <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>About the Team</a>
-            <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Track Setup Database</a>
+            <Link to="/setup" className="footer-link">Track Setup Database</Link>
             <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>API Documentation</a>
             <a href="#" className="footer-link" onClick={(e) => e.preventDefault()}>Privacy Policy</a>
           </div>
