@@ -68,7 +68,7 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
   return (
     <div key={routeKey} className="route-transition-shell">
       <Routes location={location}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Dashboard currentUser={user} />} />
         <Route
           path="/login"
           element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" replace />}
