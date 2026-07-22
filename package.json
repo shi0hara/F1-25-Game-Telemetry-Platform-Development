@@ -1,4 +1,10 @@
 {
+  "name": "f1-telemetry-platform",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "install-frontend": "cd frontend && npm install"
+  },
   "dependencies": {
     "chart.js": "^4.5.1",
     "firebase": "^12.13.0",
