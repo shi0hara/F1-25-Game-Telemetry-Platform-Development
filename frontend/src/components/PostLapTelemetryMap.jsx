@@ -155,7 +155,7 @@ function solveBounds(worldBounds, imageWidth, imageHeight) {
       const xRatio = (number(worldX) - minX) / (maxX - minX);
       const zRatio = (number(worldZ) - minZ) / (maxZ - minZ);
       return {
-        x: padding + xRatio * (imageWidth - padding * 2),
+        x: padding + (1 - xRatio) * (imageWidth - padding * 2),
         y: padding + (1 - zRatio) * (imageHeight - padding * 2),
       };
     },

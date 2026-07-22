@@ -228,7 +228,7 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
       const zNorm = (num(worldZ) - minZ) / (maxZ - minZ);
 
       return {
-        x: xNorm * imageWidth,
+        x: (1 - xNorm) * imageWidth,
         y: (1 - zNorm) * imageHeight,
       };
     },
