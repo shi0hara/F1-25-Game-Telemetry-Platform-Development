@@ -6,7 +6,7 @@ export default function Footer() {
     <footer className="footer">
       <div className="footer-content">
         <div className="footer-section brand-section">
-          <h2><span className="text-primary">F1</span> Telemetry Plus</h2>
+          <h2><span className="text-primary">F1</span> Telemetry</h2>
           <p className="slogan">Fueling your potential, one lap at a time. The ultimate AI coaching and telemetry platform.</p>
         </div>
         
