@@ -22,10 +22,13 @@ import {
   isActiveSession,
   latestSessionId,
   sortSessionsForDisplay,
+  toMillis,
 } from "../utils/sessionUtils";
 import { normalizeUsernameKey } from "../utils/userIdentity";
 
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
+const MIN_VALID_LAP_MS = 10000;
+const MAX_VALID_LAP_MS = 600000;
 
 const TEAM_THEMES = {
   ferrari: {
@@ -110,28 +113,208 @@ function loadLocalProfile(username) {
 }
 
 function formatDate(value) {
-  if (!value) return "-";
-  const d =
-    typeof value === "string"
-      ? new Date(value)
-      : value?.toDate?.() || new Date(value);
-  if (Number.isNaN(d.getTime())) return "-";
+  const ms = toMillis(value);
+  if (!ms) return "-";
+  const d = new Date(ms);
   return d.toLocaleString();
 }
 
 function formatLapTime(ms) {
-  if (ms == null) return "-";
-  const minutes = Math.floor(ms / 60000);
-  const seconds = Math.floor((ms % 60000) / 1000);
-  const fraction = ms % 1000;
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  const minutes = Math.floor(value / 60000);
+  const seconds = Math.floor((value % 60000) / 1000);
+  const fraction = Math.trunc(value % 1000);
   return `${minutes}:${seconds.toString().padStart(2, "0")}.${fraction
     .toString()
     .padStart(3, "0")}`;
 }
 
+function numberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function positiveNumberOrNull(value) {
+  const n = numberOrNull(value);
+  return n !== null && n > 0 ? n : null;
+}
+
+function startOfCurrentWeekMs() {
+  const start = new Date();
+  const daysSinceMonday = (start.getDay() + 6) % 7;
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - daysSinceMonday);
+  return start.getTime();
+}
+
+function normalizedTrackKey(session, lap = {}) {
+  const trackKey = lap.trackKey || session.trackKey;
+  if (trackKey) return String(trackKey);
+  const trackId = lap.trackId ?? session.trackId;
+  if (trackId !== undefined && trackId !== null && trackId !== "") {
+    return `track_${trackId}`;
+  }
+
+  return String(lap.trackName || session.trackName || "unknown_track")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function sessionTotalLaps(session, laps) {
+  const summary = session.processedSummary || {};
+  const summaryTotal =
+    numberOrNull(summary.totalLaps) ??
+    numberOrNull(summary.lapCount) ??
+    numberOrNull(session.totalLaps) ??
+    numberOrNull(session.lapCount);
+  const lapDocTotal = Array.isArray(laps) ? laps.length : 0;
+
+  return Math.max(summaryTotal ?? 0, lapDocTotal);
+}
+
+function isValidLapForStats(lap) {
+  const lapTimeMs = Number(lap?.lapTimeMs);
+  return (
+    lap?.valid === true &&
+    Number.isFinite(lapTimeMs) &&
+    lapTimeMs >= MIN_VALID_LAP_MS &&
+    lapTimeMs <= MAX_VALID_LAP_MS
+  );
+}
+
+function summaryBestLapTimeMs(summary) {
+  return positiveNumberOrNull(
+    summary?.bestLapTimeMs ??
+      summary?.fastestLap?.lapTimeMs ??
+      summary?.fastestLap?.rawMs ??
+      summary?.bestLap?.lapTimeMs
+  );
+}
+
+function lapActivityMs(lap, session) {
+  return Math.max(
+    toMillis(lap?.recordedAt),
+    toMillis(lap?.completedAt),
+    toMillis(lap?.createdAt),
+    toMillis(getSessionEndedAt(session)),
+    toMillis(session?.latestTelemetryAt),
+    toMillis(session?.updatedAt),
+    toMillis(getSessionStartedAt(session))
+  );
+}
+
+function buildValidLapEntries(sessions, sessionLaps) {
+  const entries = [];
+
+  for (const session of sessions) {
+    const laps = sessionLaps[session.id];
+    const summary = session.processedSummary || {};
+
+    if (Array.isArray(laps) && laps.length > 0) {
+      laps.forEach((lap) => {
+        if (!isValidLapForStats(lap)) return;
+        entries.push({ lap, session });
+      });
+      continue;
+    }
+
+    const fallbackBestLapMs = summaryBestLapTimeMs(summary);
+
+    if (fallbackBestLapMs) {
+      entries.push({
+        lap: {
+          valid: true,
+          lapTimeMs: fallbackBestLapMs,
+          lapNumber: summary.fastestLap?.lapNumber ?? summary.bestLap?.lapNumber ?? null,
+          recordedAt: getSessionEndedAt(session) || getSessionStartedAt(session),
+        },
+        session,
+      });
+    }
+  }
+
+  return entries;
+}
+
+function calculateCoachingScore(totalLaps, validLapCount, validLapEntries) {
+  if (!totalLaps && !validLapCount) return null;
+
+  const validRatio = totalLaps > 0 ? Math.min(validLapCount / totalLaps, 1) : 0;
+  const times = validLapEntries
+    .map(({ lap }) => Number(lap.lapTimeMs))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const average = times.length
+    ? times.reduce((sum, value) => sum + value, 0) / times.length
+    : null;
+  const variance =
+    average && times.length > 1
+      ? times.reduce((sum, value) => sum + Math.pow(value - average, 2), 0) / times.length
+      : 0;
+  const consistency =
+    average && times.length > 2
+      ? Math.max(0, 1 - Math.min(Math.sqrt(variance) / average, 0.08) / 0.08)
+      : Math.min(validLapCount / 3, 1) * 0.7;
+  const dataDepth = Math.min(validLapCount / 15, 1);
+
+  return Math.round(validRatio * 45 + consistency * 35 + dataDepth * 20);
+}
+
+function buildCareerStats(sessions, sessionLaps) {
+  const weekStartMs = startOfCurrentWeekMs();
+  let totalLaps = 0;
+  let validLapCount = 0;
+  const trackKeys = new Set();
+  const weeklyTrackKeys = new Set();
+  const validLapEntries = buildValidLapEntries(sessions, sessionLaps);
+
+  for (const session of sessions) {
+    const laps = sessionLaps[session.id];
+    const summary = session.processedSummary || {};
+    totalLaps += sessionTotalLaps(session, laps);
+
+    const trackKey = normalizedTrackKey(session);
+    if (trackKey && trackKey !== "unknown_track") trackKeys.add(trackKey);
+
+    if (Array.isArray(laps) && laps.length > 0) {
+      validLapCount += laps.filter(isValidLapForStats).length;
+    } else {
+      validLapCount +=
+        numberOrNull(summary.validLapCount) ??
+        numberOrNull(summary.validLaps) ??
+        (summaryBestLapTimeMs(summary) ? 1 : 0);
+    }
+  }
+
+  for (const entry of validLapEntries) {
+    if (lapActivityMs(entry.lap, entry.session) >= weekStartMs) {
+      weeklyTrackKeys.add(normalizedTrackKey(entry.session, entry.lap));
+    }
+  }
+
+  const bestLap = [...validLapEntries].sort(
+    (a, b) => Number(a.lap.lapTimeMs) - Number(b.lap.lapTimeMs)
+  )[0];
+
+  return {
+    totalSessions: sessions.length,
+    totalLaps,
+    validLapCount,
+    weeklyLeaderboardAppearances: weeklyTrackKeys.size,
+    tracksDriven: trackKeys.size,
+    bestLapTimeMs: bestLap?.lap?.lapTimeMs ?? null,
+    bestLapTrack: bestLap?.session?.trackName || "Unknown Track",
+    aiCoachingScore: calculateCoachingScore(totalLaps, validLapCount, validLapEntries),
+  };
+}
+
 export default function Profile({ username, currentUser }) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
+  const [sessionLaps, setSessionLaps] = useState({});
+  const [careerStatsLoading, setCareerStatsLoading] = useState(false);
   const [error, setError] = useState("");
   const [resolvedUser, setResolvedUser] = useState(null);
   const [favoriteTeam, setFavoriteTeam] = useState("ferrari");
@@ -254,6 +437,71 @@ export default function Profile({ username, currentUser }) {
     return unsubscribe;
   }, [resolvedUser?.id]);
 
+  const careerLapFetchKey = useMemo(
+    () =>
+      sessions
+        .map((session) => {
+          const summary = session.processedSummary || {};
+          return [
+            session.id,
+            summary.totalLaps ?? "",
+            summary.validLapCount ?? summary.validLaps ?? "",
+            isActiveSession(session) ? "active" : "ended",
+          ].join(":");
+        })
+        .sort()
+        .join("|"),
+    [sessions]
+  );
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setSessionLaps({});
+      setCareerStatsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCareerLaps() {
+      setCareerStatsLoading(true);
+
+      try {
+        const entries = await Promise.all(
+          sessions.map(async (session) => {
+            try {
+              const lapsSnap = await getDocs(
+                collection(db, "sessions", session.id, "laps")
+              );
+              return [
+                session.id,
+                lapsSnap.docs.map((lapDoc) => ({
+                  id: lapDoc.id,
+                  ...lapDoc.data(),
+                })),
+              ];
+            } catch (err) {
+              console.warn("Career lap stats failed for session:", session.id, err);
+              return [session.id, null];
+            }
+          })
+        );
+
+        if (!cancelled) {
+          setSessionLaps(Object.fromEntries(entries));
+        }
+      } finally {
+        if (!cancelled) setCareerStatsLoading(false);
+      }
+    }
+
+    loadCareerLaps();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [careerLapFetchKey]);
+
   const profileThemeStyle = {
     "--profile-team-primary": activeTeamTheme.primary,
     "--profile-team-secondary": activeTeamTheme.secondary,
@@ -261,6 +509,10 @@ export default function Profile({ username, currentUser }) {
   };
   const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
   const latestId = useMemo(() => latestSessionId(sessions), [sessions]);
+  const careerStats = useMemo(
+    () => buildCareerStats(sessions, sessionLaps),
+    [sessions, sessionLaps]
+  );
 
   return (
     <div className="page-container profile-page" style={profileThemeStyle}>
@@ -298,10 +550,49 @@ export default function Profile({ username, currentUser }) {
         </div>
 
         <div className="card career-card">
-          <h2>Career Stats</h2>
-          <p>Total Laps Recorded: 1,204</p>
-          <p>Weekly Leaderboard Appearances: 4</p>
-          <p>AI Coaching Score: 85/100</p>
+          <div className="split-head">
+            <div>
+              <h2>Career Stats</h2>
+              {careerStatsLoading && (
+                <p className="career-stats-note">Updating stats...</p>
+              )}
+            </div>
+            <span className="session-pill latest">
+              {careerStats.totalSessions} sessions
+            </span>
+          </div>
+
+          <div className="career-stats-grid">
+            <div className="career-stat highlight">
+              <span>Total Laps Recorded</span>
+              <strong>{careerStats.totalLaps}</strong>
+            </div>
+            <div className="career-stat highlight">
+              <span>AI Coaching Score</span>
+              <strong>
+                {careerStats.aiCoachingScore === null
+                  ? "-"
+                  : `${careerStats.aiCoachingScore}/100`}
+              </strong>
+            </div>
+            <div className="career-stat">
+              <span>Weekly Leaderboard Appearances</span>
+              <strong>{careerStats.weeklyLeaderboardAppearances}</strong>
+            </div>
+            <div className="career-stat">
+              <span>Best Valid Lap</span>
+              <strong>{formatLapTime(careerStats.bestLapTimeMs)}</strong>
+              <small>{careerStats.bestLapTimeMs ? careerStats.bestLapTrack : "No valid lap yet"}</small>
+            </div>
+            <div className="career-stat">
+              <span>Valid Laps</span>
+              <strong>{careerStats.validLapCount}</strong>
+            </div>
+            <div className="career-stat">
+              <span>Tracks Driven</span>
+              <strong>{careerStats.tracksDriven}</strong>
+            </div>
+          </div>
         </div>
       </div>
 

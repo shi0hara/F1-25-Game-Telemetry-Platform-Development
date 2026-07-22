@@ -504,6 +504,64 @@
   border-left-color: var(--color-accent-yellow);
 }
 
+.career-card h2 {
+  margin: 0;
+}
+
+.career-stats-note {
+  margin: 5px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}
+
+.career-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.career-stat {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.career-stat.highlight {
+  border-color: color-mix(in srgb, var(--profile-team-accent) 44%, #ffffff 56%);
+  background: color-mix(in srgb, var(--profile-team-accent) 12%, transparent 88%);
+}
+
+.career-stat span {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.career-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: #fff;
+  font-family: var(--font-family-display);
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  letter-spacing: 0.04em;
+}
+
+.career-stat.highlight strong {
+  color: var(--profile-team-accent);
+}
+
+.career-stat small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
 .profile-listener-wrap {
   margin-top: 20px;
 }
@@ -600,5 +658,11 @@
   .profile-back-btn {
     min-width: 0;
     width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .career-stats-grid {
+    grid-template-columns: 1fr;
   }
 }
