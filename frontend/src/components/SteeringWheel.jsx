@@ -25,7 +25,7 @@ function formatPercent(value) {
   return Math.round(value * 100) + "%";
 }
 
-function PedalBar({ label, value, color }) {
+function PedalBar({ label, value, color, instant = false }) {
   const controlValue = readControlValue(value);
   const percent = (controlValue ?? 0) * 100;
 
@@ -59,7 +59,7 @@ function PedalBar({ label, value, color }) {
             minHeight: percent > 0 ? 3 : 0,
             background: color,
             boxShadow: percent > 0 ? "0 0 16px " + color : "none",
-            transition: "height 24ms linear",
+            transition: instant ? "none" : "height 24ms linear",
             willChange: "height",
           }}
         />
@@ -81,6 +81,7 @@ export default function SteeringWheel({
   label = "Steering Wheel",
   size = 150,
   maxRotationDeg = 220,
+  instant = false,
 }) {
   const value = readSteeringValue(steering);
   const safeValue = value ?? 0;
@@ -161,7 +162,7 @@ export default function SteeringWheel({
               height: "92%",
               transform: "rotate(" + rotation + "deg)",
               transformOrigin: "50% 50%",
-              transition: "transform 24ms linear",
+              transition: instant ? "none" : "transform 24ms linear",
               willChange: "transform",
             }}
           >
@@ -265,8 +266,8 @@ export default function SteeringWheel({
             gap: 8,
           }}
         >
-          <PedalBar label="THR" value={throttle} color="#22c55e" />
-          <PedalBar label="BRK" value={brake} color="#f87171" />
+          <PedalBar label="THR" value={throttle} color="#22c55e" instant={instant} />
+          <PedalBar label="BRK" value={brake} color="#f87171" instant={instant} />
         </div>
       </div>
 

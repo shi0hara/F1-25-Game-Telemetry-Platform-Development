@@ -803,6 +803,7 @@ export default function TrackTelemetryMap({
   mapImageUrl = "/maps/default-track.png",
   selectedTrailKey = "current",
   liveMapPosition = null,
+  liveMapPositionRef = null,
   onTrailOptionsChange,
 }) {
   const canvasRef = useRef(null);
@@ -815,6 +816,7 @@ export default function TrackTelemetryMap({
   const liveTrailActiveRef = useRef(false);
   const visualLivePointRef = useRef(null);
   const latestMapPositionRef = useRef(null);
+  const latestAppliedLiveRefSampleRef = useRef(null);
   const completedLapTrailsRef = useRef([]);
   const selectedTrailKeyRef = useRef(selectedTrailKey);
   const trailUiUpdateTimerRef = useRef(0);
@@ -884,6 +886,7 @@ export default function TrackTelemetryMap({
     liveTrailActiveRef.current = false;
     visualLivePointRef.current = null;
     latestMapPositionRef.current = null;
+    latestAppliedLiveRefSampleRef.current = null;
     completedLapTrailsRef.current = [];
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
@@ -1377,6 +1380,15 @@ export default function TrackTelemetryMap({
         return;
       }
 
+      const latestRefPosition = liveMapPositionRef?.current;
+      if (
+        latestRefPosition &&
+        latestRefPosition !== latestAppliedLiveRefSampleRef.current
+      ) {
+        latestAppliedLiveRefSampleRef.current = latestRefPosition;
+        applyLatestMapPosition(latestRefPosition);
+      }
+
       const centerline = Array.isArray(trackMap.centerline)
         ? trackMap.centerline
         : [];
@@ -1483,6 +1495,7 @@ export default function TrackTelemetryMap({
     mapImageError,
     imageWidth,
     imageHeight,
+    liveMapPositionRef,
   ]);
 
   return (

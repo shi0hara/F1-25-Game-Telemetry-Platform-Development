@@ -36,6 +36,7 @@ In F1 25:
 - UDP broadcast mode: Off for same PC, on only if needed for another machine.
 - UDP IP: `127.0.0.1` for same PC.
 - UDP port: `20777`.
+- UDP send rate/frequency: use the highest available setting for the most responsive live page.
 
 The listener itself binds to:
 
@@ -65,6 +66,8 @@ GET http://127.0.0.1:51377/live
 ```
 
 The frontend prefers `/live-stream`, which pushes samples immediately with server-sent events. `/live` remains a polling fallback. These local endpoints are used only when the local listener reports the same active `sessionId` as the page being viewed. Firestore/backend data remains the fallback and the source for saved history, lap analysis, leaderboard, and reports.
+
+During an active session, the Current Telemetry card shows the live data source and sample rate. For the most responsive display it should say `Local stream`; `Local poll` is acceptable fallback; `Cloud backup` means the page is using slower backend/Firestore updates.
 
 When the user logs in on the website, the website pairs the listener to that account automatically.
 

@@ -33,9 +33,15 @@ ChartJS.register(
 );
 
 const LIVE_GRAPH_WINDOW_MS = 5000;
-const LIVE_GRAPH_MAX_POINTS = 240;
-const LIVE_GRAPH_RENDER_TICK_MS = 33;
+const LIVE_GRAPH_MAX_POINTS = 600;
+const LIVE_GRAPH_RENDER_TICK_MS = 16;
 const LOCAL_LIVE_POLL_INTERVAL_MS = 16;
+const LIVE_FEED_LABELS = {
+  waiting: "Waiting",
+  stream: "Local stream",
+  poll: "Local poll",
+  cloud: "Cloud backup",
+};
 const LIVE_GRAPH_METRICS = [
   { key: "speedKph", label: "Speed", color: "#38bdf8", max: 360, unit: "km/h", defaultVisible: true },
   { key: "throttlePct", label: "Throttle", color: "#22c55e", max: 100, unit: "%", defaultVisible: true },
@@ -104,6 +110,9 @@ function readTelemetryFreshness(sample) {
   );
 
   return {
+    localSequence: Number.isFinite(Number(sample.localSequence ?? sample.liveSequence))
+      ? Number(sample.localSequence ?? sample.liveSequence)
+      : null,
     sampleIndex: Number.isFinite(Number(sample.sampleIndex ?? sample.i))
       ? Number(sample.sampleIndex ?? sample.i)
       : null,
@@ -121,7 +130,7 @@ function readTelemetryFreshness(sample) {
 function compareTelemetryFreshness(next, prev) {
   if (!prev) return 1;
 
-  for (const key of ["sampleIndex", "gameTimeMs", "timestampMs"]) {
+  for (const key of ["localSequence", "sampleIndex", "gameTimeMs", "timestampMs"]) {
     if (next[key] !== null && prev[key] !== null) {
       const diff = next[key] - prev[key];
       if (diff !== 0) return diff;
@@ -271,6 +280,28 @@ function liveGraphValueLabel(metric, raw) {
   }
 
   return value.toFixed(1) + (metric.unit ? " " + metric.unit : "");
+}
+
+function readLocalSequence(payload) {
+  const sequence = Number(payload?.sequence);
+  return Number.isFinite(sequence) ? sequence : null;
+}
+
+function getLiveFeedLabel(source) {
+  return LIVE_FEED_LABELS[source] || source || LIVE_FEED_LABELS.waiting;
+}
+
+function getLiveFeedColor(source, ageMs) {
+  if (source === "stream" && (ageMs == null || ageMs < 180)) return "#22c55e";
+  if (source === "poll" && (ageMs == null || ageMs < 300)) return "#facc15";
+  if (source === "cloud") return "#94a3b8";
+  return "#f87171";
+}
+
+function formatFeedAge(ageMs) {
+  if (ageMs == null) return "-";
+  if (ageMs < 1000) return `${Math.round(ageMs)} ms`;
+  return `${(ageMs / 1000).toFixed(1)} s`;
 }
 
 function buildLiveGraphDatasetPoints(metric, visiblePoints, renderClockMs) {
@@ -558,26 +589,66 @@ export default function LiveSessionTelemetryPanel({
     mergeFreshLiveTelemetry(session)
   );
   const [liveGraphPoints, setLiveGraphPoints] = useState([]);
+  const [liveFeedStatus, setLiveFeedStatus] = useState({
+    source: "waiting",
+    hz: 0,
+    ageMs: null,
+  });
   const [selectedTrailKey, setSelectedTrailKey] = useState("current");
   const [mapTrailState, setMapTrailState] = useState(() =>
     createEmptyMapTrailState()
   );
   const lastTelemetryFreshnessRef = useRef(null);
   const lastLiveGraphPointRef = useRef(null);
+  const liveTelemetryRef = useRef(mergeFreshLiveTelemetry(session));
+  const telemetryFrameRef = useRef(0);
   const liveGraphPointsRef = useRef([]);
   const graphFlushTimerRef = useRef(0);
   const streamHealthyRef = useRef(false);
   const lastStreamSampleAtRef = useRef(0);
+  const liveFeedStatsRef = useRef({
+    source: "waiting",
+    count: 0,
+    windowStartedAt: 0,
+    lastAt: 0,
+    hz: 0,
+  });
 
   function resetLiveGraphTrace() {
     lastTelemetryFreshnessRef.current = null;
     lastLiveGraphPointRef.current = null;
     liveGraphPointsRef.current = [];
+    liveTelemetryRef.current = null;
+    if (telemetryFrameRef.current) {
+      window.cancelAnimationFrame(telemetryFrameRef.current);
+      telemetryFrameRef.current = 0;
+    }
     if (graphFlushTimerRef.current) {
       window.clearTimeout(graphFlushTimerRef.current);
       graphFlushTimerRef.current = 0;
     }
+    liveFeedStatsRef.current = {
+      source: "waiting",
+      count: 0,
+      windowStartedAt: 0,
+      lastAt: 0,
+      hz: 0,
+    };
     setLiveGraphPoints([]);
+    setLiveFeedStatus({
+      source: "waiting",
+      hz: 0,
+      ageMs: null,
+    });
+  }
+
+  function scheduleTelemetryFlush() {
+    if (telemetryFrameRef.current) return;
+
+    telemetryFrameRef.current = window.requestAnimationFrame(() => {
+      telemetryFrameRef.current = 0;
+      setSelectedTelemetry(liveTelemetryRef.current);
+    });
   }
 
   function scheduleGraphFlush() {
@@ -610,11 +681,56 @@ export default function LiveSessionTelemetryPanel({
     scheduleGraphFlush();
   }
 
-  function applyLocalLivePayload(payload) {
+  function markLiveFeed(source) {
+    const now = window.performance.now();
+    const current = liveFeedStatsRef.current;
+    const sourceChanged = current.source !== source;
+    const windowElapsed = current.windowStartedAt
+      ? now - current.windowStartedAt
+      : 0;
+
+    if (sourceChanged || !current.windowStartedAt || windowElapsed >= 1000) {
+      const hz =
+        !sourceChanged && current.count > 0 && windowElapsed > 0
+          ? (current.count * 1000) / windowElapsed
+          : 0;
+      liveFeedStatsRef.current = {
+        source,
+        count: 1,
+        windowStartedAt: now,
+        lastAt: now,
+        hz,
+      };
+      setLiveFeedStatus({
+        source,
+        hz,
+        ageMs: 0,
+      });
+      return;
+    }
+
+    liveFeedStatsRef.current = {
+      ...current,
+      count: current.count + 1,
+      lastAt: now,
+    };
+  }
+
+  function applyLocalLivePayload(payload, source = "poll") {
     if (!payload || payload.sessionId !== session?.id) return false;
 
-    const latestTelemetry = mergeFreshLiveTelemetry(payload);
-    if (!latestTelemetry) return false;
+    const mergedTelemetry = mergeFreshLiveTelemetry(payload);
+    if (!mergedTelemetry) return false;
+
+    markLiveFeed(source);
+
+    const localSequence = readLocalSequence(payload);
+    const latestTelemetry = {
+      ...mergedTelemetry,
+      ...(localSequence == null ? {} : { localSequence }),
+      liveFeedSource: source,
+      liveUpdatedAt: payload.updatedAt || mergedTelemetry.timestamp,
+    };
 
     const freshness = readTelemetryFreshness(latestTelemetry);
     const freshnessDelta = compareTelemetryFreshness(
@@ -625,8 +741,11 @@ export default function LiveSessionTelemetryPanel({
     if (freshnessDelta <= 0) return true;
 
     lastTelemetryFreshnessRef.current = freshness;
-    setSelectedTelemetry(latestTelemetry);
-    appendLiveGraphPoint(latestTelemetry, freshness);
+    liveTelemetryRef.current = latestTelemetry;
+    scheduleTelemetryFlush();
+    if (!latestTelemetry.motionOnly) {
+      appendLiveGraphPoint(latestTelemetry, freshness);
+    }
     return true;
   }
 
@@ -635,12 +754,14 @@ export default function LiveSessionTelemetryPanel({
     setSelectedTrailKey("current");
     setMapTrailState(createEmptyMapTrailState());
     setLiveSession(session || null);
-    setSelectedTelemetry(mergeFreshLiveTelemetry(session));
+    liveTelemetryRef.current = mergeFreshLiveTelemetry(session);
+    setSelectedTelemetry(liveTelemetryRef.current);
   }, [session?.id]);
 
   useEffect(() => {
     if (!session?.id) {
       setLiveSession(null);
+      liveTelemetryRef.current = null;
       setSelectedTelemetry(null);
       return;
     }
@@ -649,7 +770,23 @@ export default function LiveSessionTelemetryPanel({
 
     if (!latestTelemetry) {
       setLiveSession(session);
+      liveTelemetryRef.current = null;
       setSelectedTelemetry(null);
+      return;
+    }
+
+    if (
+      streamHealthyRef.current &&
+      window.performance.now() - lastStreamSampleAtRef.current < 750
+    ) {
+      setLiveSession((current) => {
+        if (!current || current.id !== session.id) return session;
+        return {
+          ...session,
+          latestTelemetry: current.latestTelemetry,
+          latestMapPosition: current.latestMapPosition,
+        };
+      });
       return;
     }
 
@@ -672,11 +809,17 @@ export default function LiveSessionTelemetryPanel({
     }
 
     setLiveSession(session);
-    setSelectedTelemetry(latestTelemetry);
+    liveTelemetryRef.current = latestTelemetry;
+    scheduleTelemetryFlush();
 
     if (freshnessDelta > 0) {
       lastTelemetryFreshnessRef.current = freshness;
-      appendLiveGraphPoint(latestTelemetry, freshness);
+      if (!streamHealthyRef.current) {
+        markLiveFeed("cloud");
+      }
+      if (!latestTelemetry.motionOnly) {
+        appendLiveGraphPoint(latestTelemetry, freshness);
+      }
     }
   }, [session]);
 
@@ -693,6 +836,17 @@ export default function LiveSessionTelemetryPanel({
     return () => window.clearInterval(trimTimer);
   }, [session?.id]);
 
+  useEffect(() => {
+    return () => {
+      if (telemetryFrameRef.current) {
+        window.cancelAnimationFrame(telemetryFrameRef.current);
+      }
+      if (graphFlushTimerRef.current) {
+        window.clearTimeout(graphFlushTimerRef.current);
+      }
+    };
+  }, []);
+
   const selectedSessionActive = isActiveSession(liveSession || session);
 
   useEffect(() => {
@@ -704,7 +858,7 @@ export default function LiveSessionTelemetryPanel({
     const subscription = subscribeLocalListenerLive({
       onSample(payload) {
         if (payload?.sessionId !== session.id) return;
-        if (applyLocalLivePayload(payload)) {
+        if (applyLocalLivePayload(payload, "stream")) {
           streamHealthyRef.current = true;
           lastStreamSampleAtRef.current = window.performance.now();
         }
@@ -749,7 +903,7 @@ export default function LiveSessionTelemetryPanel({
       try {
         const payload = await getLocalListenerLiveSample(140);
         if (cancelled) return;
-        failureCount = applyLocalLivePayload(payload) ? 0 : Math.min(failureCount + 1, 10);
+        failureCount = applyLocalLivePayload(payload, "poll") ? 0 : Math.min(failureCount + 1, 10);
       } catch {
         if (!cancelled) {
           failureCount = Math.min(failureCount + 1, 10);
@@ -775,6 +929,19 @@ export default function LiveSessionTelemetryPanel({
       if (timerId) window.clearTimeout(timerId);
     };
   }, [selectedSessionActive, session?.id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const stats = liveFeedStatsRef.current;
+      setLiveFeedStatus((current) => ({
+        source: stats.source || current.source,
+        hz: stats.hz ?? current.hz,
+        ageMs: stats.lastAt ? window.performance.now() - stats.lastAt : null,
+      }));
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const lapOptions = useMemo(() => {
     if (mapTrailState.options.length > 0) {
@@ -830,7 +997,51 @@ export default function LiveSessionTelemetryPanel({
 
       <div className="grid-2" style={{ marginBottom: 20 }}>
         <div className="card">
-          <h2>Current Telemetry</h2>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <h2 style={{ marginBottom: 0 }}>Current Telemetry</h2>
+            <span
+              title="Shows whether this page is using the instant local listener stream, local polling, or slower cloud backup data."
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 9px",
+                borderRadius: 999,
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.05)",
+                color: "#e5e7eb",
+                fontSize: 12,
+                fontWeight: 800,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
+                  boxShadow:
+                    "0 0 12px " +
+                    getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
+                }}
+              />
+              {getLiveFeedLabel(liveFeedStatus.source)}
+              {" | "}
+              {liveFeedStatus.hz > 0 ? liveFeedStatus.hz.toFixed(0) : "-"} Hz
+              {" | "}
+              {formatFeedAge(liveFeedStatus.ageMs)}
+            </span>
+          </div>
 
           {selectedTelemetry ? (
             <div
@@ -846,6 +1057,7 @@ export default function LiveSessionTelemetryPanel({
                 throttle={selectedThrottlePct}
                 brake={selectedBrakePct}
                 label="Live Steering"
+                instant
                 size={152}
               />
               <div
@@ -917,6 +1129,7 @@ export default function LiveSessionTelemetryPanel({
             mapImageUrl={mapImageUrl}
             selectedTrailKey={activeTrailKey}
             liveMapPosition={liveMapPosition}
+            liveMapPositionRef={liveTelemetryRef}
             onTrailOptionsChange={setMapTrailState}
           />
         ) : (

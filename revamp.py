@@ -633,6 +633,7 @@ LOCAL_LIVE_LOCK = threading.Lock()
 LOCAL_LIVE_CONDITION = threading.Condition(LOCAL_LIVE_LOCK)
 LOCAL_LIVE_SAMPLE = None
 LOCAL_LIVE_UPDATED_AT = None
+LOCAL_LIVE_SEQUENCE = 0
 LOCAL_LIVE_STREAM_HEARTBEAT_SEC = 2.0
 
 LATEST_QUEUE = queue.Queue(maxsize=1)
@@ -758,15 +759,16 @@ def listener_auth_headers():
     return {"x-listener-token": LISTENER_TOKEN}
 
 def update_local_live_sample(sample_body):
-    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT, LOCAL_LIVE_SEQUENCE
 
     with LOCAL_LIVE_CONDITION:
+        LOCAL_LIVE_SEQUENCE += 1
         LOCAL_LIVE_SAMPLE = dict(sample_body or {})
         LOCAL_LIVE_UPDATED_AT = iso_now()
         LOCAL_LIVE_CONDITION.notify_all()
 
 def update_local_live_motion_position(header=None):
-    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT, LOCAL_LIVE_SEQUENCE
 
     if CURRENT_WORLD_X is None or CURRENT_WORLD_Z is None:
         return
@@ -774,6 +776,7 @@ def update_local_live_motion_position(header=None):
     sample_timestamp = iso_now()
 
     with LOCAL_LIVE_CONDITION:
+        LOCAL_LIVE_SEQUENCE += 1
         sample = dict(LOCAL_LIVE_SAMPLE or {})
         sample.update({
             "timestamp": sample_timestamp,
@@ -795,9 +798,10 @@ def update_local_live_motion_position(header=None):
         LOCAL_LIVE_UPDATED_AT = sample_timestamp
         LOCAL_LIVE_CONDITION.notify_all()
 
-def build_local_live_payload(sample, updated_at):
+def build_local_live_payload(sample, updated_at, sequence):
     return {
         "ok": True,
+        "sequence": sequence,
         "paired": bool(LISTENER_TOKEN or USER_ID),
         "username": DRIVER_USERNAME,
         "email": DRIVER_EMAIL,
@@ -813,8 +817,9 @@ def get_local_live_payload():
     with LOCAL_LIVE_LOCK:
         sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
         updated_at = LOCAL_LIVE_UPDATED_AT
+        sequence = LOCAL_LIVE_SEQUENCE
 
-    return build_local_live_payload(sample, updated_at)
+    return build_local_live_payload(sample, updated_at, sequence)
 
 def resolve_listener_token(token):
     global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, USER_ID
@@ -856,6 +861,7 @@ def resolve_listener_token(token):
 
 class ListenerPairingHandler(BaseHTTPRequestHandler):
     server_version = "F1TelemetryListener/1.0"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         return
@@ -886,6 +892,11 @@ class ListenerPairingHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     def stream_local_live(self):
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+
         self.send_response(200)
         self.send_cors_headers()
         self.send_header("Content-Type", "text/event-stream")
@@ -894,30 +905,32 @@ class ListenerPairingHandler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
-        last_updated_at = None
+        last_sequence = None
 
         try:
             payload = get_local_live_payload()
-            last_updated_at = payload.get("updatedAt")
+            last_sequence = payload.get("sequence")
             self.write_sse_event("status", payload)
 
             while not STOP_EVENT.is_set():
                 with LOCAL_LIVE_CONDITION:
                     LOCAL_LIVE_CONDITION.wait_for(
-                        lambda: LOCAL_LIVE_UPDATED_AT != last_updated_at or STOP_EVENT.is_set(),
+                        lambda: LOCAL_LIVE_SEQUENCE != last_sequence or STOP_EVENT.is_set(),
                         timeout=LOCAL_LIVE_STREAM_HEARTBEAT_SEC,
                     )
                     sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
                     updated_at = LOCAL_LIVE_UPDATED_AT
+                    sequence = LOCAL_LIVE_SEQUENCE
 
-                if updated_at and updated_at != last_updated_at:
-                    last_updated_at = updated_at
-                    self.write_sse_event("live", build_local_live_payload(sample, updated_at))
+                if sequence != last_sequence:
+                    last_sequence = sequence
+                    self.write_sse_event("live", build_local_live_payload(sample, updated_at, sequence))
                 else:
                     self.write_sse_event("heartbeat", {
                         "ok": True,
                         "sessionId": SESSION_ID,
-                        "updatedAt": last_updated_at,
+                        "updatedAt": updated_at,
+                        "sequence": last_sequence,
                     })
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return
@@ -1208,7 +1221,7 @@ def reset_session_end_state():
 
 
 def reset_runtime_state_for_session(reset_assists=True):
-    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT, LOCAL_LIVE_SEQUENCE
     global LAST_SAMPLE_TIMESTAMP, LAST_SAMPLE_SENT_AT
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
     global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR, CURRENT_PIT_STATUS
@@ -1228,9 +1241,11 @@ def reset_runtime_state_for_session(reset_assists=True):
     TELEMETRY_BATCH.clear()
     SENT_LAP_HISTORY_SET.clear()
     LAST_HISTORY_NUM_LAPS = 0
-    with LOCAL_LIVE_LOCK:
+    with LOCAL_LIVE_CONDITION:
+        LOCAL_LIVE_SEQUENCE += 1
         LOCAL_LIVE_SAMPLE = None
-        LOCAL_LIVE_UPDATED_AT = None
+        LOCAL_LIVE_UPDATED_AT = iso_now()
+        LOCAL_LIVE_CONDITION.notify_all()
 
     LAST_SAMPLE_TIMESTAMP = None
     LAST_SAMPLE_SENT_AT = 0.0
