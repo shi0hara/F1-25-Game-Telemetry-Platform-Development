@@ -1,4 +1,4 @@
-// Mock setup data for F1 25 tracks
+﻿// Mock setup data for F1 25 tracks
 // This data structure represents real F1 25 setup values and field names
 // Setup data covers all tracks available in the project's TRACK_ID_TO_NAME mapping
 
@@ -13,7 +13,6 @@ export const SETUP_DATA = {
       rearWing: { value: 15, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 55, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 30, min: 0, max: 100 },
     },
@@ -50,7 +49,6 @@ export const SETUP_DATA = {
       rearWing: { value: 23, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 53, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 45, min: 0, max: 100 },
     },
@@ -87,7 +85,6 @@ export const SETUP_DATA = {
       rearWing: { value: 33, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 25, min: 0, max: 100 },
     },
@@ -124,7 +121,6 @@ export const SETUP_DATA = {
       rearWing: { value: 30, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 54, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -161,7 +157,6 @@ export const SETUP_DATA = {
       rearWing: { value: 50, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 15, min: 0, max: 100 },
     },
@@ -198,7 +193,6 @@ export const SETUP_DATA = {
       rearWing: { value: 25, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 51, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 15, min: 0, max: 100 },
     },
@@ -235,7 +229,6 @@ export const SETUP_DATA = {
       rearWing: { value: 17, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 25, min: 0, max: 100 },
     },
@@ -272,7 +265,6 @@ export const SETUP_DATA = {
       rearWing: { value: 50, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 65, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 30, min: 0, max: 100 },
     },
@@ -309,7 +301,6 @@ export const SETUP_DATA = {
       rearWing: { value: 0, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 58, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -346,7 +337,6 @@ export const SETUP_DATA = {
       rearWing: { value: 0, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -383,7 +373,6 @@ export const SETUP_DATA = {
       rearWing: { value: 47, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 66, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 15, min: 0, max: 100 },
     },
@@ -420,7 +409,6 @@ export const SETUP_DATA = {
       rearWing: { value: 29, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 54, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 30, min: 0, max: 100 },
     },
@@ -457,7 +445,6 @@ export const SETUP_DATA = {
       rearWing: { value: 33, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 53, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 30, min: 0, max: 100 },
     },
@@ -494,7 +481,6 @@ export const SETUP_DATA = {
       rearWing: { value: 38, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 52, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -531,7 +517,6 @@ export const SETUP_DATA = {
       rearWing: { value: 34, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 56, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 15, min: 0, max: 100 },
     },
@@ -568,7 +553,6 @@ export const SETUP_DATA = {
       rearWing: { value: 33, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 25, min: 0, max: 100 },
     },
@@ -605,7 +589,6 @@ export const SETUP_DATA = {
       rearWing: { value: 34, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 60, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 35, min: 0, max: 100 },
     },
@@ -642,7 +625,6 @@ export const SETUP_DATA = {
       rearWing: { value: 12, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 35, min: 0, max: 100 },
     },
@@ -679,7 +661,6 @@ export const SETUP_DATA = {
       rearWing: { value: 50, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 62, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -716,7 +697,6 @@ export const SETUP_DATA = {
       rearWing: { value: 35, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 58, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 45, min: 0, max: 100 },
     },
@@ -753,7 +733,6 @@ export const SETUP_DATA = {
       rearWing: { value: 10, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 51, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 55, min: 0, max: 100 },
     },
@@ -790,7 +769,6 @@ export const SETUP_DATA = {
       rearWing: { value: 12, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 52, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 50, min: 0, max: 100 },
     },
@@ -827,7 +805,6 @@ export const SETUP_DATA = {
       rearWing: { value: 0, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 50, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 20, min: 0, max: 100 },
     },
@@ -864,7 +841,6 @@ export const SETUP_DATA = {
       rearWing: { value: 35, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 52, min: 50, max: 100 },
       onThrottle: { value: 100, min: 10, max: 100 },
       offThrottle: { value: 25, min: 0, max: 100 },
     },
