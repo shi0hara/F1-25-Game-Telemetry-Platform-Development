@@ -83,9 +83,9 @@ The website still cannot receive F1 UDP telemetry directly. The local listener r
 
 ## Live Telemetry
 
-Route: `/live`
+Routes: `/live` for the session list, `/session/:sessionId` for live details.
 
-Live telemetry shows the selected session in real time.
+The Live nav item opens the session list. Selecting an active session opens the session live page, which shows telemetry in real time. Once the session ends, the same session page becomes the post-session review.
 
 Main live values:
 
@@ -107,7 +107,7 @@ Live graph:
 - Shows a rolling view of the newest five seconds of telemetry.
 - Uses the same toggleable overlay style as post-session graphs.
 - Supports Speed, Throttle, Brake, RPM, Gear, and DRS visibility toggles.
-- Uses the latest session snapshot path so the graph stays focused on current telemetry rather than historical playback.
+- Uses the local listener `/live` stream when the active session ID matches, with Firestore session snapshots as the saved/fallback state.
 
 Live session list behavior:
 

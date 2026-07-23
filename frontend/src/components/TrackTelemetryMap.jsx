@@ -8,6 +8,10 @@ import {
   query,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import {
+  isLapDistanceReset,
+  trimFutureLapPointsOnReset,
+} from "../utils/lapResetTrim";
 import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 function clamp(value, min, max) {
@@ -263,7 +267,8 @@ function drawTextBadge(ctx, text, x, y) {
 
 const MAP_TELEPORT_JUMP_METERS = 180;
 const LIVE_MAP_FETCH_INTERVAL_MS = 150;
-const LIVE_MAP_VISUAL_LERP = 0.62;
+const LIVE_MAP_VISUAL_LERP = 1;
+const LIVE_MAP_TRAIL_UI_UPDATE_MS = 80;
 
 function worldDistanceMeters(a, b) {
   if (!a || !b || !hasNumber(a.worldX) || !hasNumber(a.worldZ) || !hasNumber(b.worldX) || !hasNumber(b.worldZ)) {
@@ -293,11 +298,7 @@ function isTeleportJump(previous, current) {
     return true;
   }
 
-  if (
-    hasNumber(previous.lapDistance) &&
-    hasNumber(current.lapDistance) &&
-    Number(current.lapDistance) + 25 < Number(previous.lapDistance)
-  ) {
+  if (isLapDistanceReset(previous, current)) {
     return true;
   }
 
@@ -609,9 +610,10 @@ function readStoredMapPoint(sample) {
 }
 
 function normalizeTrailPoints(points) {
-  const sorted = [...(points || [])]
-    .filter((point) => point && !isPitMapSample(point))
-    .sort(compareMapPoints);
+  const trimmed = trimFutureLapPointsOnReset(
+    (points || []).filter((point) => point && !isPitMapSample(point))
+  );
+  const sorted = [...trimmed].sort(compareMapPoints);
   const next = [];
 
   for (const point of sorted) {
@@ -653,9 +655,9 @@ function normalizeLapTrailsFromApi(lapTrails, maxPointsPerLap = 900) {
 
     const key = getLapTrailKey(lapNumber);
     const existing = byLap.get(key);
-    const partPoints = normalizeTrailPoints(points).map((point, index) => ({
+    const partPoints = points.map((point) => ({
       ...point,
-      segmentBreakBefore: Boolean(existing && index === 0),
+      segmentBreakBefore: Boolean(point.segmentBreakBefore),
     }));
 
     if (!existing) {
@@ -734,7 +736,7 @@ function downsampleTrailPoints(points, maxPoints = 400) {
 function buildLapTrailsFromStoredPoints(points, maxPointsPerLap = 400) {
   const grouped = new Map();
 
-  for (const point of [...points].sort(compareMapPoints)) {
+  for (const point of points) {
     if (point.lapNumber == null || isPitMapSample(point)) continue;
 
     const key = getLapTrailKey(point.lapNumber);
@@ -812,9 +814,12 @@ export default function TrackTelemetryMap({
   const latestLivePointFreshnessRef = useRef(null);
   const liveTrailActiveRef = useRef(false);
   const visualLivePointRef = useRef(null);
+  const latestMapPositionRef = useRef(null);
+  const completedLapTrailsRef = useRef([]);
+  const selectedTrailKeyRef = useRef(selectedTrailKey);
+  const trailUiUpdateTimerRef = useRef(0);
 
   const [trackMap, setTrackMap] = useState(null);
-  const [sessionMap, setSessionMap] = useState(null);
   const [currentLapTrail, setCurrentLapTrail] = useState([]);
   const [currentLapNumber, setCurrentLapNumber] = useState(null);
   const [completedLapTrails, setCompletedLapTrails] = useState([]);
@@ -822,6 +827,28 @@ export default function TrackTelemetryMap({
   const [error, setError] = useState(null);
   const [mapImage, setMapImage] = useState(null);
   const [mapImageError, setMapImageError] = useState(null);
+
+  selectedTrailKeyRef.current = selectedTrailKey;
+
+  function publishCurrentTrailState(immediate = false) {
+    if (immediate) {
+      if (trailUiUpdateTimerRef.current) {
+        window.clearTimeout(trailUiUpdateTimerRef.current);
+        trailUiUpdateTimerRef.current = 0;
+      }
+      setCurrentLapTrail([...currentLapTrailRef.current]);
+      setCurrentLapNumber(currentLapNumberRef.current);
+      return;
+    }
+
+    if (trailUiUpdateTimerRef.current) return;
+
+    trailUiUpdateTimerRef.current = window.setTimeout(() => {
+      trailUiUpdateTimerRef.current = 0;
+      setCurrentLapTrail([...currentLapTrailRef.current]);
+      setCurrentLapNumber(currentLapNumberRef.current);
+    }, LIVE_MAP_TRAIL_UI_UPDATE_MS);
+  }
 
   function saveCompletedLap(lapNumber, points) {
     if (lapNumber == null || !Array.isArray(points) || points.length < 2) {
@@ -840,16 +867,24 @@ export default function TrackTelemetryMap({
 
     setCompletedLapTrails((prev) => {
       const withoutCurrentLap = prev.filter((item) => item.key !== trail.key);
-      return [...withoutCurrentLap, trail].sort((a, b) => a.lapNumber - b.lapNumber);
+      const next = [...withoutCurrentLap, trail].sort((a, b) => a.lapNumber - b.lapNumber);
+      completedLapTrailsRef.current = next;
+      return next;
     });
   }
 
   function resetLapTrails() {
+    if (trailUiUpdateTimerRef.current) {
+      window.clearTimeout(trailUiUpdateTimerRef.current);
+      trailUiUpdateTimerRef.current = 0;
+    }
     currentLapTrailRef.current = [];
     currentLapNumberRef.current = null;
     latestLivePointFreshnessRef.current = null;
     liveTrailActiveRef.current = false;
     visualLivePointRef.current = null;
+    latestMapPositionRef.current = null;
+    completedLapTrailsRef.current = [];
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
     setCompletedLapTrails([]);
@@ -872,7 +907,9 @@ export default function TrackTelemetryMap({
       }
     }
 
-    return [...byKey.values()].sort((a, b) => a.lapNumber - b.lapNumber);
+    const next = [...byKey.values()].sort((a, b) => a.lapNumber - b.lapNumber);
+    completedLapTrailsRef.current = next;
+    return next;
   }
 
   function appendToCurrentLapTrail(latest) {
@@ -887,15 +924,22 @@ export default function TrackTelemetryMap({
       return;
     }
 
+    if (last && isLapDistanceReset(last, latest)) {
+      const next = normalizeTrailPoints([...old, latest]).slice(-1600);
+      currentLapTrailRef.current = next;
+      publishCurrentTrailState(true);
+      return;
+    }
+
     if (last && isTeleportJump(last, latest)) {
       currentLapTrailRef.current = [latest];
-      setCurrentLapTrail([latest]);
+      publishCurrentTrailState(true);
       return;
     }
 
     const next = [...old, latest].slice(-1600);
     currentLapTrailRef.current = next;
-    setCurrentLapTrail(next);
+    publishCurrentTrailState(false);
   }
 
   function applyLatestMapPosition(latest, nextSessionMap = null) {
@@ -921,7 +965,9 @@ export default function TrackTelemetryMap({
           latest
         )
       ) {
-        if (nextSessionMap) setSessionMap(nextSessionMap);
+        if (nextSessionMap) {
+          latestMapPositionRef.current = nextSessionMap.latestMapPosition || latestMapPositionRef.current;
+        }
         return;
       }
 
@@ -929,7 +975,7 @@ export default function TrackTelemetryMap({
         latestLivePointFreshnessRef.current = freshness;
       }
 
-      setSessionMap((prev) => nextSessionMap || { ...(prev || {}), latestMapPosition: latest });
+      latestMapPositionRef.current = latest;
 
       const previousLapNumber = currentLapNumberRef.current;
       const nextLapNumber = getLapNumber(latest, previousLapNumber);
@@ -948,6 +994,7 @@ export default function TrackTelemetryMap({
 
         currentLapTrailRef.current = [];
         currentLapNumberRef.current = nextLapNumber;
+        publishCurrentTrailState(true);
         setCurrentLapNumber(nextLapNumber);
       }
 
@@ -957,13 +1004,12 @@ export default function TrackTelemetryMap({
     }
 
     if (nextSessionMap) {
-      setSessionMap(nextSessionMap);
+      latestMapPositionRef.current = nextSessionMap.latestMapPosition || latestMapPositionRef.current;
     }
   }
 
   useEffect(() => {
     resetLapTrails();
-    setSessionMap(null);
   }, [sessionId]);
 
   useEffect(() => {
@@ -1250,38 +1296,43 @@ export default function TrackTelemetryMap({
     onTrailOptionsChange,
   ]);
 
-  const selectedCompletedTrail = useMemo(() => {
-    return (
-      completedLapTrails.find((trail) => trail.key === selectedTrailKey) || null
-    );
-  }, [completedLapTrails, selectedTrailKey]);
+  function getDisplayedTrailSnapshot() {
+    const completedTrails = completedLapTrailsRef.current;
+    const selectedKey = selectedTrailKeyRef.current;
+    const currentTrail = currentLapTrailRef.current;
+    const currentLap = currentLapNumberRef.current;
+    const selectedCompletedTrail =
+      completedTrails.find((trail) => trail.key === selectedKey) || null;
+    const fallbackCompletedTrail = completedTrails[0] || null;
+    const activeTrailKey =
+      selectedKey === "current" || selectedCompletedTrail
+        ? selectedKey
+        : fallbackCompletedTrail?.key || "current";
+    const activeCompletedTrail =
+      activeTrailKey === "current"
+        ? null
+        : selectedCompletedTrail || fallbackCompletedTrail;
+    const shouldUseLiveTrailForSelectedLap =
+      activeCompletedTrail?.lapNumber === currentLap &&
+      currentTrail.length > (activeCompletedTrail?.points?.length || 0);
+    const trail =
+      activeTrailKey === "current"
+        ? currentTrail
+        : shouldUseLiveTrailForSelectedLap
+          ? currentTrail
+          : activeCompletedTrail?.points || [];
+    const label =
+      activeTrailKey === "current"
+        ? currentLap == null
+          ? "Current Lap Trail"
+          : `Current Lap ${currentLap} Trail`
+        : activeCompletedTrail?.label || "Saved Lap Trail";
 
-  const fallbackCompletedTrail = completedLapTrails[0] || null;
-  const activeTrailKey =
-    selectedTrailKey === "current" || selectedCompletedTrail
-      ? selectedTrailKey
-      : fallbackCompletedTrail?.key || "current";
-  const activeCompletedTrail =
-    activeTrailKey === "current"
-      ? null
-      : selectedCompletedTrail || fallbackCompletedTrail;
-  const shouldUseLiveTrailForSelectedLap =
-    activeCompletedTrail?.lapNumber === currentLapNumber &&
-    currentLapTrail.length > (activeCompletedTrail?.points?.length || 0);
-
-  const displayedTrail =
-    activeTrailKey === "current"
-      ? currentLapTrail
-      : shouldUseLiveTrailForSelectedLap
-        ? currentLapTrail
-        : activeCompletedTrail?.points || [];
-
-  const selectedTrailLabel =
-    activeTrailKey === "current"
-      ? currentLapNumber == null
-        ? "Current Lap Trail"
-        : `Current Lap ${currentLapNumber} Trail`
-      : activeCompletedTrail?.label || "Saved Lap Trail";
+    return {
+      label,
+      trail,
+    };
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1360,18 +1411,20 @@ export default function TrackTelemetryMap({
         ctx.restore();
       }
 
-      drawSmoothTelemetryTrail(ctx, displayedTrail, transform);
+      const displayed = getDisplayedTrailSnapshot();
+
+      drawSmoothTelemetryTrail(ctx, displayed.trail, transform);
 
       drawTextBadge(
         ctx,
-        `${selectedTrailLabel} (${displayedTrail.length} points)`,
+        `${displayed.label} (${displayed.trail.length} points)`,
         20,
         52
       );
 
       const latest = getVisualLivePoint(
         visualLivePointRef,
-        sessionMap?.latestMapPosition
+        latestMapPositionRef.current
       );
 
       if (
@@ -1426,9 +1479,6 @@ export default function TrackTelemetryMap({
   }, [
     trackMap,
     transform,
-    displayedTrail,
-    selectedTrailLabel,
-    sessionMap,
     mapImage,
     mapImageError,
     imageWidth,

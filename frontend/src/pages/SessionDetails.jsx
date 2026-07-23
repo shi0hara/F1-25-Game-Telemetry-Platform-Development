@@ -12,12 +12,10 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
-import TrackTelemetryMap from "../components/TrackTelemetryMap";
-import TelemetryChart from "../components/TelemetryChart";
-import SteeringWheel from "../components/SteeringWheel";
+import LiveSessionTelemetryPanel from "../components/LiveSessionTelemetryPanel";
 import AssistIcons from "../components/AssistIcons";
+import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
 import {
-  formatSessionFlag,
   getSessionEndedAt,
   getSessionStartedAt,
   getTrackKeyFromSession,
@@ -388,8 +386,9 @@ function normalizeSessionTracesForGraph(traces) {
   const lapNumbers = [...byLap.keys()].sort((a, b) => a - b);
 
   for (const lapNumber of lapNumbers) {
+    const resetTrimmedSamples = trimFutureLapPointsOnReset(byLap.get(lapNumber) || []);
     const samples = dedupeGraphLapSamples(
-      [...(byLap.get(lapNumber) || [])].sort(compareGraphSamples)
+      [...resetTrimmedSamples].sort(compareGraphSamples)
     );
 
     for (const sample of samples) {
@@ -617,105 +616,14 @@ function RaceTelemetryGraph({ traces }) {
 
 function LiveSessionPanel({ session }) {
   const trackKey = getTrackKeyFromSession(session);
-  const telemetry = session?.latestTelemetry || {};
 
   return (
-    <>
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <div>
-            <h2 style={{ margin: 0 }}>Live Session</h2>
-            <p style={{ color: "#94a3b8", margin: "4px 0 0" }}>
-              This session is still active, so this page follows the current telemetry.
-            </p>
-          </div>
-          <Link
-            to={`/live?session=${encodeURIComponent(session.id)}`}
-            style={{
-              color: "white",
-              textDecoration: "none",
-              border: "1px solid rgba(255,255,255,0.18)",
-              borderRadius: 8,
-              padding: "8px 12px",
-              background: "rgba(255,255,255,0.05)",
-            }}
-          >
-            Open Full Live View
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid-2" style={{ marginBottom: 20 }}>
-        <div className="card">
-          <h2>Current Telemetry</h2>
-          {session.latestTelemetry ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
-              <SteeringWheel
-                steering={telemetry.steering}
-                throttle={telemetry.throttle}
-                brake={telemetry.brake}
-                label="Live Steering"
-                size={152}
-              />
-              <div style={{ display: "grid", gap: 8 }}>
-                <p><strong>Speed:</strong> {telemetry.speedKph ?? 0} km/h</p>
-                <p><strong>Gear:</strong> {telemetry.gear ?? "-"}</p>
-                <p><strong>RPM:</strong> {telemetry.rpm ?? telemetry.engineRPM ?? "-"}</p>
-                <p><strong>Lap:</strong> {telemetry.lapNumber ?? "-"}</p>
-                <p><strong>DRS:</strong> {telemetry.drs ? "On" : "Off"}</p>
-              </div>
-            </div>
-          ) : (
-            <p style={{ color: "#94a3b8" }}>Waiting for live telemetry samples.</p>
-          )}
-        </div>
-
-        <div className="card">
-          <h2>Session Info</h2>
-          <p><strong>Driver:</strong> {session.username || "-"}</p>
-          <p><strong>Track:</strong> {session.trackName || "-"}</p>
-          <p><strong>Custom Setup:</strong> {formatSessionFlag(session.customSetup)}</p>
-          <p><strong>Equal Performance:</strong> {formatSessionFlag(session.equalPerformance)}</p>
-          <p><strong>Started:</strong> {formatDateTime(getSessionStartedAt(session))}</p>
-          <p><strong>Ended:</strong> {formatDateTime(getSessionEndedAt(session))}</p>
-          <p><strong>Latest update:</strong> {formatDateTime(session.latestTelemetryAt || session.updatedAt)}</p>
-        </div>
-      </div>
-
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2>Live Map</h2>
-        {trackKey ? (
-          <TrackTelemetryMap
-            apiBase={API_BASE}
-            sessionId={session.id}
-            trackKey={trackKey}
-            mapImageUrl={getDefaultMapImage(trackKey)}
-          />
-        ) : (
-          <p style={{ color: "#94a3b8" }}>No track key found for this session.</p>
-        )}
-      </div>
-
-      <div className="card">
-        <h2>Lap Timing</h2>
-        <TelemetryChart apiBase={API_BASE} sessionId={session.id} />
-      </div>
-    </>
+    <LiveSessionTelemetryPanel
+      session={session}
+      apiBase={API_BASE}
+      trackKey={trackKey}
+      mapImageUrl={getDefaultMapImage(trackKey)}
+    />
   );
 }
 
@@ -1017,10 +925,10 @@ export default function SessionDetails() {
         </div>
 
         <Link
-          to="/profile"
+          to="/live"
           className="analysis-back-link"
         >
-          Back to Profile
+          Back to Sessions
         </Link>
       </div>
 

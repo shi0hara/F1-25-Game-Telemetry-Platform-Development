@@ -12,6 +12,7 @@ import {
 import { Line } from "react-chartjs-2";
 import PostLapTelemetryMap from "../components/PostLapTelemetryMap";
 import SteeringWheel from "../components/SteeringWheel";
+import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
 
 ChartJS.register(
   CategoryScale,
@@ -975,7 +976,11 @@ export default function LapPerformanceAnalysis() {
     };
   }, [lapId, sessionId]);
 
-  const traces = data?.traces || [];
+  const rawTraces = data?.traces || [];
+  const traces = useMemo(
+    () => trimFutureLapPointsOnReset(rawTraces),
+    [rawTraces]
+  );
   const labels = useMemo(() => {
     return traces.map((sample, index) => {
       if (Number.isFinite(Number(sample.distanceM))) {

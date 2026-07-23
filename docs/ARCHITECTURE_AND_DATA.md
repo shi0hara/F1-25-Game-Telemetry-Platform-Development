@@ -394,7 +394,7 @@ Used for:
 F1 25 UDP packet
   -> revamp.py decodes packet
   -> local listener /live exposes newest sample to same-PC frontend
-  -> live page uses /live when active sessionId matches
+  -> session live page uses /live when active sessionId matches
 
 F1 25 UDP packet
   -> revamp.py decodes packet

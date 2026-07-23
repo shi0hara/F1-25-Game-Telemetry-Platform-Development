@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
 import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 function hasNumber(value) {
@@ -265,6 +266,10 @@ export default function PostLapTelemetryMap({
   const [trackMap, setTrackMap] = useState(null);
   const [mapImage, setMapImage] = useState(null);
   const [error, setError] = useState("");
+  const mapTraces = useMemo(
+    () => trimFutureLapPointsOnReset(traces),
+    [traces]
+  );
 
   useEffect(() => {
     if (!apiBase || !trackKey) {
@@ -329,22 +334,22 @@ export default function PostLapTelemetryMap({
     return (
       solveAffine(trackMap?.imageCalibration?.anchorPoints) ||
       solveBounds(
-        trackMap?.worldBounds || boundsFromTraces(traces),
+        trackMap?.worldBounds || boundsFromTraces(mapTraces),
         imageWidth,
         imageHeight
       )
     );
-  }, [imageHeight, imageWidth, traces, trackMap]);
+  }, [imageHeight, imageWidth, mapTraces, trackMap]);
 
   const positionedSamples = useMemo(
     () =>
-      traces
+      mapTraces
         .map((sample, index) => ({ sample, index }))
         .filter(
           ({ sample }) =>
             hasNumber(sample.worldX) && hasNumber(sample.worldZ)
         ),
-    [traces]
+    [mapTraces]
   );
 
   useEffect(() => {
@@ -399,7 +404,7 @@ export default function PostLapTelemetryMap({
       }
 
       for (const boundary of sectorBoundaries) {
-        const sample = traces[boundary.index];
+        const sample = mapTraces[boundary.index];
         if (!sample || !hasNumber(sample.worldX) || !hasNumber(sample.worldZ)) continue;
         const pos = transform.worldToImage(sample.worldX, sample.worldZ);
         ctx.beginPath();
@@ -414,9 +419,9 @@ export default function PostLapTelemetryMap({
 
       const fallbackIndex = positionedSamples[positionedSamples.length - 1]?.index;
       const activePosition = Number.isFinite(Number(activeIndex))
-        ? Math.max(0, Math.min(Number(activeIndex), traces.length - 1))
+        ? Math.max(0, Math.min(Number(activeIndex), mapTraces.length - 1))
         : fallbackIndex;
-      const markerSample = interpolateMapSample(traces, activePosition);
+      const markerSample = interpolateMapSample(mapTraces, activePosition);
       if (
         markerSample &&
         hasNumber(markerSample.worldX) &&
@@ -424,7 +429,7 @@ export default function PostLapTelemetryMap({
       ) {
         const pos = transform.worldToImage(markerSample.worldX, markerSample.worldZ);
         const headingSample =
-          interpolateMapSample(traces, Math.min(Number(activePosition) + 0.85, traces.length - 1)) ||
+          interpolateMapSample(mapTraces, Math.min(Number(activePosition) + 0.85, mapTraces.length - 1)) ||
           markerSample;
         const nextPos =
           hasNumber(headingSample.worldX) && hasNumber(headingSample.worldZ)
@@ -474,9 +479,9 @@ export default function PostLapTelemetryMap({
     imageHeight,
     imageWidth,
     mapImage,
+    mapTraces,
     positionedSamples,
     sectorBoundaries,
-    traces,
     trackMap,
     transform,
   ]);
