@@ -78,41 +78,40 @@ export const SETUP_DATA = {
     },
   },
   "track_3": { // Sakhir (Bahrain)
-    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
-    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
-    // timestamps tried; this is a permanent gap in archive coverage.
+    // Real Ferrari Time Trial setup (1:27.482, Dry), sourced from
+    // simracingsetup.com/setups/f1-25-setups/bahrain-grand-prix-2025-ferrari-dry-127-482/
     trackName: "Sakhir (Bahrain)",
     setupType: "Dry Setup",
     aerodynamics: {
-      frontWing: { value: 12, min: 0, max: 50 },
-      rearWing: { value: 18, min: 0, max: 50 },
+      frontWing: { value: 38, min: 0, max: 50 },
+      rearWing: { value: 33, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 52, min: 50, max: 100 },
-      onThrottle: { value: 65, min: 10, max: 100 },
-      offThrottle: { value: 55, min: 50, max: 100 },
+      differential: { value: 50, min: 50, max: 100 },
+      onThrottle: { value: 100, min: 10, max: 100 },
+      offThrottle: { value: 25, min: 0, max: 100 },
     },
     suspensionGeometry: {
-      frontCamber: { value: -3.0, min: -3.5, max: -2.5 },
-      rearCamber: { value: -1.2, min: -2.0, max: -1.0 },
-      frontToe: { value: 0.06, min: 0, max: 0.2 },
-      rearToe: { value: 0.28, min: 0.1, max: 0.25 },
+      frontCamber: { value: -3.5, min: -3.5, max: -2.5 },
+      rearCamber: { value: -2.0, min: -2.0, max: -1.0 },
+      frontToe: { value: 0, min: 0, max: 0.2 },
+      rearToe: { value: 0.1, min: 0.1, max: 0.25 },
     },
     suspension: {
-      frontSuspension: { value: 3, min: 1, max: 11 },
-      rearSuspension: { value: 2, min: 1, max: 41 },
-      frontAntiRollBar: { value: 2, min: 1, max: 21 },
-      rearAntiRollBar: { value: 4, min: 1, max: 21 },
-      frontRideHeight: { value: 22, min: 15, max: 35 },
-      rearRideHeight: { value: 38, min: 40, max: 60 },
+      frontSuspension: { value: 41, min: 1, max: 41 },
+      rearSuspension: { value: 8, min: 1, max: 41 },
+      frontAntiRollBar: { value: 12, min: 1, max: 21 },
+      rearAntiRollBar: { value: 21, min: 1, max: 21 },
+      frontRideHeight: { value: 20, min: 15, max: 35 },
+      rearRideHeight: { value: 46, min: 40, max: 60 },
     },
     brakes: {
-      brakePressure: { value: 95, min: 80, max: 100 },
-      brakeBias: { value: 56, min: 50, max: 70 },
+      brakePressure: { value: 100, min: 80, max: 100 },
+      brakeBias: { value: 53, min: 50, max: 70 },
     },
     tyres: {
-      frontTyrePressure: { value: 24.0, min: 22.5, max: 29.5 },
-      rearTyrePressure: { value: 22.5, min: 20.5, max: 26.5 },
+      frontTyrePressure: { value: 29.5, min: 22.5, max: 29.5 },
+      rearTyrePressure: { value: 20.5, min: 20.5, max: 26.5 },
     },
   },
   "track_4": { // Catalunya
@@ -153,41 +152,40 @@ export const SETUP_DATA = {
     },
   },
   "track_5": { // Monaco
-    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
-    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
-    // timestamps tried; this is a permanent gap in archive coverage.
+    // Real Ferrari Time Trial setup (1:09.191, Dry), sourced from
+    // simracingsetup.com/setups/f1-25-setups/monaco-grand-prix-2025-ferrari-dry-109-191/
     trackName: "Monaco",
     setupType: "Dry Setup",
     aerodynamics: {
-      frontWing: { value: 42, min: 0, max: 50 },
-      rearWing: { value: 48, min: 0, max: 50 },
+      frontWing: { value: 50, min: 0, max: 50 },
+      rearWing: { value: 50, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 68, min: 50, max: 100 },
-      onThrottle: { value: 80, min: 10, max: 100 },
-      offThrottle: { value: 72, min: 50, max: 100 },
+      differential: { value: 50, min: 50, max: 100 },
+      onThrottle: { value: 100, min: 10, max: 100 },
+      offThrottle: { value: 15, min: 0, max: 100 },
     },
     suspensionGeometry: {
-      frontCamber: { value: -2.5, min: -3.5, max: -2.5 },
-      rearCamber: { value: -1.0, min: -2.0, max: -1.0 },
-      frontToe: { value: 0.12, min: 0, max: 0.2 },
-      rearToe: { value: 0.42, min: 0.1, max: 0.25 },
+      frontCamber: { value: -3.5, min: -3.5, max: -2.5 },
+      rearCamber: { value: -2.0, min: -2.0, max: -1.0 },
+      frontToe: { value: 0, min: 0, max: 0.2 },
+      rearToe: { value: 0.1, min: 0.1, max: 0.25 },
     },
     suspension: {
-      frontSuspension: { value: 9, min: 1, max: 11 },
+      frontSuspension: { value: 41, min: 1, max: 41 },
       rearSuspension: { value: 8, min: 1, max: 41 },
-      frontAntiRollBar: { value: 9, min: 1, max: 21 },
-      rearAntiRollBar: { value: 10, min: 1, max: 21 },
-      frontRideHeight: { value: 48, min: 15, max: 35 },
-      rearRideHeight: { value: 62, min: 40, max: 60 },
+      frontAntiRollBar: { value: 6, min: 1, max: 21 },
+      rearAntiRollBar: { value: 21, min: 1, max: 21 },
+      frontRideHeight: { value: 20, min: 15, max: 35 },
+      rearRideHeight: { value: 48, min: 40, max: 60 },
     },
     brakes: {
       brakePressure: { value: 100, min: 80, max: 100 },
-      brakeBias: { value: 58, min: 50, max: 70 },
+      brakeBias: { value: 53, min: 50, max: 70 },
     },
     tyres: {
       frontTyrePressure: { value: 22.5, min: 22.5, max: 29.5 },
-      rearTyrePressure: { value: 21.0, min: 20.5, max: 26.5 },
+      rearTyrePressure: { value: 20.5, min: 20.5, max: 26.5 },
     },
   },
   "track_6": { // Montreal
@@ -228,41 +226,40 @@ export const SETUP_DATA = {
     },
   },
   "track_7": { // Silverstone
-    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
-    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
-    // timestamps tried; this is a permanent gap in archive coverage.
+    // Real Ferrari Time Trial setup (1:26.496, Dry), sourced from
+    // simracingsetup.com/setups/f1-25-setups/british-grand-prix-2025-ferrari-dry-126-496/
     trackName: "Silverstone",
     setupType: "Dry Setup",
     aerodynamics: {
-      frontWing: { value: 20, min: 0, max: 50 },
-      rearWing: { value: 24, min: 0, max: 50 },
+      frontWing: { value: 19, min: 0, max: 50 },
+      rearWing: { value: 17, min: 0, max: 50 },
     },
     transmission: {
       differential: { value: 50, min: 50, max: 100 },
-      onThrottle: { value: 62, min: 10, max: 100 },
-      offThrottle: { value: 52, min: 50, max: 100 },
+      onThrottle: { value: 100, min: 10, max: 100 },
+      offThrottle: { value: 25, min: 0, max: 100 },
     },
     suspensionGeometry: {
-      frontCamber: { value: -3.2, min: -3.5, max: -2.5 },
-      rearCamber: { value: -1.6, min: -2.0, max: -1.0 },
-      frontToe: { value: 0.07, min: 0, max: 0.2 },
-      rearToe: { value: 0.25, min: 0.1, max: 0.25 },
+      frontCamber: { value: -3.5, min: -3.5, max: -2.5 },
+      rearCamber: { value: -2.0, min: -2.0, max: -1.0 },
+      frontToe: { value: 0, min: 0, max: 0.2 },
+      rearToe: { value: 0.1, min: 0.1, max: 0.25 },
     },
     suspension: {
-      frontSuspension: { value: 4, min: 1, max: 11 },
-      rearSuspension: { value: 3, min: 1, max: 41 },
-      frontAntiRollBar: { value: 3, min: 1, max: 21 },
-      rearAntiRollBar: { value: 5, min: 1, max: 21 },
-      frontRideHeight: { value: 26, min: 15, max: 35 },
-      rearRideHeight: { value: 42, min: 40, max: 60 },
+      frontSuspension: { value: 41, min: 1, max: 41 },
+      rearSuspension: { value: 11, min: 1, max: 41 },
+      frontAntiRollBar: { value: 13, min: 1, max: 21 },
+      rearAntiRollBar: { value: 21, min: 1, max: 21 },
+      frontRideHeight: { value: 21, min: 15, max: 35 },
+      rearRideHeight: { value: 45, min: 40, max: 60 },
     },
     brakes: {
-      brakePressure: { value: 88, min: 80, max: 100 },
+      brakePressure: { value: 100, min: 80, max: 100 },
       brakeBias: { value: 52, min: 50, max: 70 },
     },
     tyres: {
-      frontTyrePressure: { value: 23.8, min: 22.5, max: 29.5 },
-      rearTyrePressure: { value: 22.2, min: 20.5, max: 26.5 },
+      frontTyrePressure: { value: 29.5, min: 22.5, max: 29.5 },
+      rearTyrePressure: { value: 26.5, min: 20.5, max: 26.5 },
     },
   },
   "track_9": { // Hungaroring
@@ -562,41 +559,40 @@ export const SETUP_DATA = {
     },
   },
   "track_17": { // Austria (Red Bull Ring)
-    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
-    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
-    // timestamps tried; this is a permanent gap in archive coverage.
+    // Real Ferrari Time Trial setup (1:03.673, Dry), sourced from
+    // simracingsetup.com/setups/f1-25-setups/austrian-grand-prix-2025-ferrari-dry-103-673/
     trackName: "Austria",
     setupType: "Dry Setup",
     aerodynamics: {
-      frontWing: { value: 14, min: 0, max: 50 },
-      rearWing: { value: 19, min: 0, max: 50 },
+      frontWing: { value: 43, min: 0, max: 50 },
+      rearWing: { value: 33, min: 0, max: 50 },
     },
     transmission: {
-      differential: { value: 51, min: 50, max: 100 },
-      onThrottle: { value: 63, min: 10, max: 100 },
-      offThrottle: { value: 53, min: 50, max: 100 },
+      differential: { value: 50, min: 50, max: 100 },
+      onThrottle: { value: 100, min: 10, max: 100 },
+      offThrottle: { value: 25, min: 0, max: 100 },
     },
     suspensionGeometry: {
-      frontCamber: { value: -3.1, min: -3.5, max: -2.5 },
-      rearCamber: { value: -1.5, min: -2.0, max: -1.0 },
-      frontToe: { value: 0.06, min: 0, max: 0.2 },
-      rearToe: { value: 0.27, min: 0.1, max: 0.25 },
+      frontCamber: { value: -3.5, min: -3.5, max: -2.5 },
+      rearCamber: { value: -2.0, min: -2.0, max: -1.0 },
+      frontToe: { value: 0, min: 0, max: 0.2 },
+      rearToe: { value: 0.1, min: 0.1, max: 0.25 },
     },
     suspension: {
-      frontSuspension: { value: 3, min: 1, max: 11 },
-      rearSuspension: { value: 2, min: 1, max: 41 },
-      frontAntiRollBar: { value: 2, min: 1, max: 21 },
-      rearAntiRollBar: { value: 4, min: 1, max: 21 },
-      frontRideHeight: { value: 20, min: 15, max: 35 },
-      rearRideHeight: { value: 37, min: 40, max: 60 },
+      frontSuspension: { value: 41, min: 1, max: 41 },
+      rearSuspension: { value: 1, min: 1, max: 41 },
+      frontAntiRollBar: { value: 1, min: 1, max: 21 },
+      rearAntiRollBar: { value: 5, min: 1, max: 21 },
+      frontRideHeight: { value: 21, min: 15, max: 35 },
+      rearRideHeight: { value: 47, min: 40, max: 60 },
     },
     brakes: {
-      brakePressure: { value: 89, min: 80, max: 100 },
-      brakeBias: { value: 53, min: 50, max: 70 },
+      brakePressure: { value: 100, min: 80, max: 100 },
+      brakeBias: { value: 55, min: 50, max: 70 },
     },
     tyres: {
-      frontTyrePressure: { value: 24.1, min: 22.5, max: 29.5 },
-      rearTyrePressure: { value: 22.6, min: 20.5, max: 26.5 },
+      frontTyrePressure: { value: 29.5, min: 22.5, max: 29.5 },
+      rearTyrePressure: { value: 26.5, min: 20.5, max: 26.5 },
     },
   },
   "track_19": { // Mexico
