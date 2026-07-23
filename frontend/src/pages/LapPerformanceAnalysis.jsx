@@ -86,19 +86,12 @@ function formatDateTime(value) {
 
 function StatBox({ label, value, subvalue, color }) {
   return (
-    <div
-      style={{
-        padding: "12px",
-        borderRadius: 8,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-      }}
-    >
-      <div style={{ color: "#94a3b8", fontSize: 13 }}>{label}</div>
-      <div style={{ color: color || "white", fontSize: 22, fontWeight: 700 }}>
+    <div className="analysis-stat-card">
+      <div className="analysis-stat-label">{label}</div>
+      <div className="analysis-stat-value" style={{ color: color || "white" }}>
         {value}
       </div>
-      {subvalue && <div style={{ color: "#94a3b8", fontSize: 12 }}>{subvalue}</div>}
+      {subvalue && <div className="analysis-stat-subvalue">{subvalue}</div>}
     </div>
   );
 }
@@ -845,17 +838,8 @@ function CombinedTelemetryGraph({
 
   return (
     <div className="card" style={containerStyle}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
+      <div className="analysis-panel-head">
+        <h2>Telemetry Overlay</h2>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {metrics.map((metric) => (
             <label
@@ -1179,21 +1163,12 @@ export default function LapPerformanceAnalysis() {
 
   return (
     <div className="page-container lap-performance-page">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 18,
-        }}
-      >
+      <div className="analysis-page-header">
         <div>
           <h1>
             Lap <span className="text-blue">Performance</span>
           </h1>
-          <p style={{ color: "#94a3b8", marginTop: 4 }}>
+          <p className="analysis-muted">
             Post-race analysis for one saved lap.
           </p>
           <div
@@ -1221,14 +1196,7 @@ export default function LapPerformanceAnalysis() {
         </div>
         <Link
           to={backPath}
-          style={{
-            color: "white",
-            textDecoration: "none",
-            border: "1px solid rgba(255,255,255,0.18)",
-            borderRadius: 8,
-            padding: "8px 12px",
-            background: "rgba(255,255,255,0.05)",
-          }}
+          className="analysis-back-link"
         >
           {backLabel}
         </Link>
@@ -1239,21 +1207,13 @@ export default function LapPerformanceAnalysis() {
 
       {!loading && !error && data && (
         <>
-          <div className="card" style={{ marginBottom: 20 }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                alignItems: "flex-start",
-                flexWrap: "wrap",
-              }}
-            >
+          <div className="card analysis-summary-card">
+            <div className="analysis-summary-head">
               <div>
                 <h2>
                   {session.trackName || "Unknown Track"} | Lap {lap.lapNumber ?? "-"}
                 </h2>
-                <p style={{ color: "#94a3b8", marginTop: 4 }}>
+                <p className="analysis-muted">
                   {session.username || "Unknown Driver"} | {formatDateTime(lap.recordedAt || session.startedAt)}
                 </p>
                 {isBeginnerView && (
@@ -1264,14 +1224,7 @@ export default function LapPerformanceAnalysis() {
               </div>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                gap: 10,
-                marginTop: 16,
-              }}
-            >
+            <div className="analysis-stat-grid">
               <StatBox label="Lap Time" value={formatLapTime(lap.lapTimeMs)} color="#22c55e" />
               <StatBox
                 label="Delta to PB"
@@ -1334,16 +1287,9 @@ export default function LapPerformanceAnalysis() {
             </div>
           </div>
 
-          <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card analysis-section-card">
             <h2>Sectors</h2>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: 10,
-                marginTop: 12,
-              }}
-            >
+            <div className="analysis-stat-grid analysis-sector-grid">
               <StatBox
                 label="Sector 1"
                 value={formatLapTime(lap.sector1Ms)}

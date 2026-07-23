@@ -162,19 +162,12 @@ function getDefaultMapImage(trackKey) {
 
 function StatBox({ label, value, subvalue, color }) {
   return (
-    <div
-      style={{
-        padding: 12,
-        borderRadius: 8,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
-      }}
-    >
-      <div style={{ color: "#94a3b8", fontSize: 13 }}>{label}</div>
-      <div style={{ color: color || "white", fontSize: 22, fontWeight: 800 }}>
+    <div className="analysis-stat-card">
+      <div className="analysis-stat-label">{label}</div>
+      <div className="analysis-stat-value" style={{ color: color || "white" }}>
         {value}
       </div>
-      {subvalue && <div style={{ color: "#94a3b8", fontSize: 12 }}>{subvalue}</div>}
+      {subvalue && <div className="analysis-stat-subvalue">{subvalue}</div>}
     </div>
   );
 }
@@ -413,9 +406,9 @@ function RaceTelemetryGraph({ traces }) {
 
   if (!traces.length) {
     return (
-      <div className="card">
+      <div className="card analysis-section-card">
         <h2>Telemetry Overlay</h2>
-        <p style={{ color: "#94a3b8" }}>
+        <p className="analysis-muted">
           No saved telemetry samples were found for the session graph yet.
         </p>
       </div>
@@ -425,18 +418,9 @@ function RaceTelemetryGraph({ traces }) {
   const chartMinWidth = Math.max(1800, orderedTraces.length * 12);
 
   return (
-    <div className="card">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 12,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Telemetry Overlay</h2>
+    <div className="card analysis-section-card">
+      <div className="analysis-panel-head">
+        <h2>Telemetry Overlay</h2>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {GRAPH_METRICS.map((metric) => (
@@ -607,60 +591,67 @@ function PostSessionPanel({ details }) {
   const { session, stats, laps, traces, report } = details;
   const signals = report?.topCoachSignals || [];
   const findings = report?.precisionFindings || [];
+  const startedAt = formatDateTime(getSessionStartedAt(session));
+  const endedAt = formatDateTime(getSessionEndedAt(session));
 
   return (
     <>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-          gap: 10,
-          marginBottom: 20,
-        }}
-      >
-        <StatBox
-          label="Best Lap"
-          value={formatLapTime(stats.bestLap?.lapTimeMs)}
-          subvalue={stats.bestLap ? "Lap " + (stats.bestLap.lapNumber ?? "-") : "No valid lap"}
-          color="#22c55e"
-        />
-        <StatBox
-          label="Theoretical Best"
-          value={report?.theoreticalBestLap?.lapTime || "-"}
-          subvalue="Best valid sectors combined"
-          color="#a855f7"
-        />
-        <StatBox
-          label="Valid Laps"
-          value={`${stats.validLapCount ?? 0}/${stats.lapCount ?? 0}`}
-          color="#38bdf8"
-        />
-        <StatBox
-          label="Top Speed"
-          value={formatNumber(stats.topSpeedKph, 1, " km/h")}
-          color="#facc15"
-        />
-        <StatBox
-          label="Average Speed"
-          value={formatNumber(stats.averageSpeedKph, 1, " km/h")}
-        />
-        <StatBox
-          label="DRS Reaction"
-          value={
-            stats.drs?.avgActivationDelayMs != null
-              ? formatNumber(stats.drs.avgActivationDelayMs / 1000, 2, " s")
-              : "-"
-          }
-          subvalue={
-            stats.drs?.activationCount
-              ? stats.drs.activationCount + " activations"
-              : "Needs DRS-ready telemetry"
-          }
-        />
+      <div className="card analysis-summary-card">
+        <div className="analysis-summary-head">
+          <div>
+            <h2>{session.trackName || "Unknown Track"} | Full Session</h2>
+            <p className="analysis-muted">
+              {session.username || "Unknown Driver"} | {startedAt} to {endedAt}
+            </p>
+          </div>
+          <span className="analysis-status-pill">Post Session</span>
+        </div>
+
+        <div className="analysis-stat-grid">
+          <StatBox
+            label="Best Lap"
+            value={formatLapTime(stats.bestLap?.lapTimeMs)}
+            subvalue={stats.bestLap ? "Lap " + (stats.bestLap.lapNumber ?? "-") : "No valid lap"}
+            color="#22c55e"
+          />
+          <StatBox
+            label="Theoretical Best"
+            value={report?.theoreticalBestLap?.lapTime || "-"}
+            subvalue="Best valid sectors combined"
+            color="#a855f7"
+          />
+          <StatBox
+            label="Valid Laps"
+            value={`${stats.validLapCount ?? 0}/${stats.lapCount ?? 0}`}
+            color="#38bdf8"
+          />
+          <StatBox
+            label="Top Speed"
+            value={formatNumber(stats.topSpeedKph, 1, " km/h")}
+            color="#facc15"
+          />
+          <StatBox
+            label="Average Speed"
+            value={formatNumber(stats.averageSpeedKph, 1, " km/h")}
+          />
+          <StatBox
+            label="DRS Reaction"
+            value={
+              stats.drs?.avgActivationDelayMs != null
+                ? formatNumber(stats.drs.avgActivationDelayMs / 1000, 2, " s")
+                : "-"
+            }
+            subvalue={
+              stats.drs?.activationCount
+                ? stats.drs.activationCount + " activations"
+                : "Needs DRS-ready telemetry"
+            }
+          />
+        </div>
       </div>
 
       {(signals.length > 0 || findings.length > 0) && (
-        <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card analysis-section-card">
           <h2>AI Coaching Evidence</h2>
           {signals.length > 0 && (
             <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
@@ -705,10 +696,10 @@ function PostSessionPanel({ details }) {
         </div>
       )}
 
-      <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card analysis-section-card">
         <h2>Lap Breakdown</h2>
         {laps.length === 0 ? (
-          <p style={{ color: "#94a3b8" }}>No laps were saved for this session.</p>
+          <p className="analysis-muted">No laps were saved for this session.</p>
         ) : (
           <div style={{ overflowX: "auto", marginTop: 12 }}>
             <table className="f1-table">
@@ -880,36 +871,20 @@ export default function SessionDetails() {
   const shownSession = details?.session || session || {};
 
   return (
-    <div className="page-container">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 12,
-          alignItems: "center",
-          flexWrap: "wrap",
-          marginBottom: 18,
-        }}
-      >
+    <div className="page-container lap-performance-page session-details-page">
+      <div className="analysis-page-header">
         <div>
           <h1>
             Session <span className={active ? "text-green" : "text-blue"}>{active ? "Live" : "Review"}</span>
           </h1>
-          <p style={{ color: "#94a3b8", marginTop: 4 }}>
+          <p className="analysis-muted">
             {shownSession.trackName || "Unknown Track"} | {shownSession.username || "Unknown Driver"} | Started {formatDateTime(getSessionStartedAt(shownSession))}
           </p>
         </div>
 
         <Link
           to="/profile"
-          style={{
-            color: "white",
-            textDecoration: "none",
-            border: "1px solid rgba(255,255,255,0.18)",
-            borderRadius: 8,
-            padding: "8px 12px",
-            background: "rgba(255,255,255,0.05)",
-          }}
+          className="analysis-back-link"
         >
           Back to Profile
         </Link>

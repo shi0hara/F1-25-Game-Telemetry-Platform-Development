@@ -36,6 +36,16 @@ ChartJS.register(
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
+const LIVE_GRAPH_WINDOW_MS = 5000;
+const LIVE_GRAPH_MAX_POINTS = 240;
+const LIVE_GRAPH_METRICS = [
+  { key: "speedKph", label: "Speed", color: "#38bdf8", max: 360, unit: "km/h", defaultVisible: true },
+  { key: "throttlePct", label: "Throttle", color: "#22c55e", max: 100, unit: "%", defaultVisible: true },
+  { key: "brakePct", label: "Brake", color: "#f87171", max: 100, unit: "%", defaultVisible: true },
+  { key: "rpm", label: "RPM", color: "#facc15", max: 13000, unit: "rpm", defaultVisible: false },
+  { key: "gear", label: "Gear", color: "#a78bfa", max: 8, unit: "", defaultVisible: false, stepped: true },
+  { key: "drs", label: "DRS", color: "#fb7185", max: 1, unit: "", defaultVisible: false, stepped: true },
+];
 
 function createEmptyMapTrailState() {
   return {
@@ -175,7 +185,10 @@ function isReasonableLiveSpeed(speed, previousPoint, freshness) {
     freshness.sampleIndex !== null && previousPoint.sampleIndex !== null
       ? freshness.sampleIndex - previousPoint.sampleIndex
       : null;
-  const speedDelta = Math.abs(speed - previousPoint.speed);
+  const previousSpeed = Number(previousPoint.speedKph ?? previousPoint.speed);
+  if (!Number.isFinite(previousSpeed)) return true;
+
+  const speedDelta = Math.abs(speed - previousSpeed);
 
   if (timeDeltaMs !== null && timeDeltaMs < 0) return false;
   if (frameDelta !== null && frameDelta < 0) return false;
@@ -183,6 +196,232 @@ function isReasonableLiveSpeed(speed, previousPoint, freshness) {
   if (speedDelta > 160 && (frameDelta === null || frameDelta < 8)) return false;
 
   return true;
+}
+
+function numberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function readPercentMetric(telemetry, pctKey, rawKey) {
+  const explicitPct = numberOrNull(telemetry?.[pctKey]);
+  if (explicitPct !== null) {
+    return explicitPct <= 1 && explicitPct >= 0 ? explicitPct * 100 : explicitPct;
+  }
+
+  const raw = numberOrNull(telemetry?.[rawKey]);
+  if (raw === null) return null;
+  return raw <= 1 && raw >= 0 ? raw * 100 : raw;
+}
+
+function readLiveGraphPoint(latestTelemetry, freshness) {
+  const speed = numberOrNull(latestTelemetry?.speedKph);
+  const point = {
+    receivedAtMs: Date.now(),
+    timestampMs: freshness.timestampMs,
+    sampleIndex: freshness.sampleIndex,
+    lapNumber: freshness.lapNumber,
+    sector: latestTelemetry?.sector ?? latestTelemetry?.currentSector ?? null,
+    speedKph: speed,
+    throttlePct: readPercentMetric(latestTelemetry, "throttlePct", "throttle"),
+    brakePct: readPercentMetric(latestTelemetry, "brakePct", "brake"),
+    rpm: numberOrNull(latestTelemetry?.rpm ?? latestTelemetry?.engineRPM),
+    gear: numberOrNull(latestTelemetry?.gear),
+    drs: latestTelemetry?.drs === true || latestTelemetry?.drs === 1,
+  };
+
+  const hasMetric = LIVE_GRAPH_METRICS.some((metric) => {
+    if (metric.key === "drs") return point.drs === true;
+    return point[metric.key] !== null && point[metric.key] !== undefined;
+  });
+
+  return hasMetric ? point : null;
+}
+
+function liveGraphRawValue(metric, point) {
+  if (metric.key === "drs") return point?.drs ? 1 : 0;
+  const raw = point?.[metric.key];
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function liveGraphScaledValue(metric, point) {
+  const value = liveGraphRawValue(metric, point);
+  if (value === null) return null;
+  if (metric.key === "drs") return value ? 100 : 0;
+  return Math.max(0, Math.min(100, (value / metric.max) * 100));
+}
+
+function liveGraphValueLabel(metric, raw) {
+  if (raw === null || raw === undefined) return "-";
+  if (metric.key === "drs") return raw ? "On" : "Off";
+
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return "-";
+  if (metric.key === "rpm" || metric.key === "gear") {
+    return Math.round(value).toString() + (metric.unit ? " " + metric.unit : "");
+  }
+
+  return value.toFixed(1) + (metric.unit ? " " + metric.unit : "");
+}
+
+function LiveTelemetryGraph({ points }) {
+  const [visibleMetrics, setVisibleMetrics] = useState(() =>
+    LIVE_GRAPH_METRICS.reduce((next, metric) => {
+      next[metric.key] = metric.defaultVisible;
+      return next;
+    }, {})
+  );
+
+  const labels = useMemo(() => {
+    if (points.length === 0) return [];
+    const firstTime = points[0].receivedAtMs || Date.now();
+    return points.map((point) => {
+      const elapsedSeconds = Math.max(0, (point.receivedAtMs - firstTime) / 1000);
+      return elapsedSeconds.toFixed(1) + "s";
+    });
+  }, [points]);
+
+  const chartData = useMemo(
+    () => ({
+      labels,
+      datasets: LIVE_GRAPH_METRICS.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
+        label: metric.label,
+        data: points.map((point) => liveGraphScaledValue(metric, point)),
+        borderColor: metric.color,
+        backgroundColor: metric.color,
+        borderWidth: metric.key === "speedKph" ? 2.5 : 2,
+        pointRadius: 0,
+        tension: metric.stepped ? 0 : 0.22,
+        stepped: metric.stepped || false,
+        spanGaps: true,
+        metricKey: metric.key,
+      })),
+    }),
+    [labels, points, visibleMetrics]
+  );
+
+  const chartOptions = useMemo(
+    () => ({
+      responsive: true,
+      animation: false,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: "index",
+        intersect: false,
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: "#94a3b8",
+            maxTicksLimit: 6,
+          },
+          grid: {
+            color: "rgba(255,255,255,0.06)",
+          },
+        },
+        y: {
+          beginAtZero: true,
+          max: 100,
+          ticks: {
+            color: "#cbd5e1",
+            callback: (value) => value + "%",
+          },
+          grid: {
+            color: "rgba(255,255,255,0.08)",
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          display: true,
+          labels: {
+            color: "#cbd5e1",
+            usePointStyle: true,
+            boxWidth: 8,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label(context) {
+              const metric = LIVE_GRAPH_METRICS.find(
+                (item) => item.key === context.dataset.metricKey
+              );
+              const point = points[context.dataIndex] || {};
+              if (!metric) return context.dataset.label + ": -";
+              return (
+                metric.label +
+                ": " +
+                liveGraphValueLabel(metric, liveGraphRawValue(metric, point))
+              );
+            },
+            afterBody(items) {
+              const point = points[items[0]?.dataIndex] || {};
+              return [
+                "Lap: " + (point.lapNumber ?? "-"),
+                "Sector: " + (point.sector ?? "-"),
+                "Sample: " + (point.sampleIndex ?? "-"),
+              ];
+            },
+          },
+        },
+      },
+    }),
+    [points]
+  );
+
+  return (
+    <div className="card analysis-section-card live-telemetry-graph-card">
+      <div className="analysis-panel-head">
+        <div>
+          <h2>Live Telemetry Overlay</h2>
+          <p className="analysis-muted">
+            Rolling view of the newest {Math.round(LIVE_GRAPH_WINDOW_MS / 1000)} seconds.
+          </p>
+        </div>
+
+        <div className="live-telemetry-toggle-row">
+          {LIVE_GRAPH_METRICS.map((metric) => (
+            <label
+              key={metric.key}
+              className={
+                visibleMetrics[metric.key]
+                  ? "live-telemetry-toggle active"
+                  : "live-telemetry-toggle"
+              }
+              style={{
+                "--metric-color": metric.color,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={visibleMetrics[metric.key] === true}
+                onChange={() =>
+                  setVisibleMetrics((current) => ({
+                    ...current,
+                    [metric.key]: current[metric.key] !== true,
+                  }))
+                }
+              />
+              <span className="live-telemetry-toggle-dot" />
+              {metric.label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {points.length < 2 ? (
+        <p className="analysis-muted">
+          Waiting for live telemetry samples. The graph appears once the listener sends a few updates.
+        </p>
+      ) : (
+        <div className="live-telemetry-graph-wrap">
+          <Line data={chartData} options={chartOptions} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
@@ -254,14 +493,14 @@ export default function LiveTelemetry({ currentUser }) {
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
   const [selectedTelemetry, setSelectedTelemetry] = useState(null);
-  const [speedPoints, setSpeedPoints] = useState([]);
+  const [liveGraphPoints, setLiveGraphPoints] = useState([]);
   const [selectedTrailKey, setSelectedTrailKey] = useState("current");
   const [mapTrailState, setMapTrailState] = useState(() =>
     createEmptyMapTrailState()
   );
   const [localError, setLocalError] = useState("");
   const lastTelemetryFreshnessRef = useRef(null);
-  const lastSpeedPointRef = useRef(null);
+  const lastLiveGraphPointRef = useRef(null);
 
   const {
     sessionId: autoSessionId,
@@ -275,28 +514,32 @@ export default function LiveTelemetry({ currentUser }) {
   const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
   const latestId = useMemo(() => latestSessionId(sessions), [sessions]);
 
-  function resetSpeedTrace() {
+  function resetLiveGraphTrace() {
     lastTelemetryFreshnessRef.current = null;
-    lastSpeedPointRef.current = null;
-    setSpeedPoints([]);
+    lastLiveGraphPointRef.current = null;
+    setLiveGraphPoints([]);
   }
 
-  function appendLiveSpeedPoint(latestTelemetry, freshness) {
+  function appendLiveGraphPoint(latestTelemetry, freshness) {
     const speed = Number(latestTelemetry?.speedKph);
 
-    if (!isReasonableLiveSpeed(speed, lastSpeedPointRef.current, freshness)) {
+    if (
+      Number.isFinite(speed) &&
+      !isReasonableLiveSpeed(speed, lastLiveGraphPointRef.current, freshness)
+    ) {
       return;
     }
 
-    const point = {
-      time: freshness.timestampMs ?? Date.now(),
-      timestampMs: freshness.timestampMs,
-      sampleIndex: freshness.sampleIndex,
-      speed,
-    };
+    const point = readLiveGraphPoint(latestTelemetry, freshness);
+    if (!point) return;
 
-    lastSpeedPointRef.current = point;
-    setSpeedPoints((prev) => [...prev, point].slice(-75));
+    lastLiveGraphPointRef.current = point;
+    setLiveGraphPoints((prev) => {
+      const cutoff = point.receivedAtMs - LIVE_GRAPH_WINDOW_MS;
+      return [...prev, point]
+        .filter((item) => item.receivedAtMs >= cutoff)
+        .slice(-LIVE_GRAPH_MAX_POINTS);
+    });
   }
 
   useEffect(() => {
@@ -304,7 +547,7 @@ export default function LiveTelemetry({ currentUser }) {
       setSelectedSessionId(null);
       setSelectedSession(null);
       setSelectedTelemetry(null);
-      resetSpeedTrace();
+      resetLiveGraphTrace();
       setSelectedTrailKey("current");
       setMapTrailState(createEmptyMapTrailState());
       return;
@@ -327,9 +570,20 @@ export default function LiveTelemetry({ currentUser }) {
   }, [autoSessionId, requestedSessionId, sessions]);
 
   useEffect(() => {
-    resetSpeedTrace();
+    resetLiveGraphTrace();
     setSelectedTrailKey("current");
     setMapTrailState(createEmptyMapTrailState());
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return undefined;
+
+    const trimTimer = window.setInterval(() => {
+      const cutoff = Date.now() - LIVE_GRAPH_WINDOW_MS;
+      setLiveGraphPoints((prev) => prev.filter((point) => point.receivedAtMs >= cutoff));
+    }, 500);
+
+    return () => window.clearInterval(trimTimer);
   }, [selectedSessionId]);
 
   useEffect(() => {
@@ -378,7 +632,7 @@ export default function LiveTelemetry({ currentUser }) {
 
         if (freshnessDelta > 0) {
           lastTelemetryFreshnessRef.current = freshness;
-          appendLiveSpeedPoint(latestTelemetry, freshness);
+          appendLiveGraphPoint(latestTelemetry, freshness);
         }
       },
       (err) => {
@@ -399,7 +653,7 @@ export default function LiveTelemetry({ currentUser }) {
     if (nextScope === "all" && !isAdmin) return;
 
     setLocalError("");
-    resetSpeedTrace();
+    resetLiveGraphTrace();
     setSelectedSessionId(null);
     setSelectedSession(null);
     setSelectedTelemetry(null);
@@ -440,54 +694,6 @@ export default function LiveTelemetry({ currentUser }) {
 
   const activeTrailKey = selectedLapOption?.key || "current";
   const selectedLapNumber = selectedLapOption?.lapNumber ?? null;
-
-  const chartData = useMemo(() => {
-    return {
-      labels: speedPoints.map(() => ""),
-      datasets: [
-        {
-          label: "Live Speed (km/h)",
-          data: speedPoints.map((p) => p.speed),
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.25,
-          borderColor: "#3b82f6",
-          backgroundColor: "rgba(59, 130, 246, 0.5)",
-        },
-      ],
-    };
-  }, [speedPoints]);
-
-  const chartOptions = useMemo(() => {
-    return {
-      responsive: true,
-      animation: false,
-      maintainAspectRatio: false,
-      scales: {
-        x: {
-          display: false,
-        },
-        y: {
-          beginAtZero: true,
-          max: 350,
-          ticks: {
-            color: "#fff",
-          },
-          grid: {
-            color: "rgba(255,255,255,0.12)",
-          },
-        },
-      },
-      plugins: {
-        legend: {
-          display: true,
-          labels: {
-            color: "#fff",
-          },
-        },
-      },
-    };
-  }, []);
 
   const shownError = localError || error;
 
@@ -819,12 +1025,7 @@ export default function LiveTelemetry({ currentUser }) {
             </div>
           </div>
 
-          <div className="card">
-            <h2>Live Speed Trace</h2>
-            <div style={{ height: 320, marginTop: 16 }}>
-              <Line data={chartData} options={chartOptions} />
-            </div>
-          </div>
+          <LiveTelemetryGraph points={liveGraphPoints} />
         </>
       )}
     </div>
