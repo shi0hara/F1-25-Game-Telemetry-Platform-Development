@@ -78,6 +78,9 @@ export const SETUP_DATA = {
     },
   },
   "track_3": { // Sakhir (Bahrain)
+    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
+    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
+    // timestamps tried; this is a permanent gap in archive coverage.
     trackName: "Sakhir (Bahrain)",
     setupType: "Dry Setup",
     aerodynamics: {
@@ -150,6 +153,9 @@ export const SETUP_DATA = {
     },
   },
   "track_5": { // Monaco
+    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
+    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
+    // timestamps tried; this is a permanent gap in archive coverage.
     trackName: "Monaco",
     setupType: "Dry Setup",
     aerodynamics: {
@@ -222,6 +228,9 @@ export const SETUP_DATA = {
     },
   },
   "track_7": { // Silverstone
+    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
+    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
+    // timestamps tried; this is a permanent gap in archive coverage.
     trackName: "Silverstone",
     setupType: "Dry Setup",
     aerodynamics: {
@@ -553,6 +562,9 @@ export const SETUP_DATA = {
     },
   },
   "track_17": { // Austria (Red Bull Ring)
+    // MOCK DATA: real setup unavailable. Every Wayback Machine snapshot for this
+    // simracingsetup.com detail page returns 404 despite multiple confirmed-200 CDX
+    // timestamps tried; this is a permanent gap in archive coverage.
     trackName: "Austria",
     setupType: "Dry Setup",
     aerodynamics: {
