@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
   documentId,
@@ -796,7 +796,7 @@ async function loadLapTrailsFromFirestore(sessionId, maxPointsPerLap = 400) {
   return buildLapTrailsFromStoredPoints(points, maxPointsPerLap);
 }
 
-export default function TrackTelemetryMap({
+function TrackTelemetryMap({
   apiBase,
   sessionId,
   trackKey,
@@ -1150,10 +1150,10 @@ export default function TrackTelemetryMap({
     };
   }, [apiBase, sessionId]);
 
-  const hasLiveMapPositionProp = Boolean(liveMapPosition);
+  const hasLiveMapPositionSource = Boolean(liveMapPosition || liveMapPositionRef);
 
   useEffect(() => {
-    if (!apiBase || !sessionId || hasLiveMapPositionProp) return undefined;
+    if (!apiBase || !sessionId || hasLiveMapPositionSource) return undefined;
 
     const requestId = livePositionLoadSeqRef.current + 1;
     livePositionLoadSeqRef.current = requestId;
@@ -1200,7 +1200,7 @@ export default function TrackTelemetryMap({
       abortController.abort();
       clearInterval(interval);
     };
-  }, [apiBase, sessionId, hasLiveMapPositionProp]);
+  }, [apiBase, sessionId, hasLiveMapPositionSource]);
 
   useEffect(() => {
     if (!liveMapPosition) return;
@@ -1570,3 +1570,5 @@ export default function TrackTelemetryMap({
     </div>
   );
 }
+
+export default memo(TrackTelemetryMap);

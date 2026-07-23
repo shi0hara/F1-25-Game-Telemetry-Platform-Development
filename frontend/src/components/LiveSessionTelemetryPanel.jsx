@@ -578,6 +578,151 @@ function LapTrailSelector({ options, selectedKey, onSelect, loading = false }) {
   );
 }
 
+const FastLiveTelemetryCard = memo(function FastLiveTelemetryCard({
+  telemetryRef,
+  fallbackTelemetry,
+  liveFeedStatus,
+}) {
+  const [telemetry, setTelemetry] = useState(() =>
+    telemetryRef.current || fallbackTelemetry || null
+  );
+  const lastRenderedTelemetryRef = useRef(null);
+
+  useEffect(() => {
+    let frameId = 0;
+    let cancelled = false;
+
+    function renderLatestTelemetry() {
+      if (cancelled) return;
+
+      const latest = telemetryRef.current || fallbackTelemetry || null;
+      if (latest !== lastRenderedTelemetryRef.current) {
+        lastRenderedTelemetryRef.current = latest;
+        setTelemetry(latest);
+      }
+
+      frameId = window.requestAnimationFrame(renderLatestTelemetry);
+    }
+
+    frameId = window.requestAnimationFrame(renderLatestTelemetry);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [fallbackTelemetry, telemetryRef]);
+
+  const throttlePct = readPercentMetric(telemetry, "throttlePct", "throttle");
+  const brakePct = readPercentMetric(telemetry, "brakePct", "brake");
+
+  return (
+    <div className="card">
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
+          marginBottom: 12,
+        }}
+      >
+        <h2 style={{ marginBottom: 0 }}>Current Telemetry</h2>
+        <span
+          title="Shows whether this page is using the instant local listener stream, local polling, or slower cloud backup data."
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 9px",
+            borderRadius: 999,
+            border: "1px solid rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.05)",
+            color: "#e5e7eb",
+            fontSize: 12,
+            fontWeight: 800,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
+              boxShadow:
+                "0 0 12px " +
+                getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
+            }}
+          />
+          {getLiveFeedLabel(liveFeedStatus.source)}
+          {" | "}
+          Telemetry{" "}
+          {liveFeedStatus.telemetryHz > 0
+            ? liveFeedStatus.telemetryHz.toFixed(0)
+            : liveFeedStatus.hz > 0
+              ? liveFeedStatus.hz.toFixed(0)
+              : "-"}{" "}
+          Hz
+          {" | "}
+          {formatFeedAge(liveFeedStatus.ageMs)}
+        </span>
+      </div>
+
+      {telemetry ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 16,
+            alignItems: "center",
+          }}
+        >
+          <SteeringWheel
+            steering={telemetry.steering}
+            throttle={throttlePct}
+            brake={brakePct}
+            label="Live Steering"
+            instant
+            size={152}
+          />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 8,
+            }}
+          >
+            <p><strong>Speed:</strong> {formatFixed(telemetry.speedKph, 0, "0")} km/h</p>
+            <p><strong>Gear:</strong> {telemetry.gear ?? "-"}</p>
+            <p><strong>RPM:</strong> {telemetry.rpm ?? telemetry.engineRPM ?? 0}</p>
+            <p><strong>Throttle:</strong> {formatFixed(throttlePct, 0, "0")}%</p>
+            <p><strong>Brake:</strong> {formatFixed(brakePct, 0, "0")}%</p>
+            <p><strong>Steering:</strong> {formatFixed(telemetry.steering, 2, "0.00")}</p>
+            <p><strong>DRS:</strong> {telemetry.drs ? "On" : "Off"}</p>
+            <p><strong>Lap:</strong> {telemetry.lapNumber ?? "-"}</p>
+            <p><strong>Delta to PB:</strong> {telemetry.deltaToPB ?? "-"} ms</p>
+            <p>
+              <strong>Cornering Speed:</strong>{" "}
+              {telemetry.corneringSpeed == null ? "-" : `${telemetry.corneringSpeed} km/h`}
+            </p>
+            <p>
+              <strong>Braking Distance:</strong>{" "}
+              {telemetry.brakingDistance == null
+                ? "-"
+                : `${formatFixed(telemetry.brakingDistance, 1)} m`}
+            </p>
+            <p><strong>World X:</strong> {formatFixed(telemetry.worldX, 2)}</p>
+            <p><strong>World Z:</strong> {formatFixed(telemetry.worldZ, 2)}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="analysis-muted">Waiting for live telemetry samples.</p>
+      )}
+    </div>
+  );
+});
+
 export default function LiveSessionTelemetryPanel({
   session,
   apiBase,
@@ -585,13 +730,11 @@ export default function LiveSessionTelemetryPanel({
   mapImageUrl,
 }) {
   const [liveSession, setLiveSession] = useState(session || null);
-  const [selectedTelemetry, setSelectedTelemetry] = useState(() =>
-    mergeFreshLiveTelemetry(session)
-  );
   const [liveGraphPoints, setLiveGraphPoints] = useState([]);
   const [liveFeedStatus, setLiveFeedStatus] = useState({
     source: "waiting",
     hz: 0,
+    telemetryHz: 0,
     ageMs: null,
   });
   const [selectedTrailKey, setSelectedTrailKey] = useState("current");
@@ -601,7 +744,6 @@ export default function LiveSessionTelemetryPanel({
   const lastTelemetryFreshnessRef = useRef(null);
   const lastLiveGraphPointRef = useRef(null);
   const liveTelemetryRef = useRef(mergeFreshLiveTelemetry(session));
-  const telemetryFrameRef = useRef(0);
   const liveGraphPointsRef = useRef([]);
   const graphFlushTimerRef = useRef(0);
   const streamHealthyRef = useRef(false);
@@ -609,9 +751,11 @@ export default function LiveSessionTelemetryPanel({
   const liveFeedStatsRef = useRef({
     source: "waiting",
     count: 0,
+    telemetryCount: 0,
     windowStartedAt: 0,
     lastAt: 0,
     hz: 0,
+    telemetryHz: 0,
   });
 
   function resetLiveGraphTrace() {
@@ -619,10 +763,6 @@ export default function LiveSessionTelemetryPanel({
     lastLiveGraphPointRef.current = null;
     liveGraphPointsRef.current = [];
     liveTelemetryRef.current = null;
-    if (telemetryFrameRef.current) {
-      window.cancelAnimationFrame(telemetryFrameRef.current);
-      telemetryFrameRef.current = 0;
-    }
     if (graphFlushTimerRef.current) {
       window.clearTimeout(graphFlushTimerRef.current);
       graphFlushTimerRef.current = 0;
@@ -630,24 +770,18 @@ export default function LiveSessionTelemetryPanel({
     liveFeedStatsRef.current = {
       source: "waiting",
       count: 0,
+      telemetryCount: 0,
       windowStartedAt: 0,
       lastAt: 0,
       hz: 0,
+      telemetryHz: 0,
     };
     setLiveGraphPoints([]);
     setLiveFeedStatus({
       source: "waiting",
       hz: 0,
+      telemetryHz: 0,
       ageMs: null,
-    });
-  }
-
-  function scheduleTelemetryFlush() {
-    if (telemetryFrameRef.current) return;
-
-    telemetryFrameRef.current = window.requestAnimationFrame(() => {
-      telemetryFrameRef.current = 0;
-      setSelectedTelemetry(liveTelemetryRef.current);
     });
   }
 
@@ -681,7 +815,7 @@ export default function LiveSessionTelemetryPanel({
     scheduleGraphFlush();
   }
 
-  function markLiveFeed(source) {
+  function markLiveFeed(source, isFullTelemetry = true) {
     const now = window.performance.now();
     const current = liveFeedStatsRef.current;
     const sourceChanged = current.source !== source;
@@ -694,16 +828,23 @@ export default function LiveSessionTelemetryPanel({
         !sourceChanged && current.count > 0 && windowElapsed > 0
           ? (current.count * 1000) / windowElapsed
           : 0;
+      const telemetryHz =
+        !sourceChanged && current.telemetryCount > 0 && windowElapsed > 0
+          ? (current.telemetryCount * 1000) / windowElapsed
+          : 0;
       liveFeedStatsRef.current = {
         source,
         count: 1,
+        telemetryCount: isFullTelemetry ? 1 : 0,
         windowStartedAt: now,
         lastAt: now,
         hz,
+        telemetryHz,
       };
       setLiveFeedStatus({
         source,
         hz,
+        telemetryHz,
         ageMs: 0,
       });
       return;
@@ -712,6 +853,7 @@ export default function LiveSessionTelemetryPanel({
     liveFeedStatsRef.current = {
       ...current,
       count: current.count + 1,
+      telemetryCount: current.telemetryCount + (isFullTelemetry ? 1 : 0),
       lastAt: now,
     };
   }
@@ -722,8 +864,6 @@ export default function LiveSessionTelemetryPanel({
     const mergedTelemetry = mergeFreshLiveTelemetry(payload);
     if (!mergedTelemetry) return false;
 
-    markLiveFeed(source);
-
     const localSequence = readLocalSequence(payload);
     const latestTelemetry = {
       ...mergedTelemetry,
@@ -731,6 +871,7 @@ export default function LiveSessionTelemetryPanel({
       liveFeedSource: source,
       liveUpdatedAt: payload.updatedAt || mergedTelemetry.timestamp,
     };
+    markLiveFeed(source, !latestTelemetry.motionOnly);
 
     const freshness = readTelemetryFreshness(latestTelemetry);
     const freshnessDelta = compareTelemetryFreshness(
@@ -742,7 +883,6 @@ export default function LiveSessionTelemetryPanel({
 
     lastTelemetryFreshnessRef.current = freshness;
     liveTelemetryRef.current = latestTelemetry;
-    scheduleTelemetryFlush();
     if (!latestTelemetry.motionOnly) {
       appendLiveGraphPoint(latestTelemetry, freshness);
     }
@@ -755,14 +895,12 @@ export default function LiveSessionTelemetryPanel({
     setMapTrailState(createEmptyMapTrailState());
     setLiveSession(session || null);
     liveTelemetryRef.current = mergeFreshLiveTelemetry(session);
-    setSelectedTelemetry(liveTelemetryRef.current);
   }, [session?.id]);
 
   useEffect(() => {
     if (!session?.id) {
       setLiveSession(null);
       liveTelemetryRef.current = null;
-      setSelectedTelemetry(null);
       return;
     }
 
@@ -771,7 +909,6 @@ export default function LiveSessionTelemetryPanel({
     if (!latestTelemetry) {
       setLiveSession(session);
       liveTelemetryRef.current = null;
-      setSelectedTelemetry(null);
       return;
     }
 
@@ -810,12 +947,11 @@ export default function LiveSessionTelemetryPanel({
 
     setLiveSession(session);
     liveTelemetryRef.current = latestTelemetry;
-    scheduleTelemetryFlush();
 
     if (freshnessDelta > 0) {
       lastTelemetryFreshnessRef.current = freshness;
       if (!streamHealthyRef.current) {
-        markLiveFeed("cloud");
+        markLiveFeed("cloud", true);
       }
       if (!latestTelemetry.motionOnly) {
         appendLiveGraphPoint(latestTelemetry, freshness);
@@ -838,9 +974,6 @@ export default function LiveSessionTelemetryPanel({
 
   useEffect(() => {
     return () => {
-      if (telemetryFrameRef.current) {
-        window.cancelAnimationFrame(telemetryFrameRef.current);
-      }
       if (graphFlushTimerRef.current) {
         window.clearTimeout(graphFlushTimerRef.current);
       }
@@ -936,6 +1069,7 @@ export default function LiveSessionTelemetryPanel({
       setLiveFeedStatus((current) => ({
         source: stats.source || current.source,
         hz: stats.hz ?? current.hz,
+        telemetryHz: stats.telemetryHz ?? current.telemetryHz,
         ageMs: stats.lastAt ? window.performance.now() - stats.lastAt : null,
       }));
     }, 250);
@@ -969,17 +1103,10 @@ export default function LiveSessionTelemetryPanel({
   const shownSession = liveSession || session || {};
   const activeTrailKey = selectedLapOption?.key || "current";
   const selectedLapNumber = selectedLapOption?.lapNumber ?? null;
-  const selectedThrottlePct = readPercentMetric(
-    selectedTelemetry,
-    "throttlePct",
-    "throttle"
+  const fallbackLiveTelemetry = useMemo(
+    () => mergeFreshLiveTelemetry(shownSession) || shownSession.latestMapPosition || null,
+    [shownSession]
   );
-  const selectedBrakePct = readPercentMetric(
-    selectedTelemetry,
-    "brakePct",
-    "brake"
-  );
-  const liveMapPosition = selectedTelemetry || shownSession.latestMapPosition;
 
   return (
     <>
@@ -996,106 +1123,11 @@ export default function LiveSessionTelemetryPanel({
       </div>
 
       <div className="grid-2" style={{ marginBottom: 20 }}>
-        <div className="card">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
-              marginBottom: 12,
-            }}
-          >
-            <h2 style={{ marginBottom: 0 }}>Current Telemetry</h2>
-            <span
-              title="Shows whether this page is using the instant local listener stream, local polling, or slower cloud backup data."
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 9px",
-                borderRadius: 999,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(255,255,255,0.05)",
-                color: "#e5e7eb",
-                fontSize: 12,
-                fontWeight: 800,
-                whiteSpace: "nowrap",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
-                  boxShadow:
-                    "0 0 12px " +
-                    getLiveFeedColor(liveFeedStatus.source, liveFeedStatus.ageMs),
-                }}
-              />
-              {getLiveFeedLabel(liveFeedStatus.source)}
-              {" | "}
-              {liveFeedStatus.hz > 0 ? liveFeedStatus.hz.toFixed(0) : "-"} Hz
-              {" | "}
-              {formatFeedAge(liveFeedStatus.ageMs)}
-            </span>
-          </div>
-
-          {selectedTelemetry ? (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 16,
-                alignItems: "center",
-              }}
-            >
-              <SteeringWheel
-                steering={selectedTelemetry.steering}
-                throttle={selectedThrottlePct}
-                brake={selectedBrakePct}
-                label="Live Steering"
-                instant
-                size={152}
-              />
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 8,
-                }}
-              >
-                <p><strong>Speed:</strong> {formatFixed(selectedTelemetry.speedKph, 0, "0")} km/h</p>
-                <p><strong>Gear:</strong> {selectedTelemetry.gear ?? "-"}</p>
-                <p><strong>RPM:</strong> {selectedTelemetry.rpm ?? selectedTelemetry.engineRPM ?? 0}</p>
-                <p><strong>Throttle:</strong> {formatFixed(selectedThrottlePct, 0, "0")}%</p>
-                <p><strong>Brake:</strong> {formatFixed(selectedBrakePct, 0, "0")}%</p>
-                <p><strong>Steering:</strong> {formatFixed(selectedTelemetry.steering, 2, "0.00")}</p>
-                <p><strong>DRS:</strong> {selectedTelemetry.drs ? "On" : "Off"}</p>
-                <p><strong>Lap:</strong> {selectedTelemetry.lapNumber ?? "-"}</p>
-                <p><strong>Delta to PB:</strong> {selectedTelemetry.deltaToPB ?? "-"} ms</p>
-                <p>
-                  <strong>Cornering Speed:</strong>{" "}
-                  {selectedTelemetry.corneringSpeed == null
-                    ? "-"
-                    : `${selectedTelemetry.corneringSpeed} km/h`}
-                </p>
-                <p>
-                  <strong>Braking Distance:</strong>{" "}
-                  {selectedTelemetry.brakingDistance == null
-                    ? "-"
-                    : `${formatFixed(selectedTelemetry.brakingDistance, 1)} m`}
-                </p>
-                <p><strong>World X:</strong> {formatFixed(liveMapPosition?.worldX, 2)}</p>
-                <p><strong>World Z:</strong> {formatFixed(liveMapPosition?.worldZ, 2)}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="analysis-muted">Waiting for live telemetry samples.</p>
-          )}
-        </div>
+        <FastLiveTelemetryCard
+          telemetryRef={liveTelemetryRef}
+          fallbackTelemetry={fallbackLiveTelemetry}
+          liveFeedStatus={liveFeedStatus}
+        />
 
         <div className="card">
           <h2>Session Info</h2>
@@ -1128,7 +1160,6 @@ export default function LiveSessionTelemetryPanel({
             trackKey={trackKey}
             mapImageUrl={mapImageUrl}
             selectedTrailKey={activeTrailKey}
-            liveMapPosition={liveMapPosition}
             liveMapPositionRef={liveTelemetryRef}
             onTrailOptionsChange={setMapTrailState}
           />
