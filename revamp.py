@@ -629,8 +629,10 @@ LAST_SESSION_PACKET_NOTICE_AT = 0.0
 STOP_EVENT = threading.Event()
 IDENTITY_LOCK = threading.Lock()
 LOCAL_LIVE_LOCK = threading.Lock()
+LOCAL_LIVE_CONDITION = threading.Condition(LOCAL_LIVE_LOCK)
 LOCAL_LIVE_SAMPLE = None
 LOCAL_LIVE_UPDATED_AT = None
+LOCAL_LIVE_STREAM_HEARTBEAT_SEC = 2.0
 
 LATEST_QUEUE = queue.Queue(maxsize=1)
 BATCH_QUEUE = queue.Queue(maxsize=2000)
@@ -757,15 +759,12 @@ def listener_auth_headers():
 def update_local_live_sample(sample_body):
     global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
 
-    with LOCAL_LIVE_LOCK:
+    with LOCAL_LIVE_CONDITION:
         LOCAL_LIVE_SAMPLE = dict(sample_body or {})
         LOCAL_LIVE_UPDATED_AT = iso_now()
+        LOCAL_LIVE_CONDITION.notify_all()
 
-def get_local_live_payload():
-    with LOCAL_LIVE_LOCK:
-        sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
-        updated_at = LOCAL_LIVE_UPDATED_AT
-
+def build_local_live_payload(sample, updated_at):
     return {
         "ok": True,
         "paired": bool(LISTENER_TOKEN or USER_ID),
@@ -778,6 +777,13 @@ def get_local_live_payload():
         "latestTelemetry": sample,
         "latestMapPosition": sample,
     }
+
+def get_local_live_payload():
+    with LOCAL_LIVE_LOCK:
+        sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
+        updated_at = LOCAL_LIVE_UPDATED_AT
+
+    return build_local_live_payload(sample, updated_at)
 
 def resolve_listener_token(token):
     global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, USER_ID
@@ -840,6 +846,56 @@ class ListenerPairingHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def write_sse_event(self, event_name, payload):
+        body = (
+            f"event: {event_name}\n"
+            f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+        ).encode("utf-8")
+        self.wfile.write(body)
+        self.wfile.flush()
+
+    def stream_local_live(self):
+        self.send_response(200)
+        self.send_cors_headers()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        last_updated_at = None
+
+        try:
+            payload = get_local_live_payload()
+            last_updated_at = payload.get("updatedAt")
+            self.write_sse_event("status", payload)
+
+            while not STOP_EVENT.is_set():
+                with LOCAL_LIVE_CONDITION:
+                    LOCAL_LIVE_CONDITION.wait_for(
+                        lambda: LOCAL_LIVE_UPDATED_AT != last_updated_at or STOP_EVENT.is_set(),
+                        timeout=LOCAL_LIVE_STREAM_HEARTBEAT_SEC,
+                    )
+                    sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
+                    updated_at = LOCAL_LIVE_UPDATED_AT
+
+                if updated_at and updated_at != last_updated_at:
+                    last_updated_at = updated_at
+                    self.write_sse_event("live", build_local_live_payload(sample, updated_at))
+                else:
+                    self.write_sse_event("heartbeat", {
+                        "ok": True,
+                        "sessionId": SESSION_ID,
+                        "updatedAt": last_updated_at,
+                    })
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
+        except Exception as e:
+            try:
+                self.write_sse_event("error", {"ok": False, "error": str(e)})
+            except Exception:
+                pass
+
     def read_json_body(self):
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0:
@@ -859,6 +915,10 @@ class ListenerPairingHandler(BaseHTTPRequestHandler):
 
         if path == "/live":
             self.write_json(200, get_local_live_payload())
+            return
+
+        if path == "/live-stream":
+            self.stream_local_live()
             return
 
         if path != "/health":

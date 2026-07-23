@@ -393,8 +393,8 @@ Used for:
 ```text
 F1 25 UDP packet
   -> revamp.py decodes packet
-  -> local listener /live exposes newest sample to same-PC frontend
-  -> session live page uses /live when active sessionId matches
+  -> local listener /live-stream pushes newest sample to same-PC frontend
+  -> session live page updates from the local stream when active sessionId matches
 
 F1 25 UDP packet
   -> revamp.py decodes packet

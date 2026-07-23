@@ -12,7 +12,10 @@ import { Line } from "react-chartjs-2";
 import TrackTelemetryMap from "./TrackTelemetryMap";
 import TelemetryChart from "./TelemetryChart";
 import SteeringWheel from "./SteeringWheel";
-import { getLocalListenerLiveSample } from "../services/localListenerService";
+import {
+  getLocalListenerLiveSample,
+  subscribeLocalListenerLive,
+} from "../services/localListenerService";
 import {
   formatSessionFlag,
   getSessionEndedAt,
@@ -563,6 +566,8 @@ export default function LiveSessionTelemetryPanel({
   const lastLiveGraphPointRef = useRef(null);
   const liveGraphPointsRef = useRef([]);
   const graphFlushTimerRef = useRef(0);
+  const streamHealthyRef = useRef(false);
+  const lastStreamSampleAtRef = useRef(0);
 
   function resetLiveGraphTrace() {
     lastTelemetryFreshnessRef.current = null;
@@ -603,6 +608,26 @@ export default function LiveSessionTelemetryPanel({
       .filter((item) => item.receivedAtMs >= cutoff)
       .slice(-LIVE_GRAPH_MAX_POINTS);
     scheduleGraphFlush();
+  }
+
+  function applyLocalLivePayload(payload) {
+    if (!payload || payload.sessionId !== session?.id) return false;
+
+    const latestTelemetry = mergeFreshLiveTelemetry(payload);
+    if (!latestTelemetry) return false;
+
+    const freshness = readTelemetryFreshness(latestTelemetry);
+    const freshnessDelta = compareTelemetryFreshness(
+      freshness,
+      lastTelemetryFreshnessRef.current
+    );
+
+    if (freshnessDelta <= 0) return true;
+
+    lastTelemetryFreshnessRef.current = freshness;
+    setSelectedTelemetry(latestTelemetry);
+    appendLiveGraphPoint(latestTelemetry, freshness);
+    return true;
   }
 
   useEffect(() => {
@@ -673,33 +698,51 @@ export default function LiveSessionTelemetryPanel({
   useEffect(() => {
     if (!session?.id || !selectedSessionActive) return undefined;
 
+    streamHealthyRef.current = false;
+    lastStreamSampleAtRef.current = 0;
+
+    const subscription = subscribeLocalListenerLive({
+      onSample(payload) {
+        if (payload?.sessionId !== session.id) return;
+        if (applyLocalLivePayload(payload)) {
+          streamHealthyRef.current = true;
+          lastStreamSampleAtRef.current = window.performance.now();
+        }
+      },
+      onError() {
+        streamHealthyRef.current = false;
+      },
+    });
+
+    if (!subscription.supported) {
+      streamHealthyRef.current = false;
+    }
+
+    return () => {
+      subscription.close();
+      streamHealthyRef.current = false;
+    };
+  }, [selectedSessionActive, session?.id]);
+
+  useEffect(() => {
+    if (!session?.id || !selectedSessionActive) return undefined;
+
     let cancelled = false;
     let localFetchInFlight = false;
     let failureCount = 0;
     let timerId = 0;
 
-    function applyLocalLivePayload(payload) {
-      if (!payload || payload.sessionId !== session.id) return false;
-
-      const latestTelemetry = mergeFreshLiveTelemetry(payload);
-      if (!latestTelemetry) return false;
-
-      const freshness = readTelemetryFreshness(latestTelemetry);
-      const freshnessDelta = compareTelemetryFreshness(
-        freshness,
-        lastTelemetryFreshnessRef.current
-      );
-
-      if (freshnessDelta <= 0) return true;
-
-      lastTelemetryFreshnessRef.current = freshness;
-      setSelectedTelemetry(latestTelemetry);
-      appendLiveGraphPoint(latestTelemetry, freshness);
-      return true;
-    }
-
     async function pollLocalLive() {
       if (cancelled || localFetchInFlight) return;
+
+      if (
+        streamHealthyRef.current &&
+        window.performance.now() - lastStreamSampleAtRef.current < 750
+      ) {
+        timerId = window.setTimeout(pollLocalLive, 750);
+        return;
+      }
+
       localFetchInFlight = true;
       const pollStartedAt = window.performance.now();
 

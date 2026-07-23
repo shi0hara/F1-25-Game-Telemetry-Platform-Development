@@ -60,10 +60,11 @@ http://127.0.0.1:51377
 The same local API exposes the newest decoded sample for true live display:
 
 ```text
+GET http://127.0.0.1:51377/live-stream
 GET http://127.0.0.1:51377/live
 ```
 
-The frontend uses this only when the local listener reports the same active `sessionId` as the page being viewed. Firestore/backend data remains the fallback and the source for saved history, lap analysis, leaderboard, and reports.
+The frontend prefers `/live-stream`, which pushes samples immediately with server-sent events. `/live` remains a polling fallback. These local endpoints are used only when the local listener reports the same active `sessionId` as the page being viewed. Firestore/backend data remains the fallback and the source for saved history, lap analysis, leaderboard, and reports.
 
 When the user logs in on the website, the website pairs the listener to that account automatically.
 

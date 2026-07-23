@@ -3,6 +3,7 @@ const API_BASE =
 
 const LOCAL_LISTENER_URL =
   import.meta.env.VITE_LOCAL_LISTENER_URL || "http://127.0.0.1:51377";
+const LOCAL_LISTENER_STREAM_URL = `${LOCAL_LISTENER_URL}/live-stream`;
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 900) {
   const controller = new AbortController();
@@ -75,6 +76,57 @@ export async function getLocalListenerLiveSample(timeoutMs = 180) {
   }
 
   return readJson(res);
+}
+
+export function subscribeLocalListenerLive({ onSample, onStatus, onError } = {}) {
+  if (typeof window === "undefined" || typeof window.EventSource !== "function") {
+    return {
+      close() {},
+      supported: false,
+    };
+  }
+
+  const source = new window.EventSource(LOCAL_LISTENER_STREAM_URL);
+
+  function parseEvent(event) {
+    try {
+      return JSON.parse(event.data || "{}");
+    } catch {
+      return null;
+    }
+  }
+
+  source.addEventListener("live", (event) => {
+    const payload = parseEvent(event);
+    if (payload) onSample?.(payload);
+  });
+
+  source.addEventListener("status", (event) => {
+    const payload = parseEvent(event);
+    if (payload) onStatus?.(payload);
+    if (payload?.latestTelemetry) onSample?.(payload);
+  });
+
+  source.addEventListener("heartbeat", (event) => {
+    const payload = parseEvent(event);
+    if (payload) onStatus?.(payload);
+  });
+
+  source.addEventListener("error", (event) => {
+    const payload = parseEvent(event);
+    onError?.(payload || event);
+  });
+
+  source.onerror = (event) => {
+    onError?.(event);
+  };
+
+  return {
+    close() {
+      source.close();
+    },
+    supported: true,
+  };
 }
 
 async function createWebsiteListenerToken(authToken) {

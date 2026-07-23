@@ -107,7 +107,7 @@ Live graph:
 - Shows a rolling view of the newest five seconds of telemetry.
 - Uses the same toggleable overlay style as post-session graphs.
 - Supports Speed, Throttle, Brake, RPM, Gear, and DRS visibility toggles.
-- Uses the local listener `/live` stream when the active session ID matches, with Firestore session snapshots as the saved/fallback state.
+- Uses the local listener `/live-stream` push stream when the active session ID matches, with `/live` polling and Firestore session snapshots as fallback state.
 
 Live session list behavior:
 
