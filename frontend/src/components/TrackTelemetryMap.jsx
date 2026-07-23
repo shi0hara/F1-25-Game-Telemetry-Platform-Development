@@ -377,7 +377,7 @@ function drawSmoothTelemetryTrail(ctx, trail, transform) {
     const previous = points[i - 1];
     const current = points[i];
 
-    if (isTeleportJump(previous.sample, current.sample)) {
+    if (current.sample?.segmentBreakBefore || isTeleportJump(previous.sample, current.sample)) {
       if (segment.length > 1) continuousSegments.push(segment);
       segment = [current];
     } else {
@@ -608,49 +608,87 @@ function readStoredMapPoint(sample) {
   };
 }
 
-function normalizeLapTrailsFromApi(lapTrails) {
+function normalizeTrailPoints(points) {
+  const sorted = [...(points || [])]
+    .filter((point) => point && !isPitMapSample(point))
+    .sort(compareMapPoints);
+  const next = [];
+
+  for (const point of sorted) {
+    const previous = next[next.length - 1];
+    const previousDistance = Number(previous?.lapDistance);
+    const pointDistance = Number(point.lapDistance);
+    const nearlySameDistance =
+      Number.isFinite(previousDistance) &&
+      Number.isFinite(pointDistance) &&
+      Math.abs(previousDistance - pointDistance) < 0.5;
+
+    if (previous && nearlySameDistance && isSameMapPosition(previous, point)) {
+      next[next.length - 1] = point;
+      continue;
+    }
+
+    next.push(point);
+  }
+
+  return next;
+}
+
+function normalizeLapTrailsFromApi(lapTrails, maxPointsPerLap = 900) {
   if (!Array.isArray(lapTrails)) return [];
 
   const byLap = new Map();
 
-  lapTrails
-    .map((trail) => {
-      const points = Array.isArray(trail.points)
-        ? trail.points.map(readStoredMapPoint).filter(Boolean)
-        : [];
-      const lapNumber =
-        getLapNumber(trail, null) ??
-        parseLapNumber(trail.key, null) ??
-        parseLapNumber(trail.label, null) ??
-        getLapNumber(points[0], null);
-      const bestFragment = pickBestContinuousLapFragment(points);
+  for (const trail of lapTrails) {
+    const points = Array.isArray(trail?.points)
+      ? trail.points.map(readStoredMapPoint).filter(Boolean)
+      : [];
+    const lapNumber =
+      getLapNumber(trail, null) ??
+      parseLapNumber(trail?.key, null) ??
+      parseLapNumber(trail?.label, null) ??
+      getLapNumber(points[0], null);
 
-      return {
-        key: getLapTrailKey(lapNumber),
+    if (lapNumber == null || points.length < 2) continue;
+
+    const key = getLapTrailKey(lapNumber);
+    const existing = byLap.get(key);
+    const partPoints = normalizeTrailPoints(points).map((point, index) => ({
+      ...point,
+      segmentBreakBefore: Boolean(existing && index === 0),
+    }));
+
+    if (!existing) {
+      byLap.set(key, {
+        key,
         lapNumber,
         label: getLapTrailLabel(lapNumber),
-        pointCount: bestFragment.length,
-        originalPointCount: trail.originalPointCount || points.length,
-        points: bestFragment,
-        startedAt: trail.startedAt || bestFragment[0]?.timestamp || null,
-        endedAt: trail.endedAt || bestFragment[bestFragment.length - 1]?.timestamp || null,
+        originalPointCount: Number(trail.originalPointCount || points.length),
+        points: partPoints,
+      });
+    } else {
+      existing.originalPointCount += Number(trail.originalPointCount || points.length);
+      existing.points.push(...partPoints);
+    }
+  }
+
+  return [...byLap.values()]
+    .map((trail) => {
+      const points = downsampleTrailPoints(
+        normalizeTrailPoints(trail.points),
+        maxPointsPerLap
+      );
+
+      return {
+        ...trail,
+        pointCount: points.length,
+        points,
+        startedAt: points[0]?.timestamp || null,
+        endedAt: points[points.length - 1]?.timestamp || null,
       };
     })
     .filter((trail) => trail.lapNumber != null && trail.points.length >= 2)
-    .forEach((trail) => {
-      const key = getLapTrailKey(trail.lapNumber);
-      const existing = byLap.get(key);
-
-      if (!existing || trail.points.length > existing.points.length) {
-        byLap.set(key, {
-          ...trail,
-          key,
-          label: getLapTrailLabel(trail.lapNumber),
-        });
-      }
-    });
-
-  return [...byLap.values()].sort((a, b) => a.lapNumber - b.lapNumber);
+    .sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
 function compareMapPoints(a, b) {
@@ -670,59 +708,27 @@ function compareMapPoints(a, b) {
   return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
 }
 
-function distanceSpan(points) {
-  const distances = points
-    .map((point) => Number(point.lapDistance))
-    .filter(Number.isFinite);
-
-  if (distances.length < 2) return 0;
-  return Math.max(...distances) - Math.min(...distances);
-}
-
-function pickBestContinuousLapFragment(points) {
-  const ordered = [...(points || [])]
-    .filter((point) => point && !isPitMapSample(point))
-    .sort(compareMapPoints);
-
-  if (ordered.length < 3) return ordered;
-
-  const fragments = [];
-  let current = [ordered[0]];
-
-  for (let i = 1; i < ordered.length; i += 1) {
-    const previous = ordered[i - 1];
-    const next = ordered[i];
-
-    if (isTeleportJump(previous, next)) {
-      if (current.length > 1) fragments.push(current);
-      current = [next];
-    } else {
-      current.push(next);
-    }
-  }
-
-  if (current.length > 1) fragments.push(current);
-  if (fragments.length === 0) return ordered;
-
-  return fragments.sort((a, b) => {
-    const pointDiff = b.length - a.length;
-    if (pointDiff !== 0) return pointDiff;
-    return distanceSpan(b) - distanceSpan(a);
-  })[0];
-}
-
 function downsampleTrailPoints(points, maxPoints = 400) {
   if (!Array.isArray(points) || points.length <= maxPoints) return points;
   if (maxPoints <= 2) return points.slice(0, maxPoints);
 
-  const out = [];
+  const indexes = new Set([0, points.length - 1]);
   const step = (points.length - 1) / (maxPoints - 1);
 
   for (let i = 0; i < maxPoints; i += 1) {
-    out.push(points[Math.round(i * step)]);
+    indexes.add(Math.round(i * step));
   }
 
-  return out;
+  points.forEach((point, index) => {
+    if (!point?.segmentBreakBefore) return;
+    indexes.add(index);
+    if (index > 0) indexes.add(index - 1);
+  });
+
+  return [...indexes]
+    .sort((a, b) => a - b)
+    .map((index) => points[index])
+    .filter(Boolean);
 }
 
 function buildLapTrailsFromStoredPoints(points, maxPointsPerLap = 400) {
@@ -741,8 +747,10 @@ function buildLapTrailsFromStoredPoints(points, maxPointsPerLap = 400) {
 
   return [...grouped.entries()]
     .map(([key, lapPoints]) => {
-      const bestFragment = pickBestContinuousLapFragment(lapPoints);
-      const pointsForLap = downsampleTrailPoints(bestFragment, maxPointsPerLap);
+      const pointsForLap = downsampleTrailPoints(
+        normalizeTrailPoints(lapPoints),
+        maxPointsPerLap
+      );
       const lapNumber = getLapNumber(pointsForLap[0], null);
 
       return {
@@ -1041,7 +1049,7 @@ export default function TrackTelemetryMap({
         if (apiBase) {
           try {
             const res = await fetch(
-              `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=400`,
+              `${apiBase}/sessions/${sessionId}/lap-trails?maxPointsPerLap=900`,
               { headers: getAuthHeaders(), signal: abortController.signal }
             );
 
@@ -1051,7 +1059,7 @@ export default function TrackTelemetryMap({
 
             const data = await res.json();
             if (!isCurrentRequest()) return;
-            trails = normalizeLapTrailsFromApi(data.lapTrails);
+            trails = normalizeLapTrailsFromApi(data.lapTrails, 900);
           } catch (err) {
             if (err?.name === "AbortError" || !isCurrentRequest()) return;
             apiError = err;
@@ -1060,7 +1068,7 @@ export default function TrackTelemetryMap({
         }
 
         if (trails.length === 0) {
-          trails = await loadLapTrailsFromFirestore(sessionId, 400);
+          trails = await loadLapTrailsFromFirestore(sessionId, 900);
         }
 
         if (!isCurrentRequest()) return;
