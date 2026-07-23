@@ -462,6 +462,7 @@ def update_motion_state_from_packet(header, pkt):
     CURRENT_PITCH = parse_number_attr(car, ("pitch", "m_pitch", "mPitch"), None)
     CURRENT_ROLL = parse_number_attr(car, ("roll", "m_roll", "mRoll"), None)
     LAST_VALID_MOTION_AT = LAST_MOTION_PACKET_AT
+    update_local_live_motion_position(header)
 
 def warn_if_telemetry_has_no_map_position():
     global LAST_TELEMETRY_NO_MOTION_WARN_AT
@@ -762,6 +763,36 @@ def update_local_live_sample(sample_body):
     with LOCAL_LIVE_CONDITION:
         LOCAL_LIVE_SAMPLE = dict(sample_body or {})
         LOCAL_LIVE_UPDATED_AT = iso_now()
+        LOCAL_LIVE_CONDITION.notify_all()
+
+def update_local_live_motion_position(header=None):
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
+
+    if CURRENT_WORLD_X is None or CURRENT_WORLD_Z is None:
+        return
+
+    sample_timestamp = iso_now()
+
+    with LOCAL_LIVE_CONDITION:
+        sample = dict(LOCAL_LIVE_SAMPLE or {})
+        sample.update({
+            "timestamp": sample_timestamp,
+            "motionOnly": True,
+            "sampleIndex": get_frame_identifier(header) if header is not None else sample.get("sampleIndex"),
+            "lapNumber": CURRENT_LAP_NUM,
+            "lapDistance": CURRENT_LAP_DISTANCE_M,
+            "totalDistance": CURRENT_TOTAL_DISTANCE_M,
+            "worldX": CURRENT_WORLD_X,
+            "worldY": CURRENT_WORLD_Y,
+            "worldZ": CURRENT_WORLD_Z,
+            "yaw": CURRENT_YAW,
+            "pitch": CURRENT_PITCH,
+            "roll": CURRENT_ROLL,
+            "currentSector": CURRENT_SECTOR,
+            "pitStatus": CURRENT_PIT_STATUS,
+        })
+        LOCAL_LIVE_SAMPLE = sample
+        LOCAL_LIVE_UPDATED_AT = sample_timestamp
         LOCAL_LIVE_CONDITION.notify_all()
 
 def build_local_live_payload(sample, updated_at):
