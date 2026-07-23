@@ -102,6 +102,13 @@ Main live values:
 - World position.
 - Assist settings.
 
+Live graph:
+
+- Shows a rolling view of the newest five seconds of telemetry.
+- Uses the same toggleable overlay style as post-session graphs.
+- Supports Speed, Throttle, Brake, RPM, Gear, and DRS visibility toggles.
+- Uses the latest session snapshot path so the graph stays focused on current telemetry rather than historical playback.
+
 Live session list behavior:
 
 - The active/latest session is tinted and sorted near the top.

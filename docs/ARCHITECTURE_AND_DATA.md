@@ -36,6 +36,10 @@ Framework:
 - Firebase Web SDK.
 - Chart.js through `react-chartjs-2`.
 
+Performance notes:
+
+- Heavy route pages are lazy-loaded with React `lazy`/`Suspense` so dashboard/login first load does not download every analysis, live telemetry, admin, and calibration page up front.
+
 Main routes:
 
 | Route | Page | Access |
