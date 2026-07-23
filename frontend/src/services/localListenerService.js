@@ -50,10 +50,28 @@ function sameUser(localStatus, user) {
 export async function getLocalListenerStatus() {
   const res = await fetchWithTimeout(`${LOCAL_LISTENER_URL}/health`, {
     method: "GET",
+    cache: "no-store",
   });
 
   if (!res.ok) {
     throw new Error("Local listener is not available.");
+  }
+
+  return readJson(res);
+}
+
+export async function getLocalListenerLiveSample(timeoutMs = 180) {
+  const res = await fetchWithTimeout(
+    `${LOCAL_LISTENER_URL}/live`,
+    {
+      method: "GET",
+      cache: "no-store",
+    },
+    timeoutMs
+  );
+
+  if (!res.ok) {
+    throw new Error("Local listener live telemetry is not available.");
   }
 
   return readJson(res);

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 function hasNumber(value) {
   return Number.isFinite(Number(value));
@@ -299,7 +300,9 @@ export default function PostLapTelemetryMap({
 
   const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
   const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
-  const imageUrl = trackMap?.imageCalibration?.imageUrl || "/maps/default-track.png";
+  const imageUrl = normalizeTrackMapImageUrl(
+    trackMap?.imageCalibration?.imageUrl || "/maps/default-track.png"
+  );
 
   useEffect(() => {
     let cancelled = false;

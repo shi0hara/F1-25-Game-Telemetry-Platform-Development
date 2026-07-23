@@ -628,6 +628,9 @@ LAST_SESSION_PACKET_NOTICE_AT = 0.0
 
 STOP_EVENT = threading.Event()
 IDENTITY_LOCK = threading.Lock()
+LOCAL_LIVE_LOCK = threading.Lock()
+LOCAL_LIVE_SAMPLE = None
+LOCAL_LIVE_UPDATED_AT = None
 
 LATEST_QUEUE = queue.Queue(maxsize=1)
 BATCH_QUEUE = queue.Queue(maxsize=2000)
@@ -751,6 +754,31 @@ def listener_auth_headers():
         return {}
     return {"x-listener-token": LISTENER_TOKEN}
 
+def update_local_live_sample(sample_body):
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
+
+    with LOCAL_LIVE_LOCK:
+        LOCAL_LIVE_SAMPLE = dict(sample_body or {})
+        LOCAL_LIVE_UPDATED_AT = iso_now()
+
+def get_local_live_payload():
+    with LOCAL_LIVE_LOCK:
+        sample = dict(LOCAL_LIVE_SAMPLE) if LOCAL_LIVE_SAMPLE else None
+        updated_at = LOCAL_LIVE_UPDATED_AT
+
+    return {
+        "ok": True,
+        "paired": bool(LISTENER_TOKEN or USER_ID),
+        "username": DRIVER_USERNAME,
+        "email": DRIVER_EMAIL,
+        "userId": USER_ID,
+        "sessionId": SESSION_ID,
+        "apiBase": API_BASE,
+        "updatedAt": updated_at,
+        "latestTelemetry": sample,
+        "latestMapPosition": sample,
+    }
+
 def resolve_listener_token(token):
     global DRIVER_USERNAME, DRIVER_EMAIL, LISTENER_TOKEN, USER_ID
 
@@ -827,7 +855,13 @@ class ListenerPairingHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path != "/health":
+        path = self.path.split("?", 1)[0]
+
+        if path == "/live":
+            self.write_json(200, get_local_live_payload())
+            return
+
+        if path != "/health":
             self.write_json(404, {"ok": False, "error": "not found"})
             return
 
@@ -1083,6 +1117,7 @@ def reset_session_end_state():
 
 
 def reset_runtime_state_for_session(reset_assists=True):
+    global LOCAL_LIVE_SAMPLE, LOCAL_LIVE_UPDATED_AT
     global LAST_SAMPLE_TIMESTAMP, LAST_SAMPLE_SENT_AT
     global CURRENT_LAP_NUM, BEST_LAP_TIME_MS, LAST_DELTA_TO_PB_MS
     global CURRENT_LAP_DISTANCE_M, CURRENT_TOTAL_DISTANCE_M, CURRENT_SECTOR, CURRENT_PIT_STATUS
@@ -1102,6 +1137,9 @@ def reset_runtime_state_for_session(reset_assists=True):
     TELEMETRY_BATCH.clear()
     SENT_LAP_HISTORY_SET.clear()
     LAST_HISTORY_NUM_LAPS = 0
+    with LOCAL_LIVE_LOCK:
+        LOCAL_LIVE_SAMPLE = None
+        LOCAL_LIVE_UPDATED_AT = None
 
     LAST_SAMPLE_TIMESTAMP = None
     LAST_SAMPLE_SENT_AT = 0.0
@@ -1989,8 +2027,7 @@ def post_telemetry_sample(header, pkt):
         return
 
     now = time.time()
-    if now - LAST_SAMPLE_SENT_AT < SAMPLE_MIN_INTERVAL_SEC:
-        return
+    should_send_backend_sample = now - LAST_SAMPLE_SENT_AT >= SAMPLE_MIN_INTERVAL_SEC
 
     arr = get_attr(pkt, "car_telemetry_data", "m_carTelemetryData", "m_carTelemetryData")
     if arr is None or len(arr) == 0:
@@ -2067,7 +2104,6 @@ def post_telemetry_sample(header, pkt):
             braking_distance = None
 
     LAST_BRAKE_SAMPLE_TIME = now
-    LAST_SAMPLE_SENT_AT = now
 
     sample_timestamp = iso_now()
     LAST_SAMPLE_TIMESTAMP = sample_timestamp
@@ -2107,7 +2143,13 @@ def post_telemetry_sample(header, pkt):
         "pitStatus": CURRENT_PIT_STATUS,
     }
 
+    update_local_live_sample(sample_body)
     update_corner_state_from_sample(sample_body)
+
+    if not should_send_backend_sample:
+        return
+
+    LAST_SAMPLE_SENT_AT = now
     post_latest_telemetry(sample_body)
 
     TELEMETRY_BATCH.append(sample_body)

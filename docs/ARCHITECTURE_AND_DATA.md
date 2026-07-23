@@ -393,9 +393,14 @@ Used for:
 ```text
 F1 25 UDP packet
   -> revamp.py decodes packet
+  -> local listener /live exposes newest sample to same-PC frontend
+  -> live page uses /live when active sessionId matches
+
+F1 25 UDP packet
+  -> revamp.py decodes packet
   -> latest telemetry sent to /telemetry/latest
   -> backend updates sessions/{sessionId}.latestTelemetry
-  -> frontend Firestore snapshot updates live dashboard
+  -> frontend Firestore snapshot updates live dashboard fallback/saved state
 
 F1 25 UDP packet
   -> revamp.py batches sample

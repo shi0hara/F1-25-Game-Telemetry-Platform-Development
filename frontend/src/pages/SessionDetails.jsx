@@ -88,10 +88,11 @@ function formatNumber(value, digits = 1, suffix = "") {
 function normalizeLapDoc(lapDoc, bestLapTimeMs = null) {
   const lapTimeMs = Number(lapDoc.lapTimeMs);
   const normalizedLapTime = Number.isFinite(lapTimeMs) && lapTimeMs > 0 ? lapTimeMs : null;
+  const lapNumber = parseSessionLapNumber(lapDoc.lapNumber ?? lapDoc.label ?? lapDoc.id);
 
   return {
     id: lapDoc.id,
-    lapNumber: lapDoc.lapNumber ?? null,
+    lapNumber,
     lapTimeMs: normalizedLapTime,
     sector1Ms: Number.isFinite(Number(lapDoc.sector1Ms)) ? Number(lapDoc.sector1Ms) : null,
     sector2Ms: Number.isFinite(Number(lapDoc.sector2Ms)) ? Number(lapDoc.sector2Ms) : null,
@@ -106,15 +107,69 @@ function normalizeLapDoc(lapDoc, bestLapTimeMs = null) {
   };
 }
 
+function parseSessionLapNumber(value) {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const text = String(value);
+  const lapMatch = text.match(/lap\D*(\d+)/i);
+  if (lapMatch) return Number(lapMatch[1]);
+
+  const firstNumber = text.match(/\d+/);
+  return firstNumber ? Number(firstNumber[0]) : null;
+}
+
+function lapCompletenessScore(lap) {
+  let score = 0;
+  if (Number(lap?.lapTimeMs) > 0) score += 4;
+  if (Number(lap?.sector1Ms) > 0) score += 1;
+  if (Number(lap?.sector2Ms) > 0) score += 1;
+  if (Number(lap?.sector3Ms) > 0) score += 1;
+  if (lap?.valid === true) score += 2;
+  return score;
+}
+
+function normalizeSessionLaps(rows) {
+  const byLap = new Map();
+
+  for (const row of rows || []) {
+    const lapNumber = parseSessionLapNumber(row?.lapNumber ?? row?.label ?? row?.id);
+    if (lapNumber == null) continue;
+
+    const normalizedRow = {
+      ...row,
+      lapNumber,
+    };
+    const key = String(lapNumber);
+    const existing = byLap.get(key);
+
+    if (
+      !existing ||
+      lapCompletenessScore(normalizedRow) > lapCompletenessScore(existing) ||
+      (
+        lapCompletenessScore(normalizedRow) === lapCompletenessScore(existing) &&
+        Number(normalizedRow.lapTimeMs || Infinity) < Number(existing.lapTimeMs || Infinity)
+      )
+    ) {
+      byLap.set(key, normalizedRow);
+    }
+  }
+
+  return [...byLap.values()].sort(
+    (a, b) => Number(a.lapNumber || 0) - Number(b.lapNumber || 0)
+  );
+}
+
 async function loadPostSessionFallback(sessionId, session) {
   const [lapsSnap, reportSnap] = await Promise.all([
     getDocs(collection(db, "sessions", sessionId, "laps")),
     getDoc(doc(db, "sessions", sessionId, "reports", "postSession")).catch(() => null),
   ]);
 
-  const rawLaps = lapsSnap.docs
-    .map((lapDoc) => ({ id: lapDoc.id, ...lapDoc.data() }))
-    .sort((a, b) => Number(a.lapNumber || 0) - Number(b.lapNumber || 0));
+  const rawLaps = normalizeSessionLaps(
+    lapsSnap.docs.map((lapDoc) => ({ id: lapDoc.id, ...lapDoc.data() }))
+  );
   const validLapTimes = rawLaps
     .filter((lap) => lap.valid === true)
     .map((lap) => Number(lap.lapTimeMs))
@@ -151,8 +206,9 @@ async function loadPostSessionFallback(sessionId, session) {
 
 function getDefaultMapImage(trackKey) {
   const mapImages = {
-    track_0: "/maps/albert-park.png",
-    track_12: "/maps/singapore.png",
+    track_0: "/maps/albert-park.avif",
+    track_7: "/maps/great-britain.avif",
+    track_12: "/maps/singapore.avif",
     track_11: "/maps/monza.png",
     track_13: "/maps/suzuka.png",
   };
@@ -190,21 +246,24 @@ function graphScaledValue(metric, sample) {
 function buildRaceBoundaries(traces) {
   const boundaries = [];
   let previousLap = null;
+  const seenLaps = new Set();
 
   traces.forEach((sample, index) => {
-    const lapNumber = Number(sample.lapNumber);
+    const lapNumber = Number(sample.graphLapNumber ?? sample.lapNumber);
     if (!Number.isFinite(lapNumber)) return;
 
     if (previousLap === null) {
       previousLap = lapNumber;
+      seenLaps.add(lapNumber);
       return;
     }
 
-    if (lapNumber !== previousLap) {
+    if (lapNumber !== previousLap && !seenLaps.has(lapNumber)) {
       boundaries.push({
         index,
         label: "Lap " + lapNumber,
       });
+      seenLaps.add(lapNumber);
     }
 
     previousLap = lapNumber;
@@ -220,6 +279,16 @@ function hasUsefulSpan(values, minSpan = 5) {
 }
 
 function buildSessionGraphLabels(traces) {
+  if (traces.some((sample) => sample.graphLapNumber != null)) {
+    return traces.map((sample, index) => {
+      const lapNumber = sample.graphLapNumber ?? sample.lapNumber ?? "-";
+      const lapDistance = Number(sample.lapDistance);
+      return Number.isFinite(lapDistance)
+        ? `L${lapNumber} ${Math.round(lapDistance)}m`
+        : String(index + 1);
+    });
+  }
+
   const distanceValues = traces.map((sample) => sample.distanceM);
   if (hasUsefulSpan(distanceValues)) {
     return traces.map((sample, index) => {
@@ -231,7 +300,7 @@ function buildSessionGraphLabels(traces) {
   const lapDistanceValues = traces.map((sample) => sample.lapDistance);
   if (hasUsefulSpan(lapDistanceValues)) {
     return traces.map((sample, index) => {
-      const lapNumber = sample.lapNumber ?? "-";
+      const lapNumber = sample.graphLapNumber ?? sample.lapNumber ?? "-";
       const lapDistance = Number(sample.lapDistance);
       return Number.isFinite(lapDistance)
         ? `L${lapNumber} ${Math.round(lapDistance)}m`
@@ -253,26 +322,90 @@ function canOrderByLapDistance(traces) {
   return usable.length >= Math.max(3, traces.length * 0.65);
 }
 
-function orderSessionTraces(traces) {
-  if (!canOrderByLapDistance(traces)) return traces;
+function compareGraphSamples(a, b) {
+  const aDistance = Number(a.lapDistance);
+  const bDistance = Number(b.lapDistance);
+  if (Number.isFinite(aDistance) && Number.isFinite(bDistance) && aDistance !== bDistance) {
+    return aDistance - bDistance;
+  }
 
-  return [...traces].sort((a, b) => {
-    const aLap = Number(a.lapNumber);
-    const bLap = Number(b.lapNumber);
-    if (aLap !== bLap) return aLap - bLap;
+  const aIndex = Number(a.sampleIndex ?? a.index);
+  const bIndex = Number(b.sampleIndex ?? b.index);
+  if (Number.isFinite(aIndex) && Number.isFinite(bIndex) && aIndex !== bIndex) {
+    return aIndex - bIndex;
+  }
 
-    const aDistance = Number(a.lapDistance);
-    const bDistance = Number(b.lapDistance);
-    if (aDistance !== bDistance) return aDistance - bDistance;
+  return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
+}
 
-    const aIndex = Number(a.sampleIndex ?? a.index);
-    const bIndex = Number(b.sampleIndex ?? b.index);
-    if (Number.isFinite(aIndex) && Number.isFinite(bIndex) && aIndex !== bIndex) {
-      return aIndex - bIndex;
+function dedupeGraphLapSamples(samples) {
+  const next = [];
+
+  for (const sample of samples) {
+    const distance = Number(sample.lapDistance);
+    const previous = next[next.length - 1];
+    const previousDistance = Number(previous?.lapDistance);
+
+    if (
+      previous &&
+      Number.isFinite(distance) &&
+      Number.isFinite(previousDistance) &&
+      Math.abs(distance - previousDistance) < 0.75
+    ) {
+      next[next.length - 1] = {
+        ...previous,
+        ...sample,
+      };
+      continue;
     }
 
-    return 0;
+    next.push(sample);
+  }
+
+  return next;
+}
+
+function normalizeSessionTracesForGraph(traces) {
+  if (!canOrderByLapDistance(traces)) return traces;
+
+  const byLap = new Map();
+
+  traces.forEach((sample, index) => {
+    const lapNumber = Number(sample.lapNumber);
+    if (!Number.isFinite(lapNumber)) return;
+
+    if (!byLap.has(lapNumber)) {
+      byLap.set(lapNumber, []);
+    }
+
+    byLap.get(lapNumber).push({
+      ...sample,
+      graphSourceIndex: index,
+    });
   });
+
+  const normalized = [];
+  const lapNumbers = [...byLap.keys()].sort((a, b) => a - b);
+
+  for (const lapNumber of lapNumbers) {
+    const samples = dedupeGraphLapSamples(
+      [...(byLap.get(lapNumber) || [])].sort(compareGraphSamples)
+    );
+
+    for (const sample of samples) {
+      const lapDistance = Number(sample.lapDistance);
+
+      normalized.push({
+        ...sample,
+        graphLapNumber: lapNumber,
+        graphDistanceM: Number.isFinite(lapDistance)
+          ? (lapNumber - lapNumbers[0]) * 10000 + lapDistance
+          : normalized.length,
+      });
+    }
+  }
+
+  return normalized.length >= 2 ? normalized : traces;
 }
 
 const raceGraphGuidesPlugin = {
@@ -312,7 +445,7 @@ function RaceTelemetryGraph({ traces }) {
     }, {});
   });
 
-  const orderedTraces = useMemo(() => orderSessionTraces(traces), [traces]);
+  const orderedTraces = useMemo(() => normalizeSessionTracesForGraph(traces), [traces]);
 
   const labels = useMemo(() => {
     return buildSessionGraphLabels(orderedTraces);
@@ -588,7 +721,8 @@ function LiveSessionPanel({ session }) {
 
 function PostSessionPanel({ details }) {
   const navigate = useNavigate();
-  const { session, stats, laps, traces, report } = details;
+  const { session, stats, traces, report } = details;
+  const laps = useMemo(() => normalizeSessionLaps(details.laps || []), [details.laps]);
   const signals = report?.topCoachSignals || [];
   const findings = report?.precisionFindings || [];
   const startedAt = formatDateTime(getSessionStartedAt(session));

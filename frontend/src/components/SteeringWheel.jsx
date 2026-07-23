@@ -59,7 +59,8 @@ function PedalBar({ label, value, color }) {
             minHeight: percent > 0 ? 3 : 0,
             background: color,
             boxShadow: percent > 0 ? "0 0 16px " + color : "none",
-            transition: "height 40ms linear",
+            transition: "height 24ms linear",
+            willChange: "height",
           }}
         />
       </div>
@@ -160,7 +161,7 @@ export default function SteeringWheel({
               height: "92%",
               transform: "rotate(" + rotation + "deg)",
               transformOrigin: "50% 50%",
-              transition: "transform 35ms linear",
+              transition: "transform 24ms linear",
               willChange: "transform",
             }}
           >

@@ -57,6 +57,14 @@ It starts a local-only website pairing API:
 http://127.0.0.1:51377
 ```
 
+The same local API exposes the newest decoded sample for true live display:
+
+```text
+GET http://127.0.0.1:51377/live
+```
+
+The frontend uses this only when the local listener reports the same active `sessionId` as the page being viewed. Firestore/backend data remains the fallback and the source for saved history, lap analysis, leaderboard, and reports.
+
 When the user logs in on the website, the website pairs the listener to that account automatically.
 
 When the user logs out on the website, the website tells the listener to clear the active account.

@@ -5,6 +5,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import useActiveSession from "../hooks/useActiveSession";
+import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
@@ -26,8 +27,9 @@ function getTrackKeyFromSession(data) {
 
 function getDefaultImage(trackKey) {
   const mapImages = {
-    track_0: "/maps/albert-park.png",
-    track_12: "/maps/singapore.png",
+    track_0: "/maps/albert-park.avif",
+    track_7: "/maps/great-britain.avif",
+    track_12: "/maps/singapore.avif",
     track_11: "/maps/monza.png",
     track_13: "/maps/suzuka.png",
   };
@@ -158,10 +160,11 @@ export default function TrackCalibration({
 
   const imageCalibration = trackMap?.imageCalibration || null;
 
-  const imageUrl =
+  const imageUrl = normalizeTrackMapImageUrl(
     providedImageUrl ||
-    imageCalibration?.imageUrl ||
-    getDefaultImage(activeTrackKey);
+      imageCalibration?.imageUrl ||
+      getDefaultImage(activeTrackKey)
+  );
 
   const imageWidth = Number(
     imageCalibration?.imageWidth || providedImageWidth || 1200

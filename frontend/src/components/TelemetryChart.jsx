@@ -23,7 +23,61 @@ function isLapValid(value) {
 
 function sameLap(a, b) {
   if (a == null || b == null) return false;
-  return Number(a) === Number(b);
+  return parseLapNumber(a) === parseLapNumber(b);
+}
+
+function parseLapNumber(value) {
+  if (value == null) return null;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const text = String(value);
+  const lapMatch = text.match(/lap\D*(\d+)/i);
+  if (lapMatch) return Number(lapMatch[1]);
+
+  const firstNumber = text.match(/\d+/);
+  return firstNumber ? Number(firstNumber[0]) : null;
+}
+
+function lapCompletenessScore(lap) {
+  let score = 0;
+  if (lap.lapTimeMs > 0) score += 4;
+  if (lap.sector1Ms > 0) score += 1;
+  if (lap.sector2Ms > 0) score += 1;
+  if (lap.sector3Ms > 0) score += 1;
+  if (isLapValid(lap.valid)) score += 2;
+  return score;
+}
+
+function normalizeLapRows(rows) {
+  const byLap = new Map();
+
+  for (const row of rows || []) {
+    const lapNumber = parseLapNumber(row?.lapNumber ?? row?.label ?? row?.id);
+    if (lapNumber == null) continue;
+
+    const normalizedRow = {
+      ...row,
+      lapNumber,
+    };
+    const key = String(lapNumber);
+    const existing = byLap.get(key);
+
+    if (
+      !existing ||
+      lapCompletenessScore(normalizedRow) > lapCompletenessScore(existing) ||
+      (
+        lapCompletenessScore(normalizedRow) === lapCompletenessScore(existing) &&
+        Number(normalizedRow.lapTimeMs || Infinity) < Number(existing.lapTimeMs || Infinity)
+      )
+    ) {
+      byLap.set(key, normalizedRow);
+    }
+  }
+
+  return [...byLap.values()].sort(
+    (a, b) => Number(a.lapNumber || 0) - Number(b.lapNumber || 0)
+  );
 }
 
 function getAuthHeaders() {
@@ -59,7 +113,7 @@ export default function TelemetryChart({
         }
 
         const data = await res.json();
-        const rows = Array.isArray(data.laps) ? data.laps : [];
+        const rows = normalizeLapRows(Array.isArray(data.laps) ? data.laps : []);
 
         if (cancelled) return;
 

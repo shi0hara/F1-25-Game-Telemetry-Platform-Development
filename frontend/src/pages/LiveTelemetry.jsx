@@ -16,6 +16,7 @@ import TrackTelemetryMap from "../components/TrackTelemetryMap";
 import TelemetryChart from "../components/TelemetryChart";
 import SteeringWheel from "../components/SteeringWheel";
 import useActiveSession from "../hooks/useActiveSession";
+import { getLocalListenerLiveSample } from "../services/localListenerService";
 import {
   formatSessionFlag,
   getSessionEndedAt,
@@ -38,6 +39,7 @@ const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 const LIVE_GRAPH_WINDOW_MS = 5000;
 const LIVE_GRAPH_MAX_POINTS = 240;
+const LIVE_GRAPH_RENDER_TICK_MS = 33;
 const LIVE_GRAPH_METRICS = [
   { key: "speedKph", label: "Speed", color: "#38bdf8", max: 360, unit: "km/h", defaultVisible: true },
   { key: "throttlePct", label: "Throttle", color: "#22c55e", max: 100, unit: "%", defaultVisible: true },
@@ -90,8 +92,9 @@ function getTrackKey(session) {
 
 function getDefaultMapImage(trackKey) {
   const mapImages = {
-    track_0: "/maps/albert-park.png",
-    track_12: "/maps/singapore.png",
+    track_0: "/maps/albert-park.avif",
+    track_7: "/maps/great-britain.avif",
+    track_12: "/maps/singapore.avif",
     track_11: "/maps/monza.png",
     track_13: "/maps/suzuka.png",
   };
@@ -171,6 +174,39 @@ function compareTelemetryFreshness(next, prev) {
   }
 
   return 0;
+}
+
+function mergeFreshLiveTelemetry(session) {
+  const telemetry = session?.latestTelemetry || null;
+  const mapPosition = session?.latestMapPosition || null;
+
+  if (!telemetry) return mapPosition;
+  if (!mapPosition) return telemetry;
+
+  const telemetryFreshness = readTelemetryFreshness(telemetry);
+  const mapFreshness = readTelemetryFreshness(mapPosition);
+  const mapIsAtLeastAsFresh =
+    compareTelemetryFreshness(mapFreshness, telemetryFreshness) >= 0;
+
+  if (mapIsAtLeastAsFresh) {
+    return {
+      ...telemetry,
+      ...mapPosition,
+      rpm: telemetry.rpm ?? telemetry.engineRPM ?? mapPosition.rpm ?? mapPosition.engineRPM,
+      engineRPM:
+        telemetry.engineRPM ?? telemetry.rpm ?? mapPosition.engineRPM ?? mapPosition.rpm,
+      gear: telemetry.gear ?? mapPosition.gear,
+      drs: telemetry.drs ?? mapPosition.drs,
+    };
+  }
+
+  return {
+    ...mapPosition,
+    ...telemetry,
+    worldX: telemetry.worldX ?? mapPosition.worldX,
+    worldY: telemetry.worldY ?? mapPosition.worldY,
+    worldZ: telemetry.worldZ ?? mapPosition.worldZ,
+  };
 }
 
 function isReasonableLiveSpeed(speed, previousPoint, freshness) {
@@ -266,6 +302,43 @@ function liveGraphValueLabel(metric, raw) {
   return value.toFixed(1) + (metric.unit ? " " + metric.unit : "");
 }
 
+function buildLiveGraphDatasetPoints(metric, visiblePoints, renderClockMs) {
+  const windowSeconds = LIVE_GRAPH_WINDOW_MS / 1000;
+  const samples = visiblePoints
+    .map((point) => ({
+      x: Math.max(-windowSeconds, (point.receivedAtMs - renderClockMs) / 1000),
+      y: liveGraphScaledValue(metric, point),
+      sourcePoint: point,
+    }))
+    .filter((point) => point.y !== null);
+
+  if (samples.length === 0) return [];
+
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  const anchoredSamples = [...samples];
+
+  if (first.x > -windowSeconds) {
+    anchoredSamples.unshift({
+      x: -windowSeconds,
+      y: first.y,
+      sourcePoint: first.sourcePoint,
+      edgePoint: true,
+    });
+  }
+
+  if (last.x < 0) {
+    anchoredSamples.push({
+      x: 0,
+      y: last.y,
+      sourcePoint: last.sourcePoint,
+      edgePoint: true,
+    });
+  }
+
+  return anchoredSamples;
+}
+
 function LiveTelemetryGraph({ points }) {
   const [visibleMetrics, setVisibleMetrics] = useState(() =>
     LIVE_GRAPH_METRICS.reduce((next, metric) => {
@@ -273,33 +346,43 @@ function LiveTelemetryGraph({ points }) {
       return next;
     }, {})
   );
+  const [renderClockMs, setRenderClockMs] = useState(() => Date.now());
 
-  const labels = useMemo(() => {
-    if (points.length === 0) return [];
-    const firstTime = points[0].receivedAtMs || Date.now();
-    return points.map((point) => {
-      const elapsedSeconds = Math.max(0, (point.receivedAtMs - firstTime) / 1000);
-      return elapsedSeconds.toFixed(1) + "s";
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRenderClockMs(Date.now());
+    }, LIVE_GRAPH_RENDER_TICK_MS);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const visiblePoints = useMemo(() => {
+    const cutoff = renderClockMs - LIVE_GRAPH_WINDOW_MS;
+    return points.filter((point) => {
+      return point.receivedAtMs >= cutoff && point.receivedAtMs <= renderClockMs + 500;
     });
-  }, [points]);
+  }, [points, renderClockMs]);
 
   const chartData = useMemo(
     () => ({
-      labels,
       datasets: LIVE_GRAPH_METRICS.filter((metric) => visibleMetrics[metric.key]).map((metric) => ({
         label: metric.label,
-        data: points.map((point) => liveGraphScaledValue(metric, point)),
+        data: buildLiveGraphDatasetPoints(metric, visiblePoints, renderClockMs),
         borderColor: metric.color,
         backgroundColor: metric.color,
         borderWidth: metric.key === "speedKph" ? 2.5 : 2,
+        borderCapStyle: "round",
+        borderJoinStyle: "round",
+        cubicInterpolationMode: metric.stepped ? "default" : "monotone",
         pointRadius: 0,
         tension: metric.stepped ? 0 : 0.22,
         stepped: metric.stepped || false,
         spanGaps: true,
+        clip: false,
         metricKey: metric.key,
       })),
     }),
-    [labels, points, visibleMetrics]
+    [renderClockMs, visibleMetrics, visiblePoints]
   );
 
   const chartOptions = useMemo(
@@ -313,9 +396,17 @@ function LiveTelemetryGraph({ points }) {
       },
       scales: {
         x: {
+          type: "linear",
+          min: -LIVE_GRAPH_WINDOW_MS / 1000,
+          max: 0,
           ticks: {
             color: "#94a3b8",
             maxTicksLimit: 6,
+            callback: (value) => {
+              const n = Number(value);
+              if (!Number.isFinite(n)) return "";
+              return n === 0 ? "now" : `${n.toFixed(0)}s`;
+            },
           },
           grid: {
             color: "rgba(255,255,255,0.06)",
@@ -344,11 +435,16 @@ function LiveTelemetryGraph({ points }) {
         },
         tooltip: {
           callbacks: {
+            title(items) {
+              const x = Number(items[0]?.raw?.x);
+              if (!Number.isFinite(x)) return "";
+              return x >= -0.05 ? "now" : `${Math.abs(x).toFixed(1)}s ago`;
+            },
             label(context) {
               const metric = LIVE_GRAPH_METRICS.find(
                 (item) => item.key === context.dataset.metricKey
               );
-              const point = points[context.dataIndex] || {};
+              const point = context.raw?.sourcePoint || {};
               if (!metric) return context.dataset.label + ": -";
               return (
                 metric.label +
@@ -357,7 +453,7 @@ function LiveTelemetryGraph({ points }) {
               );
             },
             afterBody(items) {
-              const point = points[items[0]?.dataIndex] || {};
+              const point = items[0]?.raw?.sourcePoint || {};
               return [
                 "Lap: " + (point.lapNumber ?? "-"),
                 "Sector: " + (point.sector ?? "-"),
@@ -368,7 +464,7 @@ function LiveTelemetryGraph({ points }) {
         },
       },
     }),
-    [points]
+    [visiblePoints]
   );
 
   return (
@@ -411,15 +507,15 @@ function LiveTelemetryGraph({ points }) {
         </div>
       </div>
 
-      {points.length < 2 ? (
-        <p className="analysis-muted">
-          Waiting for live telemetry samples. The graph appears once the listener sends a few updates.
-        </p>
-      ) : (
-        <div className="live-telemetry-graph-wrap">
+      <div className="live-telemetry-graph-wrap">
+        {visiblePoints.length < 2 ? (
+          <div className="live-telemetry-graph-placeholder">
+            Waiting for live telemetry samples. The graph appears once the listener sends a few updates.
+          </div>
+        ) : (
           <Line data={chartData} options={chartOptions} />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -501,6 +597,7 @@ export default function LiveTelemetry({ currentUser }) {
   const [localError, setLocalError] = useState("");
   const lastTelemetryFreshnessRef = useRef(null);
   const lastLiveGraphPointRef = useRef(null);
+  const showAllSessions = isAdmin && sessionScope === "all";
 
   const {
     sessionId: autoSessionId,
@@ -509,7 +606,10 @@ export default function LiveTelemetry({ currentUser }) {
     userData,
     loading,
     error,
-  } = useActiveSession(activeUsername);
+  } = useActiveSession(activeUsername, {
+    includeAllSessions: showAllSessions,
+    sessionLimit: showAllSessions ? 250 : 50,
+  });
 
   const displaySessions = useMemo(() => sortSessionsForDisplay(sessions), [sessions]);
   const latestId = useMemo(() => latestSessionId(sessions), [sessions]);
@@ -609,7 +709,7 @@ export default function LiveTelemetry({ currentUser }) {
           ...snapshot.data(),
         };
 
-        const latestTelemetry = data.latestTelemetry || null;
+        const latestTelemetry = mergeFreshLiveTelemetry(data);
 
         if (!latestTelemetry) {
           setSelectedSession(data);
@@ -624,6 +724,14 @@ export default function LiveTelemetry({ currentUser }) {
         );
 
         if (freshnessDelta < 0) {
+          setSelectedSession((current) => {
+            if (!current || current.id !== data.id) return data;
+            return {
+              ...data,
+              latestTelemetry: current.latestTelemetry,
+              latestMapPosition: current.latestMapPosition,
+            };
+          });
           return;
         }
 
@@ -668,6 +776,77 @@ export default function LiveTelemetry({ currentUser }) {
   const mapImageUrl = useMemo(() => {
     return getDefaultMapImage(activeTrackKey);
   }, [activeTrackKey]);
+  const selectedSessionActive = isActiveSession(selectedSession);
+
+  useEffect(() => {
+    if (!selectedSessionId || !selectedSessionActive) return undefined;
+
+    let cancelled = false;
+    let localFetchInFlight = false;
+    let failureCount = 0;
+    let timerId = 0;
+
+    function applyLocalLivePayload(payload) {
+      if (!payload || payload.sessionId !== selectedSessionId) return false;
+
+      const latestTelemetry = mergeFreshLiveTelemetry(payload);
+      if (!latestTelemetry) return false;
+
+      const freshness = readTelemetryFreshness(latestTelemetry);
+      const freshnessDelta = compareTelemetryFreshness(
+        freshness,
+        lastTelemetryFreshnessRef.current
+      );
+
+      if (freshnessDelta <= 0) return true;
+
+      lastTelemetryFreshnessRef.current = freshness;
+      setSelectedTelemetry(latestTelemetry);
+      setSelectedSession((current) => {
+        if (!current || current.id !== selectedSessionId) return current;
+
+        return {
+          ...current,
+          latestTelemetry,
+          latestTelemetryAt: payload.updatedAt || latestTelemetry.timestamp || current.latestTelemetryAt,
+          latestMapPosition:
+            payload.latestMapPosition || latestTelemetry || current.latestMapPosition,
+        };
+      });
+      appendLiveGraphPoint(latestTelemetry, freshness);
+      return true;
+    }
+
+    async function pollLocalLive() {
+      if (cancelled || localFetchInFlight) return;
+      localFetchInFlight = true;
+
+      try {
+        const payload = await getLocalListenerLiveSample(140);
+        if (cancelled) return;
+        failureCount = applyLocalLivePayload(payload) ? 0 : Math.min(failureCount + 1, 10);
+      } catch {
+        if (!cancelled) {
+          failureCount = Math.min(failureCount + 1, 10);
+        }
+      } finally {
+        localFetchInFlight = false;
+        if (!cancelled) {
+          timerId = window.setTimeout(
+            pollLocalLive,
+            failureCount > 2 ? 500 : 16
+          );
+        }
+      }
+    }
+
+    pollLocalLive();
+
+    return () => {
+      cancelled = true;
+      if (timerId) window.clearTimeout(timerId);
+    };
+  }, [selectedSessionActive, selectedSessionId]);
 
   const lapOptions = useMemo(() => {
     if (mapTrailState.options.length > 0) {
@@ -694,6 +873,16 @@ export default function LiveTelemetry({ currentUser }) {
 
   const activeTrailKey = selectedLapOption?.key || "current";
   const selectedLapNumber = selectedLapOption?.lapNumber ?? null;
+  const selectedThrottlePct = readPercentMetric(
+    selectedTelemetry,
+    "throttlePct",
+    "throttle"
+  );
+  const selectedBrakePct = readPercentMetric(
+    selectedTelemetry,
+    "brakePct",
+    "brake"
+  );
 
   const shownError = localError || error;
 
@@ -908,8 +1097,8 @@ export default function LiveTelemetry({ currentUser }) {
                 >
                   <SteeringWheel
                     steering={selectedTelemetry.steering}
-                    throttle={selectedTelemetry.throttle}
-                    brake={selectedTelemetry.brake}
+                    throttle={selectedThrottlePct}
+                    brake={selectedBrakePct}
                     label="Live Steering"
                     size={152}
                   />
@@ -932,11 +1121,11 @@ export default function LiveTelemetry({ currentUser }) {
                   </p>
                   <p>
                     <strong>Throttle:</strong>{" "}
-                    {((selectedTelemetry.throttle ?? 0) * 100).toFixed(0)}%
+                    {(selectedThrottlePct ?? 0).toFixed(0)}%
                   </p>
                   <p>
                     <strong>Brake:</strong>{" "}
-                    {((selectedTelemetry.brake ?? 0) * 100).toFixed(0)}%
+                    {(selectedBrakePct ?? 0).toFixed(0)}%
                   </p>
                   <p>
                     <strong>Steering:</strong>{" "}
@@ -1003,6 +1192,7 @@ export default function LiveTelemetry({ currentUser }) {
                 trackKey={activeTrackKey}
                 mapImageUrl={mapImageUrl}
                 selectedTrailKey={activeTrailKey}
+                liveMapPosition={selectedSession.latestMapPosition}
                 onTrailOptionsChange={setMapTrailState}
               />
             ) : (

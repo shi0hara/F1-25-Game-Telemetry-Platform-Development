@@ -8,6 +8,7 @@ import {
   query,
 } from "firebase/firestore";
 import { db } from "../firebase";
+import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -26,9 +27,18 @@ function getAuthHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function readControlFraction(sample, pctKey, rawKey) {
+  const pctValue = Number(sample?.[pctKey]);
+  if (Number.isFinite(pctValue)) {
+    return clamp(pctValue > 1 ? pctValue / 100 : pctValue, 0, 1);
+  }
+
+  return clamp(sample?.[rawKey], 0, 1);
+}
+
 function getTelemetryColor(sample) {
-  const brake = clamp(sample?.brake, 0, 1);
-  const throttle = clamp(sample?.throttle, 0, 1);
+  const brake = readControlFraction(sample, "brakePct", "brake");
+  const throttle = readControlFraction(sample, "throttlePct", "throttle");
   const steering = Math.abs(clamp(sample?.steering, -1, 1));
 
   if (brake > 0.05) {
@@ -252,6 +262,8 @@ function drawTextBadge(ctx, text, x, y) {
 }
 
 const MAP_TELEPORT_JUMP_METERS = 180;
+const LIVE_MAP_FETCH_INTERVAL_MS = 150;
+const LIVE_MAP_VISUAL_LERP = 0.62;
 
 function worldDistanceMeters(a, b) {
   if (!a || !b || !hasNumber(a.worldX) || !hasNumber(a.worldZ) || !hasNumber(b.worldX) || !hasNumber(b.worldZ)) {
@@ -328,6 +340,21 @@ function drawTrailSegment(ctx, previous, current, next, color) {
   ctx.stroke();
 }
 
+function drawColoredLine(ctx, from, to, color) {
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
+function midpoint(a, b) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
 function drawSmoothTelemetryTrail(ctx, trail, transform) {
   const points = getTrailPoints(
     trail.filter((sample) => !isPitMapSample(sample)),
@@ -340,30 +367,109 @@ function drawSmoothTelemetryTrail(ctx, trail, transform) {
 
   ctx.lineWidth = 5;
   ctx.globalAlpha = 1;
-  ctx.lineCap = "butt";
+  ctx.lineCap = "round";
   ctx.lineJoin = "round";
+
+  const continuousSegments = [];
+  let segment = [points[0]];
 
   for (let i = 1; i < points.length; i++) {
     const previous = points[i - 1];
     const current = points[i];
 
     if (isTeleportJump(previous.sample, current.sample)) {
+      if (segment.length > 1) continuousSegments.push(segment);
+      segment = [current];
+    } else {
+      segment.push(current);
+    }
+  }
+
+  if (segment.length > 1) continuousSegments.push(segment);
+
+  for (const pointsForSegment of continuousSegments) {
+    if (pointsForSegment.length === 2) {
+      drawColoredLine(
+        ctx,
+        pointsForSegment[0],
+        pointsForSegment[1],
+        getTelemetryColor(pointsForSegment[1].sample)
+      );
       continue;
     }
 
-    ctx.beginPath();
-    ctx.moveTo(previous.x, previous.y);
-    ctx.lineTo(current.x, current.y);
-    ctx.strokeStyle = getTelemetryColor(current.sample);
-    ctx.stroke();
+    drawColoredLine(
+      ctx,
+      pointsForSegment[0],
+      midpoint(pointsForSegment[0], pointsForSegment[1]),
+      getTelemetryColor(pointsForSegment[1].sample)
+    );
+
+    for (let i = 1; i < pointsForSegment.length - 1; i++) {
+      drawTrailSegment(
+        ctx,
+        pointsForSegment[i - 1],
+        pointsForSegment[i],
+        pointsForSegment[i + 1],
+        getTelemetryColor(pointsForSegment[i].sample)
+      );
+    }
+
+    const lastIndex = pointsForSegment.length - 1;
+    drawColoredLine(
+      ctx,
+      midpoint(pointsForSegment[lastIndex - 1], pointsForSegment[lastIndex]),
+      pointsForSegment[lastIndex],
+      getTelemetryColor(pointsForSegment[lastIndex].sample)
+    );
   }
 
   ctx.restore();
 }
 
+function getVisualLivePoint(visualPointRef, latest) {
+  if (!latest || !hasNumber(latest.worldX) || !hasNumber(latest.worldZ)) {
+    return latest;
+  }
+
+  const current = visualPointRef.current;
+
+  if (
+    !current ||
+    isTeleportJump(current, latest) ||
+    worldDistanceMeters(current, latest) > 65
+  ) {
+    visualPointRef.current = latest;
+    return latest;
+  }
+
+  const visualPoint = {
+    ...latest,
+    worldX:
+      Number(current.worldX) +
+      (Number(latest.worldX) - Number(current.worldX)) * LIVE_MAP_VISUAL_LERP,
+    worldZ:
+      Number(current.worldZ) +
+      (Number(latest.worldZ) - Number(current.worldZ)) * LIVE_MAP_VISUAL_LERP,
+  };
+
+  visualPointRef.current = visualPoint;
+  return visualPoint;
+}
+
+function parseLapNumber(value, fallback = null) {
+  if (hasNumber(value)) return Number(value);
+
+  const text = String(value ?? "");
+  const lapMatch = text.match(/lap\D*(\d+)/i);
+  if (lapMatch) return Number(lapMatch[1]);
+
+  const firstNumber = text.match(/\d+/);
+  return firstNumber ? Number(firstNumber[0]) : fallback;
+}
+
 function getLapNumber(sample, fallback = null) {
-  if (!hasNumber(sample?.lapNumber)) return fallback;
-  return Number(sample.lapNumber);
+  return parseLapNumber(sample?.lapNumber, fallback);
 }
 
 function getLapTrailKey(lapNumber) {
@@ -505,25 +611,46 @@ function readStoredMapPoint(sample) {
 function normalizeLapTrailsFromApi(lapTrails) {
   if (!Array.isArray(lapTrails)) return [];
 
-  return lapTrails
+  const byLap = new Map();
+
+  lapTrails
     .map((trail) => {
       const points = Array.isArray(trail.points)
         ? trail.points.map(readStoredMapPoint).filter(Boolean)
         : [];
+      const lapNumber =
+        getLapNumber(trail, null) ??
+        parseLapNumber(trail.key, null) ??
+        parseLapNumber(trail.label, null) ??
+        getLapNumber(points[0], null);
+      const bestFragment = pickBestContinuousLapFragment(points);
 
       return {
-        key: trail.key || getLapTrailKey(trail.lapNumber),
-        lapNumber: getLapNumber(trail, null),
-        label: trail.label || getLapTrailLabel(trail.lapNumber),
-        pointCount: points.length,
+        key: getLapTrailKey(lapNumber),
+        lapNumber,
+        label: getLapTrailLabel(lapNumber),
+        pointCount: bestFragment.length,
         originalPointCount: trail.originalPointCount || points.length,
-        points,
-        startedAt: trail.startedAt || points[0]?.timestamp || null,
-        endedAt: trail.endedAt || points[points.length - 1]?.timestamp || null,
+        points: bestFragment,
+        startedAt: trail.startedAt || bestFragment[0]?.timestamp || null,
+        endedAt: trail.endedAt || bestFragment[bestFragment.length - 1]?.timestamp || null,
       };
     })
     .filter((trail) => trail.lapNumber != null && trail.points.length >= 2)
-    .sort((a, b) => a.lapNumber - b.lapNumber);
+    .forEach((trail) => {
+      const key = getLapTrailKey(trail.lapNumber);
+      const existing = byLap.get(key);
+
+      if (!existing || trail.points.length > existing.points.length) {
+        byLap.set(key, {
+          ...trail,
+          key,
+          label: getLapTrailLabel(trail.lapNumber),
+        });
+      }
+    });
+
+  return [...byLap.values()].sort((a, b) => a.lapNumber - b.lapNumber);
 }
 
 function compareMapPoints(a, b) {
@@ -541,6 +668,47 @@ function compareMapPoints(a, b) {
   }
 
   return String(a.timestamp || "").localeCompare(String(b.timestamp || ""));
+}
+
+function distanceSpan(points) {
+  const distances = points
+    .map((point) => Number(point.lapDistance))
+    .filter(Number.isFinite);
+
+  if (distances.length < 2) return 0;
+  return Math.max(...distances) - Math.min(...distances);
+}
+
+function pickBestContinuousLapFragment(points) {
+  const ordered = [...(points || [])]
+    .filter((point) => point && !isPitMapSample(point))
+    .sort(compareMapPoints);
+
+  if (ordered.length < 3) return ordered;
+
+  const fragments = [];
+  let current = [ordered[0]];
+
+  for (let i = 1; i < ordered.length; i += 1) {
+    const previous = ordered[i - 1];
+    const next = ordered[i];
+
+    if (isTeleportJump(previous, next)) {
+      if (current.length > 1) fragments.push(current);
+      current = [next];
+    } else {
+      current.push(next);
+    }
+  }
+
+  if (current.length > 1) fragments.push(current);
+  if (fragments.length === 0) return ordered;
+
+  return fragments.sort((a, b) => {
+    const pointDiff = b.length - a.length;
+    if (pointDiff !== 0) return pointDiff;
+    return distanceSpan(b) - distanceSpan(a);
+  })[0];
 }
 
 function downsampleTrailPoints(points, maxPoints = 400) {
@@ -573,7 +741,8 @@ function buildLapTrailsFromStoredPoints(points, maxPointsPerLap = 400) {
 
   return [...grouped.entries()]
     .map(([key, lapPoints]) => {
-      const pointsForLap = downsampleTrailPoints(lapPoints, maxPointsPerLap);
+      const bestFragment = pickBestContinuousLapFragment(lapPoints);
+      const pointsForLap = downsampleTrailPoints(bestFragment, maxPointsPerLap);
       const lapNumber = getLapNumber(pointsForLap[0], null);
 
       return {
@@ -623,6 +792,7 @@ export default function TrackTelemetryMap({
   trackKey,
   mapImageUrl = "/maps/default-track.png",
   selectedTrailKey = "current",
+  liveMapPosition = null,
   onTrailOptionsChange,
 }) {
   const canvasRef = useRef(null);
@@ -633,6 +803,7 @@ export default function TrackTelemetryMap({
   const livePositionLoadSeqRef = useRef(0);
   const latestLivePointFreshnessRef = useRef(null);
   const liveTrailActiveRef = useRef(false);
+  const visualLivePointRef = useRef(null);
 
   const [trackMap, setTrackMap] = useState(null);
   const [sessionMap, setSessionMap] = useState(null);
@@ -641,6 +812,8 @@ export default function TrackTelemetryMap({
   const [completedLapTrails, setCompletedLapTrails] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [mapImage, setMapImage] = useState(null);
+  const [mapImageError, setMapImageError] = useState(null);
 
   function saveCompletedLap(lapNumber, points) {
     if (lapNumber == null || !Array.isArray(points) || points.length < 2) {
@@ -668,6 +841,7 @@ export default function TrackTelemetryMap({
     currentLapNumberRef.current = null;
     latestLivePointFreshnessRef.current = null;
     liveTrailActiveRef.current = false;
+    visualLivePointRef.current = null;
     setCurrentLapTrail([]);
     setCurrentLapNumber(null);
     setCompletedLapTrails([]);
@@ -714,6 +888,69 @@ export default function TrackTelemetryMap({
     const next = [...old, latest].slice(-1600);
     currentLapTrailRef.current = next;
     setCurrentLapTrail(next);
+  }
+
+  function applyLatestMapPosition(latest, nextSessionMap = null) {
+    if (
+      latest &&
+      hasNumber(latest.worldX) &&
+      hasNumber(latest.worldZ)
+    ) {
+      const freshness = readMapPointFreshness(latest);
+      const freshnessDelta = compareMapPointFreshness(
+        freshness,
+        latestLivePointFreshnessRef.current
+      );
+
+      if (freshnessDelta < 0) {
+        return;
+      }
+
+      if (
+        freshnessDelta === 0 &&
+        isSameMapPosition(
+          currentLapTrailRef.current[currentLapTrailRef.current.length - 1],
+          latest
+        )
+      ) {
+        if (nextSessionMap) setSessionMap(nextSessionMap);
+        return;
+      }
+
+      if (freshnessDelta > 0) {
+        latestLivePointFreshnessRef.current = freshness;
+      }
+
+      setSessionMap((prev) => nextSessionMap || { ...(prev || {}), latestMapPosition: latest });
+
+      const previousLapNumber = currentLapNumberRef.current;
+      const nextLapNumber = getLapNumber(latest, previousLapNumber);
+
+      if (previousLapNumber === null && nextLapNumber !== null) {
+        currentLapNumberRef.current = nextLapNumber;
+        setCurrentLapNumber(nextLapNumber);
+      }
+
+      if (
+        previousLapNumber !== null &&
+        nextLapNumber !== null &&
+        nextLapNumber !== previousLapNumber
+      ) {
+        saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
+
+        currentLapTrailRef.current = [];
+        currentLapNumberRef.current = nextLapNumber;
+        setCurrentLapNumber(nextLapNumber);
+      }
+
+      liveTrailActiveRef.current = true;
+      appendToCurrentLapTrail(latest);
+      return;
+    }
+
+    if (nextSessionMap) {
+      setSessionMap(nextSessionMap);
+    }
   }
 
   useEffect(() => {
@@ -856,8 +1093,10 @@ export default function TrackTelemetryMap({
     };
   }, [apiBase, sessionId]);
 
+  const hasLiveMapPositionProp = Boolean(liveMapPosition);
+
   useEffect(() => {
-    if (!apiBase || !sessionId) return undefined;
+    if (!apiBase || !sessionId || hasLiveMapPositionProp) return undefined;
 
     const requestId = livePositionLoadSeqRef.current + 1;
     livePositionLoadSeqRef.current = requestId;
@@ -886,64 +1125,7 @@ export default function TrackTelemetryMap({
         const data = await res.json();
         if (!isCurrentRequest()) return;
 
-        const latest = data.latestMapPosition;
-
-        if (
-          latest &&
-          hasNumber(latest.worldX) &&
-          hasNumber(latest.worldZ)
-        ) {
-          const freshness = readMapPointFreshness(latest);
-          const freshnessDelta = compareMapPointFreshness(
-            freshness,
-            latestLivePointFreshnessRef.current
-          );
-
-          if (freshnessDelta < 0) {
-            return;
-          }
-
-          if (freshnessDelta > 0) {
-            latestLivePointFreshnessRef.current = freshness;
-          }
-
-          setSessionMap(data);
-
-          if (
-            freshnessDelta === 0 &&
-            isSameMapPosition(
-              currentLapTrailRef.current[currentLapTrailRef.current.length - 1],
-              latest
-            )
-          ) {
-            return;
-          }
-
-          const previousLapNumber = currentLapNumberRef.current;
-          const nextLapNumber = getLapNumber(latest, previousLapNumber);
-
-          if (previousLapNumber === null && nextLapNumber !== null) {
-            currentLapNumberRef.current = nextLapNumber;
-            setCurrentLapNumber(nextLapNumber);
-          }
-
-          if (
-            previousLapNumber !== null &&
-            nextLapNumber !== null &&
-            nextLapNumber !== previousLapNumber
-          ) {
-            saveCompletedLap(previousLapNumber, currentLapTrailRef.current);
-
-            currentLapTrailRef.current = [];
-            currentLapNumberRef.current = nextLapNumber;
-            setCurrentLapNumber(nextLapNumber);
-          }
-
-          liveTrailActiveRef.current = true;
-          appendToCurrentLapTrail(latest);
-        } else {
-          setSessionMap(data);
-        }
+        applyLatestMapPosition(data.latestMapPosition, data);
       } catch (err) {
         if (err?.name === "AbortError" || !isCurrentRequest()) return;
         console.error(err);
@@ -954,19 +1136,53 @@ export default function TrackTelemetryMap({
     }
 
     fetchLivePosition();
-    const interval = setInterval(fetchLivePosition, 250);
+    const interval = setInterval(fetchLivePosition, LIVE_MAP_FETCH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       abortController.abort();
       clearInterval(interval);
     };
-  }, [apiBase, sessionId]);
+  }, [apiBase, sessionId, hasLiveMapPositionProp]);
 
-  const imageUrl = trackMap?.imageCalibration?.imageUrl || mapImageUrl;
+  useEffect(() => {
+    if (!liveMapPosition) return;
+    applyLatestMapPosition(liveMapPosition);
+  }, [liveMapPosition]);
+
+  const imageUrl = normalizeTrackMapImageUrl(
+    trackMap?.imageCalibration?.imageUrl || mapImageUrl
+  );
 
   const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
   const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
+  const canvasAspectRatio = `${imageWidth || 1200} / ${imageHeight || 800}`;
+
+  useEffect(() => {
+    let cancelled = false;
+    const image = new Image();
+
+    setMapImage(null);
+    setMapImageError(null);
+
+    image.onload = () => {
+      if (cancelled) return;
+      setMapImage(image);
+      setMapImageError(null);
+    };
+
+    image.onerror = () => {
+      if (cancelled) return;
+      setMapImage(null);
+      setMapImageError(`Map image not found: ${imageUrl}`);
+    };
+
+    image.src = imageUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrl]);
 
   const transform = useMemo(() => {
     const anchors = trackMap?.imageCalibration?.anchorPoints;
@@ -1063,20 +1279,25 @@ export default function TrackTelemetryMap({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
-    const image = new Image();
+    let frameId = 0;
 
-    image.src = imageUrl;
+    function drawFrame() {
+      const ctx = canvas.getContext("2d");
+      const width = imageWidth || mapImage?.naturalWidth || 1200;
+      const height = imageHeight || mapImage?.naturalHeight || 800;
 
-    image.onload = () => {
-      const width = imageWidth || image.naturalWidth || 1200;
-      const height = imageHeight || image.naturalHeight || 800;
-
-      canvas.width = width;
-      canvas.height = height;
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
 
       ctx.clearRect(0, 0, width, height);
-      ctx.drawImage(image, 0, 0, width, height);
+
+      if (mapImage) {
+        ctx.drawImage(mapImage, 0, 0, width, height);
+      } else {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+        ctx.font = "16px Arial";
+        ctx.fillText(mapImageError || "Loading map image...", 30, 50);
+      }
 
       if (!trackMap || !transform) {
         ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
@@ -1093,6 +1314,7 @@ export default function TrackTelemetryMap({
           80
         );
 
+        frameId = window.requestAnimationFrame(drawFrame);
         return;
       }
 
@@ -1139,7 +1361,10 @@ export default function TrackTelemetryMap({
         52
       );
 
-      const latest = sessionMap?.latestMapPosition;
+      const latest = getVisualLivePoint(
+        visualLivePointRef,
+        sessionMap?.latestMapPosition
+      );
 
       if (
         latest &&
@@ -1184,30 +1409,20 @@ export default function TrackTelemetryMap({
         ctx.fillStyle = "white";
         ctx.fillText(rmseText, 26, height - 20);
       }
-    };
+      frameId = window.requestAnimationFrame(drawFrame);
+    }
 
-    image.onerror = () => {
-      const width = imageWidth || 1200;
-      const height = imageHeight || 800;
+    frameId = window.requestAnimationFrame(drawFrame);
 
-      canvas.width = width;
-      canvas.height = height;
-
-      ctx.clearRect(0, 0, width, height);
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, width, height);
-
-      ctx.fillStyle = "white";
-      ctx.font = "16px Arial";
-      ctx.fillText(`Map image not found: ${imageUrl}`, 30, 50);
-    };
+    return () => window.cancelAnimationFrame(frameId);
   }, [
     trackMap,
     transform,
     displayedTrail,
     selectedTrailLabel,
     sessionMap,
-    imageUrl,
+    mapImage,
+    mapImageError,
     imageWidth,
     imageHeight,
   ]);
@@ -1234,16 +1449,26 @@ export default function TrackTelemetryMap({
         </p>
       )}
 
-      <canvas
-        ref={canvasRef}
+      <div
         style={{
           width: "100%",
           maxWidth: "1000px",
-          borderRadius: "14px",
-          background: "#111",
-          border: "1px solid rgba(255,255,255,0.15)",
+          aspectRatio: canvasAspectRatio,
         }}
-      />
+      >
+        <canvas
+          ref={canvasRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            boxSizing: "border-box",
+            borderRadius: "14px",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.15)",
+          }}
+        />
+      </div>
 
       <div
         style={{

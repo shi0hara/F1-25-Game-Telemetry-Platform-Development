@@ -103,7 +103,11 @@ function pickBestSession(sessions) {
   return sorted[0];
 }
 
-export default function useActiveSession(userOrUsername) {
+export default function useActiveSession(userOrUsername, options = {}) {
+  const includeAllSessions = options?.includeAllSessions === true;
+  const sessionLimit = Number.isFinite(Number(options?.sessionLimit))
+    ? Number(options.sessionLimit)
+    : 50;
   const knownUserId = useMemo(() => getUserId(userOrUsername), [userOrUsername]);
   const username = useMemo(
     () => getUserDisplayName(userOrUsername),
@@ -130,6 +134,13 @@ export default function useActiveSession(userOrUsername) {
     setSessionId(null);
     setSessionData(null);
     setSessions([]);
+
+    if (includeAllSessions) {
+      setLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     if (knownUserId) {
       setUserId(knownUserId);
@@ -192,9 +203,45 @@ export default function useActiveSession(userOrUsername) {
     return () => {
       cancelled = true;
     };
-  }, [knownUserId, normalizedUsername, userOrUsername, username]);
+  }, [includeAllSessions, knownUserId, normalizedUsername, userOrUsername, username]);
 
   useEffect(() => {
+    if (includeAllSessions) {
+      setLoading(true);
+      setError("");
+
+      const sessionsQuery = query(
+        collection(db, "sessions"),
+        limit(sessionLimit)
+      );
+
+      const unsubscribe = onSnapshot(
+        sessionsQuery,
+        (snapshot) => {
+          setLoading(false);
+          setError("");
+
+          const docs = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+
+          const bestSession = pickBestSession(docs);
+
+          setSessions(docs);
+          setSessionId(bestSession?.id || null);
+          setSessionData(bestSession || null);
+        },
+        (err) => {
+          console.error("All sessions listener error:", err);
+          setLoading(false);
+          setError(err.message || "Failed to load sessions.");
+        }
+      );
+
+      return unsubscribe;
+    }
+
     if (!knownUserId && !normalizedUsername) {
       setLoading(false);
       setError("");
@@ -242,7 +289,7 @@ export default function useActiveSession(userOrUsername) {
     );
 
     return unsubscribe;
-  }, [knownUserId, normalizedUsername, userId]);
+  }, [includeAllSessions, knownUserId, normalizedUsername, sessionLimit, userId]);
 
   const activeTrackKey = useMemo(() => {
     return getTrackKeyFromSession(sessionData);
