@@ -29,6 +29,8 @@ import { normalizeUsernameKey } from "../utils/userIdentity";
 const PROFILE_STORAGE_PREFIX = "f1ProfilePrefs:";
 const MIN_VALID_LAP_MS = 10000;
 const MAX_VALID_LAP_MS = 600000;
+const CAREER_LAP_DETAIL_LIMIT = 25;
+const CAREER_LAP_FETCH_BATCH_SIZE = 4;
 
 const TEAM_THEMES = {
   ferrari: {
@@ -192,6 +194,30 @@ function summaryBestLapTimeMs(summary) {
       summary?.fastestLap?.rawMs ??
       summary?.bestLap?.lapTimeMs
   );
+}
+
+function hasUsefulCareerSummary(session) {
+  const summary = session?.processedSummary || {};
+  return (
+    numberOrNull(summary.totalLaps) !== null ||
+    numberOrNull(summary.lapCount) !== null ||
+    numberOrNull(summary.validLapCount) !== null ||
+    numberOrNull(summary.validLaps) !== null ||
+    summaryBestLapTimeMs(summary) !== null
+  );
+}
+
+function shouldFetchCareerLaps(session, weekStartMs) {
+  if (isActiveSession(session)) return true;
+
+  const activityMs = Math.max(
+    toMillis(getSessionStartedAt(session)),
+    toMillis(getSessionEndedAt(session)),
+    toMillis(session?.latestTelemetryAt),
+    toMillis(session?.updatedAt)
+  );
+
+  return activityMs >= weekStartMs || !hasUsefulCareerSummary(session);
 }
 
 function lapActivityMs(lap, session) {
@@ -464,28 +490,48 @@ export default function Profile({ username, currentUser }) {
     let cancelled = false;
 
     async function loadCareerLaps() {
+      const weekStartMs = startOfCurrentWeekMs();
+      const sessionsToFetch = sessions
+        .filter((session) => shouldFetchCareerLaps(session, weekStartMs))
+        .slice(0, CAREER_LAP_DETAIL_LIMIT);
+
+      if (sessionsToFetch.length === 0) {
+        setSessionLaps({});
+        setCareerStatsLoading(false);
+        return;
+      }
+
+      setSessionLaps({});
       setCareerStatsLoading(true);
 
       try {
-        const entries = await Promise.all(
-          sessions.map(async (session) => {
-            try {
-              const lapsSnap = await getDocs(
-                collection(db, "sessions", session.id, "laps")
-              );
-              return [
-                session.id,
-                lapsSnap.docs.map((lapDoc) => ({
-                  id: lapDoc.id,
-                  ...lapDoc.data(),
-                })),
-              ];
-            } catch (err) {
-              console.warn("Career lap stats failed for session:", session.id, err);
-              return [session.id, null];
-            }
-          })
-        );
+        const entries = [];
+
+        for (let i = 0; i < sessionsToFetch.length; i += CAREER_LAP_FETCH_BATCH_SIZE) {
+          const batch = sessionsToFetch.slice(i, i + CAREER_LAP_FETCH_BATCH_SIZE);
+          const batchEntries = await Promise.all(
+            batch.map(async (session) => {
+              try {
+                const lapsSnap = await getDocs(
+                  collection(db, "sessions", session.id, "laps")
+                );
+                return [
+                  session.id,
+                  lapsSnap.docs.map((lapDoc) => ({
+                    id: lapDoc.id,
+                    ...lapDoc.data(),
+                  })),
+                ];
+              } catch (err) {
+                console.warn("Career lap stats failed for session:", session.id, err);
+                return [session.id, null];
+              }
+            })
+          );
+
+          entries.push(...batchEntries);
+          if (cancelled) return;
+        }
 
         if (!cancelled) {
           setSessionLaps(Object.fromEntries(entries));

@@ -1,27 +1,28 @@
-import { useState, useEffect } from "react";
+import { Suspense, lazy, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
 import Navbar from "./components/layout/Navbar";
 import Footer from "./components/layout/Footer";
 import Dashboard from "./pages/Dashboard";
-import LiveTelemetry from "./pages/LiveTelemetry";
-import Leaderboard from "./pages/Leaderboard";
-import LapPerformanceAnalysis from "./pages/LapPerformanceAnalysis";
-import SessionDetails from "./pages/SessionDetails";
-import Profile from "./pages/Profile";
-import EditProfile from "./pages/EditProfile";
 import Login from "./pages/Login";
 import Contact from "./pages/Contact";
 import NotFound from "./pages/NotFound";
-import AdminUsers from "./pages/AdminUsers";
 import useActiveSession from "./hooks/useActiveSession";
-import TrackCalibration from "./pages/TrackCalibration";
-import RecommendedSetups from "./pages/RecommendedSetups";
 import { auth } from "./firebase";
 import {
   notifyLocalListenerLogout,
   pairLocalListenerAfterLogin,
 } from "./services/localListenerService";
+
+const AdminUsers = lazy(() => import("./pages/AdminUsers"));
+const EditProfile = lazy(() => import("./pages/EditProfile"));
+const LapPerformanceAnalysis = lazy(() => import("./pages/LapPerformanceAnalysis"));
+const Leaderboard = lazy(() => import("./pages/Leaderboard"));
+const LiveTelemetry = lazy(() => import("./pages/LiveTelemetry"));
+const Profile = lazy(() => import("./pages/Profile"));
+const RecommendedSetups = lazy(() => import("./pages/RecommendedSetups"));
+const SessionDetails = lazy(() => import("./pages/SessionDetails"));
+const TrackCalibration = lazy(() => import("./pages/TrackCalibration"));
 
 function getStoredUser() {
   try {
@@ -61,75 +62,85 @@ const AdminRoute = ({ user, children }) => {
   return children;
 };
 
+function RouteLoading() {
+  return (
+    <div className="card route-loading-card">
+      Loading page...
+    </div>
+  );
+}
+
 const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
   const location = useLocation();
   const routeKey = `${location.pathname}${location.search}`;
 
   return (
     <div key={routeKey} className="route-transition-shell">
-      <Routes location={location}>
-        <Route path="/" element={<Dashboard currentUser={user} />} />
-        <Route
-          path="/login"
-          element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" replace />}
-        />
-        <Route path="/contact" element={<Contact />} />
-        <Route
-          path="/live"
-          element={
-            <ProtectedRoute user={user}>
-              <LiveTelemetry currentUser={user} sessionId={sessionId} />
-            </ProtectedRoute>
-          }
-        />
-        <Route path="/leaderboard" element={<Leaderboard />} />
-        <Route path="/setups" element={<RecommendedSetups />} />
-        <Route
-          path="/analysis/:sessionId/lap/:lapId"
-          element={<LapPerformanceAnalysis />}
-        />
-        <Route
-          path="/session/:sessionId"
-          element={
-            <ProtectedRoute user={user}>
-              <SessionDetails />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute user={user}>
-              <Profile username={username} currentUser={user} sessionId={sessionId} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/edit-profile"
-          element={
-            <ProtectedRoute user={user}>
-              <EditProfile username={username} currentUser={user} />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute user={user}>
-              <AdminUsers />
-            </AdminRoute>
-          }
-        />
-        <Route
-          path="/calibrate"
-          element={
-            <AdminRoute user={user}>
-              <TrackCalibration username={username} />
-            </AdminRoute>
-          }
-        />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <Suspense fallback={<RouteLoading />}>
+        <Routes location={location}>
+          <Route path="/" element={<Dashboard currentUser={user} />} />
+          <Route
+            path="/login"
+            element={!user ? <Login onLogin={handleLogin} /> : <Navigate to="/" replace />}
+          />
+          <Route path="/contact" element={<Contact />} />
+          <Route
+            path="/live"
+            element={
+              <ProtectedRoute user={user}>
+                <LiveTelemetry currentUser={user} sessionId={sessionId} />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/setups" element={<RecommendedSetups />} />
+          <Route
+            path="/analysis/:sessionId/lap/:lapId"
+            element={<LapPerformanceAnalysis />}
+          />
+          <Route
+            path="/session/:sessionId"
+            element={
+              <ProtectedRoute user={user}>
+                <SessionDetails />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute user={user}>
+                <Profile username={username} currentUser={user} sessionId={sessionId} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/edit-profile"
+            element={
+              <ProtectedRoute user={user}>
+                <EditProfile username={username} currentUser={user} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute user={user}>
+                <AdminUsers />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/calibrate"
+            element={
+              <AdminRoute user={user}>
+                <TrackCalibration username={username} />
+              </AdminRoute>
+            }
+          />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </div>
   );
 };

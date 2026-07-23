@@ -303,6 +303,13 @@ textarea:focus {
   margin-bottom: 16px;
 }
 
+.route-loading-card {
+  max-width: 520px;
+  margin: 24px auto;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
 .dashboard-page .grid-2 {
   align-items: stretch;
 }

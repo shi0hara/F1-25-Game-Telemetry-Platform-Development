@@ -180,6 +180,25 @@ function pickDailyLeader(payload, selectedTrackKey = "") {
   return { leader, track: leaderTrack };
 }
 
+function pickDailyTrackKey(current, allPayload, dailyPayload) {
+  const options = mergeDailyTrackOptions(allPayload || dailyPayload, dailyPayload);
+  if (current && options.some((track) => track.trackKey === current)) {
+    return current;
+  }
+
+  const activeDailyKey = dailyPayload?.activeTrackKey || trackOptionKey(dailyPayload?.activeTrack);
+  const activeOption = options.find(
+    (track) => track.dailyTrackKey === activeDailyKey || track.trackKey === activeDailyKey
+  );
+
+  return (
+    activeOption?.trackKey ||
+    options.find((track) => Number(track.dailyValidLaps || 0) > 0)?.trackKey ||
+    options[0]?.trackKey ||
+    ""
+  );
+}
+
 async function fetchLeaderboard(scope, signal) {
   const params = new URLSearchParams({
     limit: "100",
@@ -241,37 +260,32 @@ export default function Dashboard({ currentUser }) {
         setLoading(true);
         setError("");
 
-        const [sessionList, dailyPayload, allPayload] = await Promise.all([
+        const [sessionList, dailyPayload] = await Promise.all([
           currentUser ? fetchPersonalSessions(controller.signal) : Promise.resolve([]),
           fetchDailyLeaderboard(controller.signal),
-          fetchAllTimeLeaderboard(controller.signal).catch((err) => {
-            console.warn("All-time leaderboard unavailable for dashboard track list:", err);
-            return null;
-          }),
         ]);
 
         if (cancelled) return;
         setSessions(sessionList);
         setLeaderboard(dailyPayload);
-        setAllLeaderboard(allPayload || dailyPayload);
-        setSelectedDailyTrackKey((current) => {
-          const options = mergeDailyTrackOptions(allPayload || dailyPayload, dailyPayload);
-          if (current && options.some((track) => track.trackKey === current)) {
-            return current;
-          }
+        setAllLeaderboard(dailyPayload);
+        setSelectedDailyTrackKey((current) =>
+          pickDailyTrackKey(current, dailyPayload, dailyPayload)
+        );
 
-          const activeDailyKey = dailyPayload?.activeTrackKey || trackOptionKey(dailyPayload?.activeTrack);
-          const activeOption = options.find(
-            (track) => track.dailyTrackKey === activeDailyKey || track.trackKey === activeDailyKey
-          );
-
-          return (
-            activeOption?.trackKey ||
-            options.find((track) => Number(track.dailyValidLaps || 0) > 0)?.trackKey ||
-            options[0]?.trackKey ||
-            ""
-          );
-        });
+        fetchAllTimeLeaderboard(controller.signal)
+          .then((allPayload) => {
+            if (cancelled) return;
+            setAllLeaderboard(allPayload || dailyPayload);
+            setSelectedDailyTrackKey((current) =>
+              pickDailyTrackKey(current, allPayload || dailyPayload, dailyPayload)
+            );
+          })
+          .catch((err) => {
+            if (!cancelled && err?.name !== "AbortError") {
+              console.warn("All-time leaderboard unavailable for dashboard track list:", err);
+            }
+          });
       } catch (err) {
         if (cancelled || err?.name === "AbortError") return;
         console.error("Dashboard load error:", err);
