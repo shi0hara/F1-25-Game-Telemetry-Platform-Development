@@ -864,7 +864,11 @@ function AiCoachPill({ session, report, onViewAnalysis, viewAnalysisBtnRef }) {
             <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 11H9v-2h2v2zm0-4H9V5h2v4z" />
           </svg>
           <span className="ai-coach-pill-text">AI Driving Coach</span>
-          <button className="ai-coach-pill-btn" disabled>
+          <button
+            ref={viewAnalysisBtnRef}
+            className="ai-coach-pill-btn"
+            onClick={onViewAnalysis}
+          >
             View Analysis
           </button>
         </>
