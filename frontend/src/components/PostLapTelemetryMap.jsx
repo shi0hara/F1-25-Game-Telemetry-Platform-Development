@@ -262,6 +262,9 @@ export default function PostLapTelemetryMap({
   sectorBoundaries = [],
   containerStyle,
   flipMap = false,
+  rotateDeg = 0,
+  traceScale = 0.8,
+  traceHScale = 1,
 }) {
   const canvasRef = useRef(null);
   const [trackMap, setTrackMap] = useState(null);
@@ -394,16 +397,71 @@ export default function PostLapTelemetryMap({
   }, [effectiveTransform, trackMap, positionedSamples, imageHeight]);
 
   // Wrap effectiveTransform to apply vertical offset (and respect flip)
-  const positionedEffectiveTransform = useMemo(() => {
+  // Optionally apply rotation (degrees clockwise) around canvas center
+  const rotatedTransform = useMemo(() => {
     if (!effectiveTransform) return null;
+    const deg = Number(rotateDeg) || 0;
+    const normalized = ((deg % 360) + 360) % 360;
+    if (normalized === 0) return effectiveTransform;
+    const cx = imageWidth / 2;
+    const cy = imageHeight / 2;
+    if (normalized === 90) {
+      // rotate 90 degrees clockwise (screen coords) - map right -> down
+      return {
+        worldToImage(worldX, worldZ) {
+          const p = effectiveTransform.worldToImage(worldX, worldZ);
+          const xr = -(p.y - cy);
+          const yr = p.x - cx;
+          return { x: cx + xr, y: cy + yr };
+        },
+      };
+    }
+    if (normalized === 180) {
+      return {
+        worldToImage(worldX, worldZ) {
+          const p = effectiveTransform.worldToImage(worldX, worldZ);
+          return { x: imageWidth - p.x, y: imageHeight - p.y };
+        },
+      };
+    }
+    if (normalized === 270) {
+      return {
+        worldToImage(worldX, worldZ) {
+          const p = effectiveTransform.worldToImage(worldX, worldZ);
+          const xr = p.y - cy;
+          const yr = -(p.x - cx);
+          return { x: cx + xr, y: cy + yr };
+        },
+      };
+    }
+    return effectiveTransform;
+  }, [effectiveTransform, rotateDeg, imageWidth, imageHeight]);
+
+  const positionedEffectiveTransform = useMemo(() => {
+    const base = rotatedTransform || effectiveTransform;
+    if (!base) return null;
     const offsetY = verticalOffset || 0;
     return {
       worldToImage(worldX, worldZ) {
-        const p = effectiveTransform.worldToImage(worldX, worldZ);
+        const p = base.worldToImage(worldX, worldZ);
         return { x: p.x, y: p.y + offsetY };
       },
     };
-  }, [effectiveTransform, verticalOffset]);
+  }, [rotatedTransform, effectiveTransform, verticalOffset]);
+
+  // Reduce vertical stretch for the drawn lap trace only (1 = no scale)
+  const mapForTrace = useMemo(() => {
+    if (!positionedEffectiveTransform) return null;
+    const cy = imageHeight / 2;
+    const vs = Number(traceScale) || 1;
+    const hs = Number(traceHScale) || 1;
+    const cx = imageWidth / 2;
+    return (worldX, worldZ) => {
+      const p = positionedEffectiveTransform.worldToImage(worldX, worldZ);
+      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return p;
+      return { x: cx + (p.x - cx) * hs, y: cy + (p.y - cy) * vs };
+    };
+  }, [positionedEffectiveTransform, imageHeight, imageWidth, traceScale, traceHScale]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -445,8 +503,9 @@ export default function PostLapTelemetryMap({
         const previous = positionedSamples[i - 1].sample;
         const current = positionedSamples[i].sample;
         if (isJump(previous, current)) continue;
-        const from = positionedEffectiveTransform.worldToImage(previous.worldX, previous.worldZ);
-        const to = positionedEffectiveTransform.worldToImage(current.worldX, current.worldZ);
+        const from = mapForTrace ? mapForTrace(previous.worldX, previous.worldZ) : positionedEffectiveTransform.worldToImage(previous.worldX, previous.worldZ);
+        const to = mapForTrace ? mapForTrace(current.worldX, current.worldZ) : positionedEffectiveTransform.worldToImage(current.worldX, current.worldZ);
+        if (!from || !to) continue;
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
         ctx.lineTo(to.x, to.y);
@@ -459,7 +518,7 @@ export default function PostLapTelemetryMap({
       for (const boundary of sectorBoundaries) {
         const sample = mapTraces[boundary.index];
         if (!sample || !hasNumber(sample.worldX) || !hasNumber(sample.worldZ)) continue;
-        const pos = positionedEffectiveTransform.worldToImage(sample.worldX, sample.worldZ);
+        const pos = mapForTrace ? mapForTrace(sample.worldX, sample.worldZ) : positionedEffectiveTransform.worldToImage(sample.worldX, sample.worldZ);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2);
         ctx.fillStyle = boundary.color;
@@ -480,13 +539,13 @@ export default function PostLapTelemetryMap({
         hasNumber(markerSample.worldX) &&
         hasNumber(markerSample.worldZ)
       ) {
-        const pos = positionedEffectiveTransform.worldToImage(markerSample.worldX, markerSample.worldZ);
+        const pos = mapForTrace ? mapForTrace(markerSample.worldX, markerSample.worldZ) : positionedEffectiveTransform.worldToImage(markerSample.worldX, markerSample.worldZ);
         const headingSample =
           interpolateMapSample(mapTraces, Math.min(Number(activePosition) + 0.85, mapTraces.length - 1)) ||
           markerSample;
         const nextPos =
           hasNumber(headingSample.worldX) && hasNumber(headingSample.worldZ)
-            ? positionedEffectiveTransform.worldToImage(headingSample.worldX, headingSample.worldZ)
+            ? (mapForTrace ? mapForTrace(headingSample.worldX, headingSample.worldZ) : positionedEffectiveTransform.worldToImage(headingSample.worldX, headingSample.worldZ))
             : pos;
         const angle = Math.atan2(nextPos.y - pos.y, nextPos.x - pos.x);
 
@@ -537,6 +596,8 @@ export default function PostLapTelemetryMap({
     sectorBoundaries,
     trackMap,
     positionedEffectiveTransform,
+    traceScale,
+    traceHScale,
   ]);
 
   if (positionedSamples.length < 2) {
