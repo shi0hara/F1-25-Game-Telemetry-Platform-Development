@@ -38,6 +38,149 @@ AI_COACH_SYSTEM_PROMPT = (
     "and whether you had enough information to give reliable advice."
 )
 
+# Track corner/zone names mapped by approximate lap distance ranges (metres).
+# Each entry: (start_m, end_m, name)
+TRACK_CORNERS = {
+    "Melbourne": [
+        (0, 150, "Turn 1"),
+        (150, 350, "Turn 2"),
+        (350, 550, "Turn 3"),
+        (700, 900, "Turn 4"),
+        (900, 1050, "Turn 5"),
+        (1050, 1250, "Turn 6"),
+        (1250, 1450, "Turn 7-8"),
+        (1450, 1700, "Turn 9"),
+        (1700, 1900, "Turn 10"),
+        (1900, 2200, "Turn 11"),
+        (2200, 2500, "Turn 12"),
+        (2500, 2800, "Turn 13"),
+        (3200, 3500, "Turn 14"),
+    ],
+    "Suzuka": [
+        (0, 250, "Turn 1 (First Curve)"),
+        (250, 550, "Turn 2"),
+        (550, 800, "Turns 3-4 (S Curves)"),
+        (800, 1100, "Turns 5-6 (S Curves)"),
+        (1100, 1350, "Turn 7 (Dunlop)"),
+        (1350, 1700, "Turns 8-9 (Degner 1-2)"),
+        (1700, 2200, "Turn 10 (Hairpin)"),
+        (2200, 2700, "Turn 11 (200R)"),
+        (2700, 3200, "Turns 12-13 (Spoon)"),
+        (3200, 3800, "Turn 14 (Back straight)"),
+        (3800, 4200, "Turn 15 (130R)"),
+        (4200, 4700, "Turn 16-17 (Chicane)"),
+        (4700, 5100, "Turn 18 (Final)"),
+    ],
+    "Monza": [
+        (0, 350, "Turn 1-2 (Variante del Rettifilo)"),
+        (350, 850, "Curva Grande"),
+        (850, 1200, "Turn 4-5 (Variante della Roggia)"),
+        (1200, 2100, "Curve di Lesmo 1-2"),
+        (2100, 2800, "Turn 8 (Serraglio)"),
+        (2800, 3400, "Curva del Vialone"),
+        (3400, 4000, "Turn 11 (Variante Ascari)"),
+        (4000, 4700, "Curva Parabolica"),
+        (4700, 5200, "Turn 14 (Alboreto)"),
+    ],
+    "Silverstone": [
+        (0, 300, "Turn 1 (Abbey)"),
+        (300, 600, "Turn 2 (Farm)"),
+        (600, 900, "Turn 3 (Village)"),
+        (900, 1200, "Turn 4-5 (The Loop)"),
+        (1200, 1600, "Turn 6 (Brooklands)"),
+        (1600, 2000, "Turn 7-8 (Luffield)"),
+        (2000, 2500, "Turn 9 (Copse)"),
+        (2500, 3200, "Turns 10-11 (Maggots-Becketts)"),
+        (3200, 3600, "Turn 12 (Chapel)"),
+        (3600, 4100, "Hangar Straight"),
+        (4100, 4500, "Turn 13-14 (Stowe-Vale)"),
+        (4500, 5100, "Turn 15-16 (Club)"),
+    ],
+    "Spa": [
+        (0, 350, "Turn 1 (La Source)"),
+        (350, 1000, "Eau Rouge / Raidillon"),
+        (1000, 1800, "Kemmel Straight"),
+        (1800, 2200, "Turn 5 (Les Combes)"),
+        (2200, 2600, "Turn 6-7 (Malmedy)"),
+        (2600, 3100, "Turn 8 (Rivage)"),
+        (3100, 3700, "Turns 9-10 (Fagnes)"),
+        (3700, 4300, "Turn 11 (Pouhon)"),
+        (4300, 4800, "Turns 12-13 (Les Fagnes)"),
+        (4800, 5400, "Turn 14 (Stavelot)"),
+        (5400, 6000, "Turn 15-16 (Paul Frère)"),
+        (6000, 6500, "Turn 17-18 (Blanchimont)"),
+        (6500, 7000, "Turn 19 (Bus Stop)"),
+    ],
+    "Sakhir (Bahrain)": [
+        (0, 300, "Turn 1"),
+        (300, 550, "Turn 2-3"),
+        (550, 800, "Turn 4"),
+        (800, 1100, "Turn 5-6-7"),
+        (1100, 1500, "Turn 8"),
+        (1500, 1800, "Turn 9"),
+        (1800, 2200, "Turn 10"),
+        (2200, 2600, "Turn 11-12"),
+        (2600, 3100, "Turn 13"),
+        (3100, 3500, "Turn 14"),
+        (3500, 4000, "Turn 15"),
+    ],
+    "Jeddah": [
+        (0, 300, "Turn 1"),
+        (300, 700, "Turn 2-3"),
+        (700, 1200, "Turns 4-5-6-7"),
+        (1200, 1700, "Turns 8-9-10"),
+        (1700, 2200, "Turns 11-12"),
+        (2200, 2800, "Turn 13 (Hairpin)"),
+        (2800, 3400, "Turns 14-15-16"),
+        (3400, 4000, "Turns 17-18-19"),
+        (4000, 4600, "Turns 20-21"),
+        (4600, 5200, "Turn 22-23"),
+        (5200, 5800, "Turns 24-25-26-27"),
+    ],
+    "Monaco": [
+        (0, 200, "Sainte Dévote"),
+        (200, 600, "Beau Rivage"),
+        (600, 900, "Massenet / Casino"),
+        (900, 1200, "Mirabeau"),
+        (1200, 1500, "Hairpin (Loews)"),
+        (1500, 1800, "Portier"),
+        (1800, 2300, "Tunnel"),
+        (2300, 2600, "Chicane (Nouvelle)"),
+        (2600, 2900, "Tabac"),
+        (2900, 3200, "Swimming Pool"),
+        (3200, 3500, "La Rascasse / Anthony Noghès"),
+    ],
+}
+
+
+def lookup_corner_name(track_name, start_distance_m, end_distance_m):
+    """Look up the corner name for a given track and distance range."""
+    if not track_name:
+        return None
+    corners = TRACK_CORNERS.get(track_name)
+    if not corners:
+        return None
+    if start_distance_m is None:
+        return None
+
+    mid_point = (start_distance_m + (end_distance_m or start_distance_m)) / 2.0
+
+    for corner_start, corner_end, name in corners:
+        if corner_start <= mid_point <= corner_end:
+            return name
+
+    # Fallback: find closest corner
+    best = None
+    best_dist = float("inf")
+    for corner_start, corner_end, name in corners:
+        corner_mid = (corner_start + corner_end) / 2.0
+        dist = abs(mid_point - corner_mid)
+        if dist < best_dist and dist < 200:  # within 200m tolerance
+            best_dist = dist
+            best = name
+
+    return best
+
 
 def parse_float(value, default=None):
     if value is None:
@@ -187,19 +330,35 @@ def load_samples_from_api(session_id, max_samples=2000, auth_token=None):
     data = response.json()
     traces = data.get("traces") or []
     api_laps = data.get("laps") or []
+    api_session = data.get("session") or {}
 
     if not traces:
         raise SystemExit(f"No telemetry traces found for session {session_id}.")
 
     print(f"  Got {len(traces)} samples from API.")
 
+    # Extract session metadata
+    track_name = api_session.get("trackName")
+    track_id = api_session.get("trackId")
+    if track_name:
+        print(f"  Track: {track_name}")
+
     # Extract assist profile from laps (most reliable source)
     session_assists = None
+    lap_times = {}
     for lap in api_laps:
         lap_assists = lap.get("assists")
-        if lap_assists and isinstance(lap_assists, dict):
+        if lap_assists and isinstance(lap_assists, dict) and session_assists is None:
             session_assists = lap_assists
-            break
+        lap_num = parse_int(lap.get("lapNumber"))
+        lap_time_ms = parse_int(lap.get("lapTimeMs"))
+        if lap_num is not None and lap_time_ms is not None and lap_time_ms > 0:
+            lap_times[lap_num] = lap_time_ms
+
+    session_meta = {
+        "trackName": track_name,
+        "trackId": track_id,
+    }
 
     samples = []
     for index, row in enumerate(traces, start=1):
@@ -236,7 +395,7 @@ def load_samples_from_api(session_id, max_samples=2000, auth_token=None):
         raise SystemExit("No usable telemetry samples in API response.")
 
     print(f"  {len(samples)} usable samples after filtering.")
-    return samples, session_assists
+    return samples, session_assists, lap_times, session_meta
 
 
 def duration_seconds(samples):
@@ -426,7 +585,7 @@ def summarize_lap(lap_number, samples):
     }
 
 
-def summarize_session(samples, assists=None):
+def summarize_session(samples, assists=None, lap_times=None, track_name=None):
     by_lap = defaultdict(list)
     for sample in samples:
         by_lap[sample["lapNumber"]].append(sample)
@@ -436,12 +595,37 @@ def summarize_session(samples, assists=None):
         for lap_number in sorted(by_lap)
     ]
 
+    # Attach real lap times from API if available
+    if lap_times:
+        for lap in lap_summaries:
+            real_time_ms = lap_times.get(lap["lapNumber"])
+            if real_time_ms:
+                lap["lapTimeMs"] = real_time_ms
+                lap["lapTimeSec"] = round(real_time_ms / 1000.0, 3)
+
+    # Attach corner names to braking/cornering zones
+    if track_name:
+        for lap in lap_summaries:
+            for zone in lap.get("brakingZones", []):
+                zone["cornerName"] = lookup_corner_name(
+                    track_name, zone.get("startLapDistanceM"), zone.get("endLapDistanceM")
+                )
+            for zone in lap.get("corneringZones", []):
+                zone["cornerName"] = lookup_corner_name(
+                    track_name, zone.get("startLapDistanceM"), zone.get("endLapDistanceM")
+                )
+
     speeds = [sample["speedKph"] for sample in samples]
-    lap_durations = [lap["approxDurationSec"] for lap in lap_summaries if lap["approxDurationSec"]]
+    lap_durations = [lap.get("lapTimeSec") or lap["approxDurationSec"] for lap in lap_summaries if lap.get("lapTimeSec") or lap.get("approxDurationSec")]
+
+    # Determine fastest lap
+    timed_laps = [(lap["lapNumber"], lap["lapTimeMs"]) for lap in lap_summaries if lap.get("lapTimeMs")]
+    fastest_lap = min(timed_laps, key=lambda x: x[1])[0] if timed_laps else None
 
     session = {
         "sampleCount": len(samples),
         "lapCount": len(lap_summaries),
+        "trackName": track_name,
         "firstTimestamp": samples[0]["timestampRaw"] if samples else None,
         "lastTimestamp": samples[-1]["timestampRaw"] if samples else None,
         "approxDurationSec": duration_seconds(samples),
@@ -449,6 +633,7 @@ def summarize_session(samples, assists=None):
         "maxSpeedKph": max(speeds) if speeds else None,
         "lapDurationMedianSec": median(lap_durations),
         "lapDurationSpreadSec": (max(lap_durations) - min(lap_durations)) if len(lap_durations) >= 2 else None,
+        "fastestLap": fastest_lap,
     }
 
     return {
@@ -593,7 +778,7 @@ def render_markdown(report):
     lap_rows = [
         [
             lap["lapNumber"],
-            format_time(lap["approxDurationSec"]),
+            format_time(lap.get("lapTimeSec") or lap["approxDurationSec"]),
             format_number(lap["avgSpeedKph"], 1, " kph"),
             format_number(lap["maxSpeedKph"], 0, " kph"),
             pct(lap["fullThrottlePct"]),
@@ -616,11 +801,13 @@ def render_markdown(report):
         f"- Report schema: `{report['schema']}`",
         f"- Generated at: {report['generatedAt']}",
         f"- Samples analysed: {session['sampleCount']}",
+        f"- Track: {session['trackName'] or 'Unknown'}",
         f"- Laps detected: {session['lapCount']}",
         f"- Approx session duration: {format_time(session['approxDurationSec'])}",
         f"- Average speed: {format_number(session['avgSpeedKph'], 1, ' kph')}",
         f"- Top speed: {format_number(session['maxSpeedKph'], 0, ' kph')}",
         f"- Lap duration spread: {format_number(session['lapDurationSpreadSec'], 2, ' sec')}",
+        f"- Fastest lap: Lap {session['fastestLap']}" if session.get('fastestLap') else "- Fastest lap: -",
         "",
     ]
 
@@ -724,7 +911,7 @@ def render_markdown(report):
         lines.extend([
             f"### Lap {lap['lapNumber']}",
             "",
-            f"- Approx duration: {format_time(lap['approxDurationSec'])}",
+            f"- Lap time: {format_time(lap.get('lapTimeSec'))}" if lap.get("lapTimeSec") else f"- Approx duration: {format_time(lap['approxDurationSec'])}",
             f"- Distance covered: {format_number(lap['distanceCoveredM'], 1, ' m')}",
             f"- Average speed: {format_number(lap['avgSpeedKph'], 1, ' kph')}",
             f"- 95th percentile speed: {format_number(lap['p95SpeedKph'], 1, ' kph')}",
@@ -750,8 +937,10 @@ def render_markdown(report):
         if lap["brakingZones"]:
             rows = []
             for index, zone in enumerate(lap["brakingZones"], start=1):
+                corner = zone.get("cornerName") or ""
                 rows.append([
                     index,
+                    corner,
                     format_number(zone["startLapDistanceM"], 1, " m"),
                     format_number(zone["endLapDistanceM"], 1, " m"),
                     format_number(zone["distanceM"], 1, " m"),
@@ -764,7 +953,7 @@ def render_markdown(report):
                 "Braking zones:",
                 "",
                 markdown_table(
-                    ["#", "Start", "End", "Distance", "Entry", "Min", "Exit", "Peak brake"],
+                    ["#", "Corner", "Start", "End", "Distance", "Entry", "Min", "Exit", "Peak brake"],
                     rows,
                 ),
                 "",
@@ -773,8 +962,10 @@ def render_markdown(report):
         if lap["corneringZones"]:
             rows = []
             for index, zone in enumerate(lap["corneringZones"], start=1):
+                corner = zone.get("cornerName") or ""
                 rows.append([
                     index,
+                    corner,
                     format_number(zone["startLapDistanceM"], 1, " m"),
                     format_number(zone["endLapDistanceM"], 1, " m"),
                     format_number(zone["avgSpeedKph"], 0, " kph"),
@@ -786,7 +977,7 @@ def render_markdown(report):
                 "Cornering zones:",
                 "",
                 markdown_table(
-                    ["#", "Start", "End", "Avg speed", "Min speed", "Avg throttle", "Peak steering"],
+                    ["#", "Corner", "Start", "End", "Avg speed", "Min speed", "Avg throttle", "Peak steering"],
                     rows,
                 ),
                 "",
@@ -906,18 +1097,21 @@ def main():
 
     # Load samples from API or CSV
     if args.session:
-        samples, session_assists = load_samples_from_api(args.session, max_samples=args.max_samples, auth_token=args.token)
+        samples, session_assists, lap_times, session_meta = load_samples_from_api(args.session, max_samples=args.max_samples, auth_token=args.token)
+        track_name = session_meta.get("trackName")
     else:
         csv_path = Path(args.csv or DEFAULT_INPUT)
         if not csv_path.exists():
             raise SystemExit(f"Input CSV not found: {csv_path}")
         samples = load_samples(csv_path)
         session_assists = None
+        lap_times = None
+        track_name = None
 
     if not samples:
         raise SystemExit("No usable telemetry samples found.")
 
-    report = summarize_session(samples, assists=session_assists)
+    report = summarize_session(samples, assists=session_assists, lap_times=lap_times, track_name=track_name)
 
     markdown_path = Path(args.md)
     json_path = Path(args.json)

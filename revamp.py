@@ -1515,6 +1515,68 @@ def flush_pending_telemetry_batch_sync():
         ))
 
 
+def run_local_post_session_report(session_id=None):
+    """Generate the local AI report from CSV, send to OpenRouter (Claude Opus),
+    and upload the AI coach response to the backend."""
+    try:
+        from pathlib import Path as _Path
+        import subprocess
+        import sys
+
+        csv_file = _Path(CSV_PATH)
+        if not csv_file.exists() or csv_file.stat().st_size <= 100:
+            print("No telemetry CSV to process (empty or missing).")
+            return
+
+        print("\nGenerating post-session AI report...")
+        cmd = [
+            sys.executable,
+            "build_post_session_ai_report.py",
+            "--csv", CSV_PATH,
+            "--ai",
+            "--model", "anthropic/claude-opus-4.8",
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0 and result.stderr:
+            print("Report generation error:", result.stderr[-500:])
+            return
+
+        # Upload the AI coach response to the backend
+        ai_output_path = _Path("ai_coach_response.md")
+        if not ai_output_path.exists() or ai_output_path.stat().st_size == 0:
+            print("No AI coach response file found to upload.")
+            return
+
+        if not session_id:
+            print("No session ID available — skipping upload of AI coach response.")
+            return
+
+        response_text = ai_output_path.read_text(encoding="utf-8")
+        upload_url = f"{API_BASE}/sessions/{session_id}/reports/ai-coach-response"
+        print(f"Uploading AI coach response to backend for session {session_id}...")
+
+        try:
+            upload_res = http.post(
+                upload_url,
+                headers=listener_auth_headers(),
+                json={
+                    "responseMarkdown": response_text,
+                    "model": "anthropic/claude-opus-4.8",
+                    "generatedAt": iso_now(),
+                },
+                timeout=(5.0, 30.0),
+            )
+            upload_res.raise_for_status()
+            print("AI coach response uploaded successfully.")
+        except Exception as upload_err:
+            print(f"Failed to upload AI coach response: {upload_err}")
+
+    except Exception as e:
+        print(f"Post-session report auto-generation failed: {e}")
+
+
 def close_current_backend_session(reason=None, packet_type=None, detected_at=None):
     global SESSION_ID, LAST_CLOSED_GAME_SESSION_UID, LAST_CLOSED_SESSION_SIGNATURE, LAST_CLOSED_SESSION_MONO
 
@@ -1538,12 +1600,17 @@ def close_current_backend_session(reason=None, packet_type=None, detected_at=Non
 
     closed = end_session_once(False)
     if closed:
+        closed_session_id = SESSION_ID  # capture before reset
         SESSION_ID = None
         reset_session_end_state()
         reset_runtime_state_for_session()
         LAST_CLOSED_GAME_SESSION_UID = closed_game_session_uid
         LAST_CLOSED_SESSION_SIGNATURE = closed_session_signature
         LAST_CLOSED_SESSION_MONO = time.time()
+
+        # Generate and send report to AI coach on session end
+        run_local_post_session_report(session_id=closed_session_id)
+
         print("Listener is still active. Waiting for the next game session...")
 
     return closed
@@ -2548,24 +2615,8 @@ def main():
 
         sock.close()
 
-        # Auto-generate post-session report and send to AI coach
-        try:
-            from pathlib import Path as _Path
-            csv_file = _Path(CSV_PATH)
-            if csv_file.exists() and csv_file.stat().st_size > 100:
-                print("\nGenerating post-session AI report...")
-                import subprocess
-                import sys
-                cmd = [sys.executable, "build_post_session_ai_report.py", "--csv", CSV_PATH, "--ai"]
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if result.stdout:
-                    print(result.stdout)
-                if result.returncode != 0 and result.stderr:
-                    print("Report generation error:", result.stderr[-500:])
-            else:
-                print("No telemetry CSV to process (empty or missing).")
-        except Exception as e:
-            print(f"Post-session report auto-generation failed: {e}")
+        # Report generation is now handled inside close_current_backend_session()
+        # which was already called above.
 
 if __name__ == "__main__":
     main()
