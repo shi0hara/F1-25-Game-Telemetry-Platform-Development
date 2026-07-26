@@ -1037,7 +1037,43 @@ export default function LapPerformanceAnalysis() {
   const DEFAULT_TRACE_H_SCALE = 1.0;
   const [draftTraceHScale, setDraftTraceHScale] = useState(DEFAULT_TRACE_H_SCALE);
   const [appliedTraceHScale, setAppliedTraceHScale] = useState(DEFAULT_TRACE_H_SCALE);
+  const [traceScaleText, setTraceScaleText] = useState(String(Math.round(DEFAULT_TRACE_SCALE * 100)));
+  const [traceHScaleText, setTraceHScaleText] = useState(String(Math.round(DEFAULT_TRACE_H_SCALE * 100)));
+  const [traceScaleTextFocused, setTraceScaleTextFocused] = useState(false);
+  const [traceHScaleTextFocused, setTraceHScaleTextFocused] = useState(false);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
+
+  // Sync text inputs with slider/reset changes (only when input is not focused)
+  useEffect(() => {
+    if (!traceScaleTextFocused) {
+      setTraceScaleText(String(Math.round(draftTraceScale * 100)));
+    }
+  }, [draftTraceScale, traceScaleTextFocused]);
+
+  useEffect(() => {
+    if (!traceHScaleTextFocused) {
+      setTraceHScaleText(String(Math.round(draftTraceHScale * 100)));
+    }
+  }, [draftTraceHScale, traceHScaleTextFocused]);
+
+  function commitTraceScaleText() {
+    const v = Number(traceScaleText);
+    if (Number.isFinite(v) && v >= 50 && v <= 120) {
+      setDraftTraceScale(v / 100);
+    }
+    setTraceScaleText(String(Math.round(draftTraceScale * 100)));
+    setTraceScaleTextFocused(false);
+  }
+
+  function commitTraceHScaleText() {
+    const v = Number(traceHScaleText);
+    if (Number.isFinite(v) && v >= 50 && v <= 150) {
+      setDraftTraceHScale(v / 100);
+    }
+    setTraceHScaleText(String(Math.round(draftTraceHScale * 100)));
+    setTraceHScaleTextFocused(false);
+  }
+
   const stats = data?.stats || {};
   const deltas = data?.deltas || {};
   const personalBest = data?.personalBest || null;
@@ -1228,7 +1264,7 @@ export default function LapPerformanceAnalysis() {
       {!loading && !error && data && (
         <>
           <div className="card analysis-summary-card">
-            <div className="analysis-summary-head">
+            <div className="analysis-summary-head" style={{ marginBottom: 0 }}>
               <div>
                 <h2>
                   {session.trackName || "Unknown Track"} | Lap {lap.lapNumber ?? "-"}
@@ -1236,135 +1272,157 @@ export default function LapPerformanceAnalysis() {
                 <p className="analysis-muted">
                   {session.username || "Unknown Driver"} | {formatDateTime(lap.recordedAt || session.startedAt)}
                 </p>
-                {isBeginnerView && (
-                  <div style={{ color: "#a8b2c8", marginTop: 8, marginBottom: 0 }}>
-                            <div style={{ marginBottom: 8 }}>
+                <div style={{ color: "#a8b2c8", marginTop: 8, marginBottom: 0 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <button
+                        type="button"
+                        className="lap-extras-toggle"
+                        onClick={() => setSettingsExpanded((s) => !s)}
+                        aria-expanded={settingsExpanded}
+                      >
+                        <span>Map Settings</span>
+                        <span className={`lap-extras-chevron ${settingsExpanded ? "open" : ""}`}>v</span>
+                      </button>
+
+                      {settingsExpanded && (
+                        <div className="lap-extras-body" key="map-settings-expanded-beginner">
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace vertical scale</label>
+                              <input
+                                type="range"
+                                min="50"
+                                max="120"
+                                step="1"
+                                value={Math.round(draftTraceScale * 100)}
+                                onChange={(e) => setDraftTraceScale(Number(e.target.value) / 100)}
+                                style={{ flex: 1 }}
+                              />
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={traceScaleText}
+                                onChange={(e) => setTraceScaleText(e.target.value)}
+                                onFocus={() => setTraceScaleTextFocused(true)}
+                                onBlur={commitTraceScaleText}
+                                onKeyDown={(e) => { if (e.key === 'Enter') commitTraceScaleText(); }}
+                                className="map-settings-number-input"
+                              />
+                              <span style={{ color: '#cbd5e1', fontSize: 13 }}>%</span>
                               <button
                                 type="button"
-                                className="lap-extras-toggle"
-                                onClick={() => setSettingsExpanded((s) => !s)}
-                                aria-expanded={settingsExpanded}
+                                className="map-settings-btn"
+                                onClick={() => setAppliedTraceScale(draftTraceScale)}
+                                disabled={Number(appliedTraceScale) === Number(draftTraceScale)}
                               >
-                                <span>Map Settings</span>
-                                <span className={`lap-extras-chevron ${settingsExpanded ? "open" : ""}`}>v</span>
+                                Apply
                               </button>
-
-                              {settingsExpanded && (
-                                <div className="lap-extras-body" key="map-settings-expanded-advanced">
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                      <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace vertical scale</label>
-                                      <input
-                                        type="range"
-                                        min="0.5"
-                                        max="1.2"
-                                        step="0.01"
-                                        value={draftTraceScale}
-                                        onChange={(e) => setDraftTraceScale(Number(e.target.value))}
-                                        style={{ flex: 1 }}
-                                      />
-                                      <div style={{ color: '#cbd5e1', width: 48, textAlign: 'right' }}>{(draftTraceScale*100).toFixed(0)}%</div>
-                                      <button
-                                        type="button"
-                                        onClick={() => setAppliedTraceScale(draftTraceScale)}
-                                        disabled={Number(appliedTraceScale) === Number(draftTraceScale)}
-                                        style={{ padding: '6px 10px', borderRadius: 6 }}
-                                      >
-                                        Apply
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => { setDraftTraceScale(DEFAULT_TRACE_SCALE); setAppliedTraceScale(DEFAULT_TRACE_SCALE); }}
-                                        disabled={Number(appliedTraceScale) === Number(DEFAULT_TRACE_SCALE) && Number(draftTraceScale) === Number(DEFAULT_TRACE_SCALE)}
-                                        style={{ padding: '6px 10px', borderRadius: 6 }}
-                                      >
-                                        Reset
-                                      </button>
-                                    </div>
-
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                      <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace horizontal scale</label>
-                                      <input
-                                        type="range"
-                                        min="0.5"
-                                        max="1.5"
-                                        step="0.01"
-                                        value={draftTraceHScale}
-                                        onChange={(e) => setDraftTraceHScale(Number(e.target.value))}
-                                        style={{ flex: 1 }}
-                                      />
-                                      <div style={{ color: '#cbd5e1', width: 48, textAlign: 'right' }}>{(draftTraceHScale*100).toFixed(0)}%</div>
-                                      <button
-                                        type="button"
-                                        onClick={() => setAppliedTraceHScale(draftTraceHScale)}
-                                        disabled={Number(appliedTraceHScale) === Number(draftTraceHScale)}
-                                        style={{ padding: '6px 10px', borderRadius: 6 }}
-                                      >
-                                        Apply
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => { setDraftTraceHScale(DEFAULT_TRACE_H_SCALE); setAppliedTraceHScale(DEFAULT_TRACE_H_SCALE); }}
-                                        disabled={Number(appliedTraceHScale) === Number(DEFAULT_TRACE_H_SCALE) && Number(draftTraceHScale) === Number(DEFAULT_TRACE_H_SCALE)}
-                                        style={{ padding: '6px 10px', borderRadius: 6 }}
-                                      >
-                                        Reset
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
+                              <button
+                                type="button"
+                                className="map-settings-btn"
+                                onClick={() => { setDraftTraceScale(DEFAULT_TRACE_SCALE); setAppliedTraceScale(DEFAULT_TRACE_SCALE); }}
+                                disabled={Number(appliedTraceScale) === Number(DEFAULT_TRACE_SCALE) && Number(draftTraceScale) === Number(DEFAULT_TRACE_SCALE)}
+                              >
+                                Reset
+                              </button>
                             </div>
 
-                          
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace horizontal scale</label>
+                              <input
+                                type="range"
+                                min="50"
+                                max="150"
+                                step="1"
+                                value={Math.round(draftTraceHScale * 100)}
+                                onChange={(e) => setDraftTraceHScale(Number(e.target.value) / 100)}
+                                style={{ flex: 1 }}
+                              />
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={traceHScaleText}
+                                onChange={(e) => setTraceHScaleText(e.target.value)}
+                                onFocus={() => setTraceHScaleTextFocused(true)}
+                                onBlur={commitTraceHScaleText}
+                                onKeyDown={(e) => { if (e.key === 'Enter') commitTraceHScaleText(); }}
+                                className="map-settings-number-input"
+                              />
+                              <span style={{ color: '#cbd5e1', fontSize: 13 }}>%</span>
+                              <button
+                                type="button"
+                                className="map-settings-btn"
+                                onClick={() => setAppliedTraceHScale(draftTraceHScale)}
+                                disabled={Number(appliedTraceHScale) === Number(draftTraceHScale)}
+                              >
+                                Apply
+                              </button>
+                              <button
+                                type="button"
+                                className="map-settings-btn"
+                                onClick={() => { setDraftTraceHScale(DEFAULT_TRACE_H_SCALE); setAppliedTraceHScale(DEFAULT_TRACE_H_SCALE); }}
+                                disabled={Number(appliedTraceHScale) === Number(DEFAULT_TRACE_H_SCALE) && Number(draftTraceHScale) === Number(DEFAULT_TRACE_H_SCALE)}
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                        <PostLapTelemetryMap
-                          apiBase={API_BASE}
-                          trackKey={session.trackKey}
-                          traces={traces}
-                          activeIndex={activeSampleIndex}
-                          sectorBoundaries={sectorBoundaries}
-                          containerStyle={{ height: "100%", minHeight: "300px" }}
-                          flipMap={flipSingapore}
-                          rotateDeg={rotateBahrain ? 90 : 0}
-                          traceScale={appliedTraceScale}
-                          traceHScale={appliedTraceHScale}
-                        />
-                      </div>
-
-                      <div className="lap-analysis-grid-item replay-panel">
-                        <ReplayControls
-                          traces={traces}
-                          replayTimeMs={replayTimeMs}
-                          replayDurationMs={replayDurationMs}
-                          replaySpeed={replaySpeed}
-                          isReplaying={isReplaying}
-                          onPlayPause={handleReplayPlayPause}
-                          onRestart={handleReplayRestart}
-                          onSeekBy={handleReplaySeekBy}
-                          onSeekTo={handleReplaySeekTo}
-                          onSpeedStep={handleReplaySpeedStep}
-                          containerStyle={{ height: "100%", minHeight: "200px" }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="lap-analysis-column lap-analysis-column-right">
-                      <div className="lap-analysis-grid-item telemetry-panel">
-                        {renderTelemetryPanel({
-                          metrics: beginnerMetrics,
-                          visible: beginnerVisibleMetrics,
-                          onToggle: toggleBeginnerMetric,
-                        })}
-                      </div>
-
-                      <div className="lap-analysis-grid-item driver-panel">
-                        <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%", minHeight: "180px" }} />
-                      </div>
+                      )}
                     </div>
                   </div>
+              </div>
+            </div>
+          </div>
+
+          {isBeginnerView && (
+            <div className="lap-analysis-two-col-grid" key="beginner-mode">
+              <div className="lap-analysis-column lap-analysis-column-left">
+                <div className="lap-analysis-grid-item map-panel">
+                  <PostLapTelemetryMap
+                    apiBase={API_BASE}
+                    trackKey={session.trackKey}
+                    traces={traces}
+                    activeIndex={activeSampleIndex}
+                    sectorBoundaries={sectorBoundaries}
+                    containerStyle={{ height: "100%", minHeight: "300px" }}
+                    flipMap={flipSingapore}
+                    rotateDeg={rotateBahrain ? 90 : 0}
+                    traceScale={appliedTraceScale}
+                    traceHScale={appliedTraceHScale}
+                  />
                 </div>
-              )}
+
+                <div className="lap-analysis-grid-item replay-panel">
+                  <ReplayControls
+                    traces={traces}
+                    replayTimeMs={replayTimeMs}
+                    replayDurationMs={replayDurationMs}
+                    replaySpeed={replaySpeed}
+                    isReplaying={isReplaying}
+                    onPlayPause={handleReplayPlayPause}
+                    onRestart={handleReplayRestart}
+                    onSeekBy={handleReplaySeekBy}
+                    onSeekTo={handleReplaySeekTo}
+                    onSpeedStep={handleReplaySpeedStep}
+                    containerStyle={{ height: "100%", minHeight: "200px" }}
+                  />
+                </div>
+              </div>
+
+              <div className="lap-analysis-column lap-analysis-column-right">
+                <div className="lap-analysis-grid-item telemetry-panel">
+                  {renderTelemetryPanel({
+                    metrics: beginnerMetrics,
+                    visible: beginnerVisibleMetrics,
+                    onToggle: toggleBeginnerMetric,
+                  })}
+                </div>
+
+                <div className="lap-analysis-grid-item driver-panel">
+                  <ReplayDriverPanel activeSample={activeSample} containerStyle={{ height: "100%", minHeight: "180px" }} />
+                </div>
+              </div>
             </div>
           )}
 
@@ -1372,93 +1430,6 @@ export default function LapPerformanceAnalysis() {
             <div className="lap-analysis-two-col-grid" key="advanced-mode">
               <div className="lap-analysis-column lap-analysis-column-left">
                 <div className="lap-analysis-grid-item map-panel">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => setSettingsExpanded((s) => !s)}
-                      style={{ padding: '6px 10px', borderRadius: 6 }}
-                    >
-                      {settingsExpanded ? "Hide Map Settings" : "Map Settings"}
-                    </button>
-                    {settingsExpanded && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1 }}>
-                        <div style={{ marginBottom: 8 }}>
-                          <button
-                            type="button"
-                            className="lap-extras-toggle"
-                            onClick={() => setSettingsExpanded((s) => !s)}
-                            aria-expanded={settingsExpanded}
-                          >
-                            <span>Map Settings</span>
-                            <span className={`lap-extras-chevron ${settingsExpanded ? "open" : ""}`}>v</span>
-                          </button>
-
-                          {settingsExpanded && (
-                            <div className="lap-extras-body" key="map-settings-expanded-advanced">
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                  <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace vertical scale</label>
-                                  <input
-                                    type="range"
-                                    min="0.5"
-                                    max="1.2"
-                                    step="0.01"
-                                    value={draftTraceScale}
-                                    onChange={(e) => setDraftTraceScale(Number(e.target.value))}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <div style={{ color: '#cbd5e1', width: 48, textAlign: 'right' }}>{(draftTraceScale*100).toFixed(0)}%</div>
-                                  <button
-                                    type="button"
-                                    onClick={() => setAppliedTraceScale(draftTraceScale)}
-                                    disabled={Number(appliedTraceScale) === Number(draftTraceScale)}
-                                    style={{ padding: '6px 10px', borderRadius: 6 }}
-                                  >
-                                    Apply
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => { setDraftTraceScale(DEFAULT_TRACE_SCALE); setAppliedTraceScale(DEFAULT_TRACE_SCALE); }}
-                                    disabled={Number(appliedTraceScale) === Number(DEFAULT_TRACE_SCALE) && Number(draftTraceScale) === Number(DEFAULT_TRACE_SCALE)}
-                                    style={{ padding: '6px 10px', borderRadius: 6 }}
-                                  >
-                                    Reset
-                                  </button>
-                                </div>
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                  <label style={{ color: '#cbd5e1', fontSize: 13, minWidth: 160 }}>Trace horizontal scale</label>
-                                  <input
-                                    type="range"
-                                    min="0.5"
-                                    max="1.5"
-                                    step="0.01"
-                                    value={draftTraceHScale}
-                                    onChange={(e) => setDraftTraceHScale(Number(e.target.value))}
-                                    style={{ flex: 1 }}
-                                  />
-                                  <div style={{ color: '#cbd5e1', width: 48, textAlign: 'right' }}>{(draftTraceHScale*100).toFixed(0)}%</div>
-                                  <button
-                                    type="button"
-                                    onClick={() => setAppliedTraceHScale(draftTraceHScale)}
-                                    disabled={Number(appliedTraceHScale) === Number(draftTraceHScale)}
-                                    style={{ padding: '6px 10px', borderRadius: 6 }}
-                                  >
-                                    Apply
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => { setDraftTraceHScale(DEFAULT_TRACE_H_SCALE); setAppliedTraceHScale(DEFAULT_TRACE_H_SCALE); }}
-                                    disabled={Number(appliedTraceHScale) === Number(DEFAULT_TRACE_H_SCALE) && Number(draftTraceHScale) === Number(DEFAULT_TRACE_H_SCALE)}
-                                    style={{ padding: '6px 10px', borderRadius: 6 }}
-                                  >
-                                    Reset
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
                   <PostLapTelemetryMap
                     apiBase={API_BASE}
                     trackKey={session.trackKey}
