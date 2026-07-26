@@ -1,0 +1,192 @@
+/* Backdrop */
+.ai-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0);
+  pointer-events: none;
+  transition: background-color 0.3s ease;
+}
+
+.ai-drawer-backdrop--open {
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+}
+
+/* Drawer panel */
+.ai-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 92vw);
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(170deg, rgba(24, 31, 48, 0.98) 0%, rgba(11, 15, 22, 0.99) 100%);
+  border-left: 1px solid var(--surface-edge, rgba(255, 255, 255, 0.14));
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%);
+  transition: transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+  overflow: hidden;
+}
+
+.ai-drawer--open {
+  transform: translateX(0);
+}
+
+/* Header */
+.ai-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--surface-edge, rgba(255, 255, 255, 0.14));
+  flex-shrink: 0;
+}
+
+.ai-drawer-title {
+  margin: 0;
+  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  color: var(--color-text-white, #f7f8fb);
+}
+
+.ai-drawer-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.ai-drawer-close:hover,
+.ai-drawer-close:focus-visible {
+  border-color: rgba(248, 113, 113, 0.6);
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+  outline: none;
+}
+
+/* Beginner / Advanced toggle — reuses the project's switch pattern */
+.ai-drawer-toggle {
+  --drawer-toggle-x: 0%;
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  margin: 16px 24px 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #3a3a3c 0%, #2c2c2e 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.ai-drawer-toggle::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: calc(50% - 7px);
+  height: calc(100% - 10px);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #ececec 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 6px 14px rgba(0, 0, 0, 0.35);
+  transform: translateX(var(--drawer-toggle-x));
+  transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+  pointer-events: none;
+}
+
+.ai-drawer-toggle.is-advanced {
+  --drawer-toggle-x: 100%;
+}
+
+.ai-drawer-toggle button {
+  position: relative;
+  z-index: 1;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.78);
+  font-family: var(--font-family-display, "Teko", sans-serif);
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
+.ai-drawer-toggle button:hover {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.ai-drawer-toggle button:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.ai-drawer-toggle button.active {
+  color: #141414;
+}
+
+/* Body / report content */
+.ai-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  color: var(--color-text-white, #f7f8fb);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.ai-drawer-report {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-drawer-empty {
+  color: #64748b;
+  font-style: italic;
+}
+
+/* Footer */
+.ai-drawer-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--surface-edge, rgba(255, 255, 255, 0.14));
+  flex-shrink: 0;
+}
+
+.ai-drawer-confirm {
+  width: 100%;
+  padding: 12px 20px;
+  border: 1px solid rgba(34, 197, 94, 0.5);
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #bbf7d0;
+  font-family: var(--font-family-display, "Teko", sans-serif);
+  font-size: 1.3rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.ai-drawer-confirm:hover {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: rgba(34, 197, 94, 0.75);
+}
+
+.ai-drawer-confirm:focus-visible {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}

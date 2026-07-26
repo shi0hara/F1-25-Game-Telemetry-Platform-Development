@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, onSnapshot } from "firebase/firestore";
 import {
@@ -14,6 +14,7 @@ import { Line } from "react-chartjs-2";
 import { db } from "../firebase";
 import LiveSessionTelemetryPanel from "../components/LiveSessionTelemetryPanel";
 import AssistIcons from "../components/AssistIcons";
+import AiCoachDrawer from "../components/AiCoachDrawer";
 import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
 import {
   getSessionEndedAt,
@@ -801,6 +802,77 @@ function PostSessionPanel({ details }) {
   );
 }
 
+function AiCoachPill({ session, report, onViewAnalysis, viewAnalysisBtnRef }) {
+  const aiStatus = session?.aiCoachResponseStatus;
+  const reportStatus = session?.postSessionReportStatus;
+
+  // Show the pill once the post-session report exists (ready/building) or AI response is tracked
+  const hasReport = reportStatus === "ready" || reportStatus === "building";
+  if (!aiStatus && !hasReport) return null;
+
+  const isProcessing =
+    aiStatus === "processing" ||
+    (!aiStatus && reportStatus === "building");
+
+  const isReady = aiStatus === "ready";
+
+  return (
+    <div className="ai-coach-pill" data-status={isReady ? "ready" : isProcessing ? "processing" : "idle"}>
+      {isProcessing && (
+        <>
+          <span className="ai-coach-pill-spinner" />
+          <span className="ai-coach-pill-text">Generating Your Analysis</span>
+          <button className="ai-coach-pill-btn" disabled>
+            View Analysis
+          </button>
+        </>
+      )}
+      {isReady && (
+        <>
+          <svg
+            className="ai-coach-pill-check"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            width="16"
+            height="16"
+          >
+            <path
+              fillRule="evenodd"
+              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span className="ai-coach-pill-text">Analysis Ready</span>
+          <button
+            ref={viewAnalysisBtnRef}
+            className="ai-coach-pill-btn"
+            onClick={onViewAnalysis}
+          >
+            View Analysis
+          </button>
+        </>
+      )}
+      {!isProcessing && !isReady && (
+        <>
+          <svg
+            className="ai-coach-pill-icon"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            width="16"
+            height="16"
+          >
+            <path d="M10 2a8 8 0 100 16 8 8 0 000-16zm1 11H9v-2h2v2zm0-4H9V5h2v4z" />
+          </svg>
+          <span className="ai-coach-pill-text">AI Driving Coach</span>
+          <button className="ai-coach-pill-btn" disabled>
+            View Analysis
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SessionDetails() {
   const { sessionId } = useParams();
   const [session, setSession] = useState(null);
@@ -809,6 +881,9 @@ export default function SessionDetails() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [aiCoachContent, setAiCoachContent] = useState(null);
+  const viewAnalysisBtnRef = useRef(null);
 
   useEffect(() => {
     if (!sessionId) return undefined;
@@ -912,6 +987,24 @@ export default function SessionDetails() {
 
   const shownSession = details?.session || session || {};
 
+  const handleOpenDrawer = useCallback(async () => {
+    setDrawerOpen(true);
+    if (aiCoachContent) return; // already loaded
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/reports/post-session`,
+        { headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAiCoachContent(data.aiCoachResponse || null);
+      }
+    } catch (err) {
+      console.error("Failed to load AI coach response:", err);
+    }
+  }, [sessionId, aiCoachContent]);
+
   return (
     <div className="page-container lap-performance-page session-details-page">
       <div className="analysis-page-header">
@@ -924,12 +1017,19 @@ export default function SessionDetails() {
           </p>
         </div>
 
-        <Link
-          to="/live"
-          className="analysis-back-link"
-        >
-          Back to Sessions
-        </Link>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <AiCoachPill
+            session={shownSession}
+            onViewAnalysis={handleOpenDrawer}
+            viewAnalysisBtnRef={viewAnalysisBtnRef}
+          />
+          <Link
+            to="/live"
+            className="analysis-back-link"
+          >
+            Back to Sessions
+          </Link>
+        </div>
       </div>
 
       {sessionLoading && <p>Loading session...</p>}
@@ -945,6 +1045,13 @@ export default function SessionDetails() {
       {!sessionLoading && session && !active && !detailsLoading && details && (
         <PostSessionPanel details={details} />
       )}
+
+      <AiCoachDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        reportContent={aiCoachContent}
+        triggerRef={viewAnalysisBtnRef}
+      />
     </div>
   );
 }
