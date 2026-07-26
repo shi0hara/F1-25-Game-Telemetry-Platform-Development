@@ -261,6 +261,7 @@ export default function PostLapTelemetryMap({
   activeIndex,
   sectorBoundaries = [],
   containerStyle,
+  flipMap = false,
 }) {
   const canvasRef = useRef(null);
   const [trackMap, setTrackMap] = useState(null);
@@ -341,6 +342,16 @@ export default function PostLapTelemetryMap({
     );
   }, [imageHeight, imageWidth, mapTraces, trackMap]);
 
+  const effectiveTransform = useMemo(() => {
+    if (!transform) return null;
+    if (!flipMap) return transform;
+    return {
+      worldToImage(worldX, worldZ) {
+        const p = transform.worldToImage(worldX, worldZ);
+        return { x: imageWidth - p.x, y: imageHeight - p.y };
+      },
+    };
+  }, [transform, imageWidth, imageHeight, flipMap]);
   const positionedSamples = useMemo(
     () =>
       mapTraces
@@ -351,6 +362,48 @@ export default function PostLapTelemetryMap({
         ),
     [mapTraces]
   );
+
+  // Compute vertical centering offset so the drawn track sits centered vertically
+  const verticalOffset = useMemo(() => {
+    if (!effectiveTransform) return 0;
+    const points = [];
+    if (Array.isArray(trackMap?.centerline)) {
+      for (const p of trackMap.centerline) {
+        const pt = readCenterlinePoint(p);
+        if (pt) points.push(pt);
+      }
+    }
+    for (const item of positionedSamples) {
+      points.push({ worldX: number(item.sample.worldX), worldZ: number(item.sample.worldZ) });
+    }
+    if (points.length === 0) return 0;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const pt of points) {
+      const mapped = effectiveTransform.worldToImage(pt.worldX, pt.worldZ);
+      if (!Number.isFinite(mapped?.y)) continue;
+      minY = Math.min(minY, mapped.y);
+      maxY = Math.max(maxY, mapped.y);
+    }
+    if (!Number.isFinite(minY) || !Number.isFinite(maxY) || maxY <= minY) return 0;
+    const contentHeight = maxY - minY;
+    const offset = (imageHeight - contentHeight) / 2 - minY;
+    // small clamp so we don't move extreme amounts
+    if (!Number.isFinite(offset)) return 0;
+    return offset;
+  }, [effectiveTransform, trackMap, positionedSamples, imageHeight]);
+
+  // Wrap effectiveTransform to apply vertical offset (and respect flip)
+  const positionedEffectiveTransform = useMemo(() => {
+    if (!effectiveTransform) return null;
+    const offsetY = verticalOffset || 0;
+    return {
+      worldToImage(worldX, worldZ) {
+        const p = effectiveTransform.worldToImage(worldX, worldZ);
+        return { x: p.x, y: p.y + offsetY };
+      },
+    };
+  }, [effectiveTransform, verticalOffset]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -368,7 +421,7 @@ export default function PostLapTelemetryMap({
       ctx.fillRect(0, 0, imageWidth, imageHeight);
       if (image) ctx.drawImage(image, 0, 0, imageWidth, imageHeight);
 
-      if (!transform) {
+      if (!positionedEffectiveTransform) {
         drawBadge(ctx, "No map calibration is available", 20, 48);
         return;
       }
@@ -379,7 +432,7 @@ export default function PostLapTelemetryMap({
       if (centerline.length > 1) {
         ctx.beginPath();
         centerline.forEach((point, index) => {
-          const pos = transform.worldToImage(point.worldX, point.worldZ);
+          const pos = positionedEffectiveTransform.worldToImage(point.worldX, point.worldZ);
           if (index === 0) ctx.moveTo(pos.x, pos.y);
           else ctx.lineTo(pos.x, pos.y);
         });
@@ -392,8 +445,8 @@ export default function PostLapTelemetryMap({
         const previous = positionedSamples[i - 1].sample;
         const current = positionedSamples[i].sample;
         if (isJump(previous, current)) continue;
-        const from = transform.worldToImage(previous.worldX, previous.worldZ);
-        const to = transform.worldToImage(current.worldX, current.worldZ);
+        const from = positionedEffectiveTransform.worldToImage(previous.worldX, previous.worldZ);
+        const to = positionedEffectiveTransform.worldToImage(current.worldX, current.worldZ);
         ctx.beginPath();
         ctx.moveTo(from.x, from.y);
         ctx.lineTo(to.x, to.y);
@@ -406,7 +459,7 @@ export default function PostLapTelemetryMap({
       for (const boundary of sectorBoundaries) {
         const sample = mapTraces[boundary.index];
         if (!sample || !hasNumber(sample.worldX) || !hasNumber(sample.worldZ)) continue;
-        const pos = transform.worldToImage(sample.worldX, sample.worldZ);
+        const pos = positionedEffectiveTransform.worldToImage(sample.worldX, sample.worldZ);
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2);
         ctx.fillStyle = boundary.color;
@@ -427,13 +480,13 @@ export default function PostLapTelemetryMap({
         hasNumber(markerSample.worldX) &&
         hasNumber(markerSample.worldZ)
       ) {
-        const pos = transform.worldToImage(markerSample.worldX, markerSample.worldZ);
+        const pos = positionedEffectiveTransform.worldToImage(markerSample.worldX, markerSample.worldZ);
         const headingSample =
           interpolateMapSample(mapTraces, Math.min(Number(activePosition) + 0.85, mapTraces.length - 1)) ||
           markerSample;
         const nextPos =
           hasNumber(headingSample.worldX) && hasNumber(headingSample.worldZ)
-            ? transform.worldToImage(headingSample.worldX, headingSample.worldZ)
+            ? positionedEffectiveTransform.worldToImage(headingSample.worldX, headingSample.worldZ)
             : pos;
         const angle = Math.atan2(nextPos.y - pos.y, nextPos.x - pos.x);
 
@@ -483,7 +536,7 @@ export default function PostLapTelemetryMap({
     positionedSamples,
     sectorBoundaries,
     trackMap,
-    transform,
+    positionedEffectiveTransform,
   ]);
 
   if (positionedSamples.length < 2) {

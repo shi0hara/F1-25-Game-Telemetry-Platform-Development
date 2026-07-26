@@ -13,6 +13,7 @@ import { Line } from "react-chartjs-2";
 import PostLapTelemetryMap from "../components/PostLapTelemetryMap";
 import SteeringWheel from "../components/SteeringWheel";
 import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
+import { getTrackKeyFromSession } from "../utils/sessionUtils";
 
 ChartJS.register(
   CategoryScale,
@@ -1023,6 +1024,10 @@ export default function LapPerformanceAnalysis() {
 
   const lap = data?.lap || {};
   const session = data?.session || {};
+  const normalizedTrackKey = getTrackKeyFromSession(session);
+  const flipSingapore = Boolean(
+    normalizedTrackKey === "track_12" || /singapore/i.test(String(normalizedTrackKey || ""))
+  );
   const stats = data?.stats || {};
   const deltas = data?.deltas || {};
   const personalBest = data?.personalBest || null;
@@ -1340,6 +1345,7 @@ export default function LapPerformanceAnalysis() {
                           activeIndex={activeSampleIndex}
                           sectorBoundaries={sectorBoundaries}
                           containerStyle={{ height: "100%", minHeight: "300px" }}
+                          flipMap={flipSingapore}
                         />
                       </div>
 
@@ -1390,6 +1396,7 @@ export default function LapPerformanceAnalysis() {
                     activeIndex={activeSampleIndex}
                     sectorBoundaries={sectorBoundaries}
                     containerStyle={{ height: "100%", minHeight: "300px" }}
+                    flipMap={flipSingapore}
                   />
                 </div>
 
