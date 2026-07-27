@@ -626,7 +626,6 @@ export default function PostLapTelemetryMap({
         style={{
           display: "block",
           width: "100%",
-          maxWidth: 560,
           aspectRatio: imageWidth + " / " + imageHeight,
           background: "#07111f",
           border: "1px solid rgba(255,255,255,0.14)",

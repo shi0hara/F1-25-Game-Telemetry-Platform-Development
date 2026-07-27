@@ -1560,7 +1560,6 @@ function TrackTelemetryMap({
       <div
         style={{
           width: "100%",
-          maxWidth: "1000px",
           aspectRatio: canvasAspectRatio,
         }}
       >
