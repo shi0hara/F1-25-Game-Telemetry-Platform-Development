@@ -1054,6 +1054,7 @@ export default function SessionDetails() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         reportContent={aiCoachContent}
+        sessionId={sessionId}
         triggerRef={viewAnalysisBtnRef}
       />
     </div>

@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./AiCoachDrawer.css";
 
+const API_BASE =
+  import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
+
+function getAuthHeaders() {
+  const token = window.localStorage.getItem("f1AuthToken");
+  return token ? { Authorization: "Bearer " + token } : {};
+}
+
 /**
  * Side drawer for the AI Driving Coach analysis.
  *
@@ -8,7 +16,8 @@ import "./AiCoachDrawer.css";
  *  - open: boolean — whether the drawer is visible
  *  - onClose: () => void — called when the drawer should close
  *  - title: string — drawer heading (defaults to "AI Driving Coach")
- *  - reportContent: string|null — markdown/text content to display
+ *  - reportContent: string|null — advanced report markdown/text
+ *  - sessionId: string — session ID for fetching beginner report
  *  - triggerRef: React ref — the button that opened the drawer (focus returns here on close)
  */
 export default function AiCoachDrawer({
@@ -16,9 +25,13 @@ export default function AiCoachDrawer({
   onClose,
   title = "AI Driving Coach",
   reportContent = null,
+  sessionId = null,
   triggerRef = null,
 }) {
   const [mode, setMode] = useState("advanced"); // "beginner" | "advanced"
+  const [beginnerContent, setBeginnerContent] = useState(null);
+  const [beginnerLoading, setBeginnerLoading] = useState(false);
+  const [beginnerError, setBeginnerError] = useState(null);
   const drawerRef = useRef(null);
   const closeButtonRef = useRef(null);
 
@@ -101,6 +114,105 @@ export default function AiCoachDrawer({
     return () => document.removeEventListener("keydown", trapFocus);
   }, [open]);
 
+  // Generate beginner report from the backend
+  const generateBeginnerReport = useCallback(async () => {
+    if (!sessionId || beginnerLoading) return;
+    if (beginnerContent) return; // already cached
+
+    setBeginnerLoading(true);
+    setBeginnerError(null);
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/reports/ai-coach-beginner`,
+        {
+          method: "POST",
+          headers: {
+            ...getAuthHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            advancedContent: reportContent,
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Request failed (HTTP ${res.status})`);
+      }
+
+      const data = await res.json();
+      setBeginnerContent(data.beginnerResponse);
+    } catch (err) {
+      console.error("Beginner report generation failed:", err);
+      setBeginnerError(err.message || "Failed to generate beginner report");
+    } finally {
+      setBeginnerLoading(false);
+    }
+  }, [sessionId, reportContent, beginnerContent, beginnerLoading]);
+
+  // Handle confirmation button
+  function handleConfirm() {
+    if (mode === "beginner" && !beginnerContent && !beginnerLoading) {
+      generateBeginnerReport();
+      return;
+    }
+    handleClose();
+  }
+
+  // Determine what to display in the body
+  let bodyContent;
+  if (mode === "advanced") {
+    bodyContent = reportContent ? (
+      <div className="ai-drawer-report">{reportContent}</div>
+    ) : (
+      <p className="ai-drawer-empty">No analysis available yet.</p>
+    );
+  } else {
+    // Beginner mode
+    if (beginnerLoading) {
+      bodyContent = (
+        <div className="ai-drawer-loading">
+          <span className="ai-drawer-loading-spinner" />
+          <p>Simplifying your analysis...</p>
+        </div>
+      );
+    } else if (beginnerError) {
+      bodyContent = (
+        <div className="ai-drawer-error">
+          <p>{beginnerError}</p>
+          <button
+            className="ai-drawer-retry"
+            onClick={generateBeginnerReport}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    } else if (beginnerContent) {
+      bodyContent = (
+        <div className="ai-drawer-report">{beginnerContent}</div>
+      );
+    } else {
+      bodyContent = (
+        <p className="ai-drawer-empty">
+          Click the button below to generate a beginner-friendly version of your analysis.
+        </p>
+      );
+    }
+  }
+
+  // Confirm button label and state
+  let confirmLabel = "Got it";
+  let confirmDisabled = false;
+  if (mode === "beginner" && !beginnerContent && !beginnerLoading) {
+    confirmLabel = "Generate Beginner Report";
+  } else if (mode === "beginner" && beginnerLoading) {
+    confirmLabel = "Generating...";
+    confirmDisabled = true;
+  }
+
   return (
     <div
       className={`ai-drawer-backdrop ${open ? "ai-drawer-backdrop--open" : ""}`}
@@ -155,17 +267,17 @@ export default function AiCoachDrawer({
 
         {/* Report content area */}
         <div className="ai-drawer-body">
-          {reportContent ? (
-            <div className="ai-drawer-report">{reportContent}</div>
-          ) : (
-            <p className="ai-drawer-empty">No analysis available yet.</p>
-          )}
+          {bodyContent}
         </div>
 
         {/* Footer */}
         <div className="ai-drawer-footer">
-          <button className="ai-drawer-confirm" onClick={handleClose}>
-            Got it
+          <button
+            className="ai-drawer-confirm"
+            onClick={handleConfirm}
+            disabled={confirmDisabled}
+          >
+            {confirmLabel}
           </button>
         </div>
       </aside>
