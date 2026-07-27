@@ -291,3 +291,24 @@ Run listener:
 ```powershell
 python .\revamp.py
 ```
+
+## OpenRouter API Key
+
+The listener uses OpenRouter to send the post-session telemetry report to an AI coach (model: `anthropic/claude-opus-4.8`) when a game session ends. The AI coach response is then uploaded to the backend and displayed in the web app's session review page.
+
+Set the key permanently on Windows:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-v1-your-key-here", "User")
+```
+
+Or for the current session only:
+
+```powershell
+$env:OPENROUTER_API_KEY = "sk-or-v1-your-key-here"
+python .\revamp.py
+```
+
+Get your key at: https://openrouter.ai/keys
+
+Without this key, the local report files (`post_session_ai_report.md`, `post_session_ai_report.json`) are still generated, but no AI coaching response is produced or uploaded.

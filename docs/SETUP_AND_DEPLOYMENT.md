@@ -87,6 +87,21 @@ Required local files/environment:
 - `serviceAccountKey.json` for Firebase Admin locally.
 - `.env` for any local configuration.
 
+Required backend environment variables for AI features:
+
+| Variable | Purpose |
+| --- | --- |
+| `OPENROUTER_API_KEY` | API key from [openrouter.ai/keys](https://openrouter.ai/keys). Required for the AI Driving Coach beginner report generation endpoint. |
+| `OPENROUTER_BEGINNER_MODEL` | Override the model used for beginner reports. Defaults to `anthropic/claude-opus-4.8`. |
+
+On Render, add these under your service's **Environment** tab.
+
+For local development, add them to a `.env` file in the backend folder:
+
+```env
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+```
+
 Do not commit service account keys or real secrets.
 
 ## Backend Deployment on Render
@@ -214,6 +229,33 @@ Optional listener environment variables:
 | `LISTENER_RESET_CONFIG=1` | Ignore saved pairing config for one run |
 | `LISTENER_TRUST_SAVED_TOKEN=true` | Let listener immediately reuse a saved token on startup |
 | `ALLOW_MANUAL_LISTENER_LOGIN=true` | Re-enable terminal username/email prompts |
+| `OPENROUTER_API_KEY` | API key from [openrouter.ai/keys](https://openrouter.ai/keys). Required for the post-session AI coach report sent on session end. |
+| `OPENROUTER_MODEL` | Override the AI coach model. Defaults to `google/gemini-2.5-flash`. The listener currently passes `anthropic/claude-opus-4.8` via CLI flag. |
+
+## AI Coach Report (Post-Session)
+
+When a game session ends, the listener automatically:
+
+1. Generates a post-session telemetry report from the local CSV.
+2. Sends the report to OpenRouter (model: `anthropic/claude-opus-4.8`) for AI coaching analysis.
+3. Uploads the AI coach response to the backend, which stores it in Firestore.
+
+This requires the `OPENROUTER_API_KEY` environment variable to be set on the machine running the listener.
+
+Set it permanently on Windows:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-v1-your-key-here", "User")
+```
+
+Or for the current terminal session only:
+
+```powershell
+$env:OPENROUTER_API_KEY = "sk-or-v1-your-key-here"
+python .\revamp.py
+```
+
+If the key is not set, the report will still be generated locally as markdown/JSON files, but it will not be sent to the AI coach or uploaded to the backend.
 
 ## Test Accounts
 
