@@ -404,38 +404,7 @@ export default function PostLapTelemetryMap({
     [mapTraces]
   );
 
-  // Compute vertical centering offset so the drawn track sits centered vertically
-  const verticalOffset = useMemo(() => {
-    if (!effectiveTransform) return 0;
-    const points = [];
-    if (Array.isArray(trackMap?.centerline)) {
-      for (const p of trackMap.centerline) {
-        const pt = readCenterlinePoint(p);
-        if (pt) points.push(pt);
-      }
-    }
-    for (const item of positionedSamples) {
-      points.push({ worldX: number(item.sample.worldX), worldZ: number(item.sample.worldZ) });
-    }
-    if (points.length === 0) return 0;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const pt of points) {
-      const mapped = effectiveTransform.worldToImage(pt.worldX, pt.worldZ);
-      if (!Number.isFinite(mapped?.y)) continue;
-      minY = Math.min(minY, mapped.y);
-      maxY = Math.max(maxY, mapped.y);
-    }
-    if (!Number.isFinite(minY) || !Number.isFinite(maxY) || maxY <= minY) return 0;
-    const contentHeight = maxY - minY;
-    const offset = (imageHeight - contentHeight) / 2 - minY;
-    // small clamp so we don't move extreme amounts
-    if (!Number.isFinite(offset)) return 0;
-    return offset;
-  }, [effectiveTransform, trackMap, positionedSamples, imageHeight]);
-
-  // Wrap effectiveTransform to apply vertical offset (and respect flip)
-  // Optionally apply rotation (degrees clockwise) around canvas center
+  // Optionally apply rotation (degrees clockwise) around canvas center.
   const rotatedTransform = useMemo(() => {
     if (!effectiveTransform) return null;
     const deg = Number(rotateDeg) || 0;
@@ -478,14 +447,8 @@ export default function PostLapTelemetryMap({
   const positionedEffectiveTransform = useMemo(() => {
     const base = rotatedTransform || effectiveTransform;
     if (!base) return null;
-    const offsetY = verticalOffset || 0;
-    return {
-      worldToImage(worldX, worldZ) {
-        const p = base.worldToImage(worldX, worldZ);
-        return { x: p.x, y: p.y + offsetY };
-      },
-    };
-  }, [rotatedTransform, effectiveTransform, verticalOffset]);
+    return base;
+  }, [rotatedTransform, effectiveTransform]);
 
   // Reduce vertical stretch for the drawn lap trace only (1 = no scale)
   const mapForTrace = useMemo(() => {

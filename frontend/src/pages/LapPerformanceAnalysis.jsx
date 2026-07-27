@@ -1031,7 +1031,7 @@ export default function LapPerformanceAnalysis() {
   const rotateBahrain = Boolean(
     normalizedTrackKey === "track_3" || /sakhir|bahrain/i.test(String(normalizedTrackKey || ""))
   );
-  const DEFAULT_TRACE_SCALE = 0.8;
+  const DEFAULT_TRACE_SCALE = 1.0;
   const [draftTraceScale, setDraftTraceScale] = useState(DEFAULT_TRACE_SCALE);
   const [appliedTraceScale, setAppliedTraceScale] = useState(DEFAULT_TRACE_SCALE);
   const DEFAULT_TRACE_H_SCALE = 1.0;
