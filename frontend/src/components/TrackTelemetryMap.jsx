@@ -12,7 +12,7 @@ import {
   isLapDistanceReset,
   trimFutureLapPointsOnReset,
 } from "../utils/lapResetTrim";
-import { normalizeTrackMapImageUrl } from "../utils/mapImages";
+import { resolveTrackMapImageUrl } from "../utils/mapImages";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -1207,8 +1207,10 @@ function TrackTelemetryMap({
     applyLatestMapPosition(liveMapPosition);
   }, [liveMapPosition]);
 
-  const imageUrl = normalizeTrackMapImageUrl(
-    trackMap?.imageCalibration?.imageUrl || mapImageUrl
+  const imageUrl = resolveTrackMapImageUrl(
+    trackMap?.imageCalibration?.imageUrl,
+    trackKey,
+    mapImageUrl
   );
 
   const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);

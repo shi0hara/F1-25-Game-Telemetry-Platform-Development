@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
-import { normalizeTrackMapImageUrl } from "../utils/mapImages";
+import { resolveTrackMapImageUrl } from "../utils/mapImages";
 
 function hasNumber(value) {
   return Number.isFinite(Number(value));
@@ -309,8 +309,9 @@ export default function PostLapTelemetryMap({
 
   const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
   const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
-  const imageUrl = normalizeTrackMapImageUrl(
-    trackMap?.imageCalibration?.imageUrl || "/maps/default-track.png"
+  const imageUrl = resolveTrackMapImageUrl(
+    trackMap?.imageCalibration?.imageUrl,
+    trackKey
   );
 
   useEffect(() => {

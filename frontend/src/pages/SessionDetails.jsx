@@ -23,6 +23,7 @@ import {
   isActiveSession,
   toMillis,
 } from "../utils/sessionUtils";
+import { getDefaultTrackMapImage } from "../utils/mapImages";
 
 ChartJS.register(
   CategoryScale,
@@ -204,15 +205,7 @@ async function loadPostSessionFallback(sessionId, session) {
 }
 
 function getDefaultMapImage(trackKey) {
-  const mapImages = {
-    track_0: "/maps/albert-park.avif",
-    track_7: "/maps/great-britain.avif",
-    track_12: "/maps/singapore.avif",
-    track_11: "/maps/monza.png",
-    track_13: "/maps/suzuka.png",
-  };
-
-  return mapImages[trackKey] || "/maps/default-track.png";
+  return getDefaultTrackMapImage(trackKey);
 }
 
 function StatBox({ label, value, subvalue, color }) {
