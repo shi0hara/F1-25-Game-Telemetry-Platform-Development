@@ -1614,8 +1614,8 @@ def close_current_backend_session(reason=None, packet_type=None, detected_at=Non
         LAST_CLOSED_SESSION_SIGNATURE = closed_session_signature
         LAST_CLOSED_SESSION_MONO = time.time()
 
-        # Generate and send report to AI coach on session end
-        run_local_post_session_report(session_id=closed_session_id)
+        # The backend/Render generates the AI coach response after the session end report is saved.
+        print(f"AI coach response generation queued on backend for session {closed_session_id}.")
 
         print("Listener is still active. Waiting for the next game session...")
 
