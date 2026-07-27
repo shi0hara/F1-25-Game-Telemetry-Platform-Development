@@ -126,6 +126,22 @@ function solveAffine(anchorPoints) {
   };
 }
 
+function scaleTransform(transform, scaleX, scaleY) {
+  if (!transform) return null;
+  const xScale = Number.isFinite(Number(scaleX)) ? Number(scaleX) : 1;
+  const yScale = Number.isFinite(Number(scaleY)) ? Number(scaleY) : 1;
+
+  return {
+    worldToImage(worldX, worldZ) {
+      const point = transform.worldToImage(worldX, worldZ);
+      return {
+        x: point.x * xScale,
+        y: point.y * yScale,
+      };
+    },
+  };
+}
+
 function boundsFromTraces(traces) {
   const points = traces.filter(
     (sample) => hasNumber(sample.worldX) && hasNumber(sample.worldZ)
@@ -151,14 +167,24 @@ function solveBounds(worldBounds, imageWidth, imageHeight) {
   if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
   if (minX === maxX || minZ === maxZ) return null;
 
-  const padding = 28;
+  const padding = Math.max(24, Math.min(imageWidth, imageHeight) * 0.035);
+  const availableWidth = Math.max(1, imageWidth - padding * 2);
+  const availableHeight = Math.max(1, imageHeight - padding * 2);
+  const worldWidth = maxX - minX;
+  const worldHeight = maxZ - minZ;
+  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+  const fittedWidth = worldWidth * scale;
+  const fittedHeight = worldHeight * scale;
+  const offsetX = (imageWidth - fittedWidth) / 2;
+  const offsetY = (imageHeight - fittedHeight) / 2;
+
   return {
     worldToImage(worldX, worldZ) {
       const xRatio = (number(worldX) - minX) / (maxX - minX);
       const zRatio = (number(worldZ) - minZ) / (maxZ - minZ);
       return {
-        x: padding + (1 - xRatio) * (imageWidth - padding * 2),
-        y: padding + (1 - zRatio) * (imageHeight - padding * 2),
+        x: offsetX + (1 - xRatio) * fittedWidth,
+        y: offsetY + (1 - zRatio) * fittedHeight,
       };
     },
   };
@@ -307,8 +333,6 @@ export default function PostLapTelemetryMap({
     return () => controller.abort();
   }, [apiBase, trackKey]);
 
-  const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
-  const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
   const imageUrl = resolveTrackMapImageUrl(
     trackMap?.imageCalibration?.imageUrl,
     trackKey
@@ -335,16 +359,40 @@ export default function PostLapTelemetryMap({
     };
   }, [imageUrl]);
 
+  const savedImageWidth = Number(trackMap?.imageCalibration?.imageWidth || 0);
+  const savedImageHeight = Number(trackMap?.imageCalibration?.imageHeight || 0);
+  const loadedImageWidth = Number(mapImage?.naturalWidth || 0);
+  const loadedImageHeight = Number(mapImage?.naturalHeight || 0);
+  const imageWidth = loadedImageWidth || 1200;
+  const imageHeight = loadedImageHeight || 675;
+  const calibrationImageWidth = savedImageWidth || imageWidth;
+  const calibrationImageHeight = savedImageHeight || imageHeight;
+  const calibrationScaleX = calibrationImageWidth
+    ? imageWidth / calibrationImageWidth
+    : 1;
+  const calibrationScaleY = calibrationImageHeight
+    ? imageHeight / calibrationImageHeight
+    : 1;
+
   const transform = useMemo(() => {
-    return (
-      solveAffine(trackMap?.imageCalibration?.anchorPoints) ||
-      solveBounds(
-        trackMap?.worldBounds || boundsFromTraces(mapTraces),
-        imageWidth,
-        imageHeight
-      )
+    const calibratedTransform = solveAffine(trackMap?.imageCalibration?.anchorPoints);
+    if (calibratedTransform) {
+      return scaleTransform(calibratedTransform, calibrationScaleX, calibrationScaleY);
+    }
+
+    return solveBounds(
+      trackMap?.worldBounds || boundsFromTraces(mapTraces),
+      imageWidth,
+      imageHeight
     );
-  }, [imageHeight, imageWidth, mapTraces, trackMap]);
+  }, [
+    calibrationScaleX,
+    calibrationScaleY,
+    imageHeight,
+    imageWidth,
+    mapTraces,
+    trackMap,
+  ]);
 
   const effectiveTransform = useMemo(() => {
     if (!transform) return null;

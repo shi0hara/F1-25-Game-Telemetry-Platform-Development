@@ -222,6 +222,29 @@ function solveLeastSquaresAffine(anchorPoints) {
   return transform;
 }
 
+function scaleTransform(transform, scaleX, scaleY) {
+  if (!transform) return null;
+
+  const xScale = Number.isFinite(Number(scaleX)) ? Number(scaleX) : 1;
+  const yScale = Number.isFinite(Number(scaleY)) ? Number(scaleY) : 1;
+
+  return {
+    ...transform,
+    rmsePixels:
+      transform.rmsePixels == null
+        ? transform.rmsePixels
+        : transform.rmsePixels * ((Math.abs(xScale) + Math.abs(yScale)) / 2),
+
+    worldToImage(worldX, worldZ) {
+      const point = transform.worldToImage(worldX, worldZ);
+      return {
+        x: point.x * xScale,
+        y: point.y * yScale,
+      };
+    },
+  };
+}
+
 function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
   if (!worldBounds) return null;
 
@@ -233,6 +256,17 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
   if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
   if (maxX === minX || maxZ === minZ) return null;
 
+  const padding = Math.max(24, Math.min(imageWidth, imageHeight) * 0.035);
+  const availableWidth = Math.max(1, imageWidth - padding * 2);
+  const availableHeight = Math.max(1, imageHeight - padding * 2);
+  const worldWidth = maxX - minX;
+  const worldHeight = maxZ - minZ;
+  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
+  const fittedWidth = worldWidth * scale;
+  const fittedHeight = worldHeight * scale;
+  const offsetX = (imageWidth - fittedWidth) / 2;
+  const offsetY = (imageHeight - fittedHeight) / 2;
+
   return {
     anchorCount: 0,
     rmsePixels: null,
@@ -242,8 +276,8 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
       const zNorm = (num(worldZ) - minZ) / (maxZ - minZ);
 
       return {
-        x: (1 - xNorm) * imageWidth,
-        y: (1 - zNorm) * imageHeight,
+        x: offsetX + (1 - xNorm) * fittedWidth,
+        y: offsetY + (1 - zNorm) * fittedHeight,
       };
     },
   };
@@ -1213,9 +1247,21 @@ function TrackTelemetryMap({
     mapImageUrl
   );
 
-  const imageWidth = Number(trackMap?.imageCalibration?.imageWidth || 1200);
-  const imageHeight = Number(trackMap?.imageCalibration?.imageHeight || 800);
-  const canvasAspectRatio = `${imageWidth || 1200} / ${imageHeight || 800}`;
+  const savedImageWidth = Number(trackMap?.imageCalibration?.imageWidth || 0);
+  const savedImageHeight = Number(trackMap?.imageCalibration?.imageHeight || 0);
+  const loadedImageWidth = Number(mapImage?.naturalWidth || 0);
+  const loadedImageHeight = Number(mapImage?.naturalHeight || 0);
+  const imageWidth = loadedImageWidth || 1200;
+  const imageHeight = loadedImageHeight || 675;
+  const calibrationImageWidth = savedImageWidth || imageWidth;
+  const calibrationImageHeight = savedImageHeight || imageHeight;
+  const calibrationScaleX = calibrationImageWidth
+    ? imageWidth / calibrationImageWidth
+    : 1;
+  const calibrationScaleY = calibrationImageHeight
+    ? imageHeight / calibrationImageHeight
+    : 1;
+  const canvasAspectRatio = `${imageWidth} / ${imageHeight}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -1249,11 +1295,11 @@ function TrackTelemetryMap({
     const calibratedTransform = solveLeastSquaresAffine(anchors);
 
     if (calibratedTransform) {
-      return calibratedTransform;
+      return scaleTransform(calibratedTransform, calibrationScaleX, calibrationScaleY);
     }
 
     return solveBoundsTransform(trackMap?.worldBounds, imageWidth, imageHeight);
-  }, [trackMap, imageWidth, imageHeight]);
+  }, [trackMap, imageWidth, imageHeight, calibrationScaleX, calibrationScaleY]);
 
   useEffect(() => {
     if (!onTrailOptionsChange) return;
