@@ -62,13 +62,15 @@ function hasLiveTelemetry(session) {
 function hasEndedAt(value) {
   if (!value) return false;
   if (typeof value.toMillis === "function") return true;
+  if (typeof value.toDate === "function") return true;
   if (typeof value.seconds === "number") return true;
+  if (typeof value._seconds === "number") return true;
   if (typeof value === "string") return value.trim() !== "";
   return true;
 }
 
 function isActiveSession(session) {
-  return Boolean(session) && !hasEndedAt(session.endedAt);
+  return Boolean(session) && !hasEndedAt(session.endedAt) && !hasEndedAt(session.endedAtIso);
 }
 
 function pickBestSession(sessions) {
@@ -88,16 +90,16 @@ function pickBestSession(sessions) {
     return activeWithLiveTelemetry;
   }
 
-  const anyWithLiveTelemetry = sorted.find(hasLiveTelemetry);
-
-  if (anyWithLiveTelemetry) {
-    return anyWithLiveTelemetry;
-  }
-
   const activeSession = sorted.find(isActiveSession);
 
   if (activeSession) {
     return activeSession;
+  }
+
+  const anyWithLiveTelemetry = sorted.find(hasLiveTelemetry);
+
+  if (anyWithLiveTelemetry) {
+    return anyWithLiveTelemetry;
   }
 
   return sorted[0];

@@ -5,6 +5,10 @@ import {
 } from "firebase/firestore";
 import { db } from "../firebase";
 import useActiveSession from "../hooks/useActiveSession";
+import {
+  getLocalListenerLiveSample,
+  subscribeLocalListenerLive,
+} from "../services/localListenerService";
 import { normalizeTrackMapImageUrl } from "../utils/mapImages";
 
 const API_BASE =
@@ -48,8 +52,51 @@ function hasNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function toFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getPayloadMapPosition(payload) {
+  const sample = payload?.latestMapPosition || payload?.latestTelemetry || null;
+  if (!sample) return null;
+
+  const worldX = toFiniteNumber(sample.worldX);
+  const worldZ = toFiniteNumber(sample.worldZ);
+  if (worldX === null || worldZ === null) return null;
+
+  return {
+    ...sample,
+    worldX,
+    worldY: toFiniteNumber(sample.worldY) ?? sample.worldY,
+    worldZ,
+    speedKph: toFiniteNumber(sample.speedKph) ?? sample.speedKph,
+  };
+}
+
+function isAdminUser(user) {
+  return user?.isAdmin === true || user?.role === "admin";
+}
+
+function isPayloadForCurrentUser(payload, currentUser, username) {
+  if (!payload?.paired) return false;
+  if (isAdminUser(currentUser)) return true;
+
+  const payloadUserId = String(payload.userId || "").trim();
+  const currentUserId = String(currentUser?.id || currentUser?.userId || "").trim();
+  if (payloadUserId && currentUserId) return payloadUserId === currentUserId;
+
+  const payloadUsername = String(payload.username || "").trim().toLowerCase();
+  const currentUsername = String(currentUser?.username || username || "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(payloadUsername && currentUsername && payloadUsername === currentUsername);
+}
+
 export default function TrackCalibration({
   username,
+  currentUser,
   sessionId: providedSessionId,
   trackKey: providedTrackKey,
   imageUrl: providedImageUrl,
@@ -63,9 +110,15 @@ export default function TrackCalibration({
     sessionData: activeSessionData,
     loading: sessionLoading,
     error: activeSessionError,
-  } = useActiveSession(username);
+  } = useActiveSession(currentUser || username);
 
-  const sessionId = providedSessionId || activeSessionId;
+  const [localLivePayload, setLocalLivePayload] = useState(null);
+  const localSessionId = localLivePayload?.sessionId || null;
+  const sessionId = providedSessionId || localSessionId || activeSessionId;
+  const localMapPosition = useMemo(
+    () => getPayloadMapPosition(localLivePayload),
+    [localLivePayload]
+  );
 
   const [liveSessionData, setLiveSessionData] = useState(null);
   const [trackMap, setTrackMap] = useState(null);
@@ -76,6 +129,70 @@ export default function TrackCalibration({
   const [dirty, setDirty] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pollTimer = 0;
+
+    function acceptPayload(payload) {
+      if (cancelled || !payload?.sessionId) return;
+      if (!isPayloadForCurrentUser(payload, currentUser, username)) return;
+
+      const mapPosition = getPayloadMapPosition(payload);
+      if (!mapPosition) return;
+
+      setLocalLivePayload((previous) => {
+        const previousSequence = Number(previous?.sequence);
+        const nextSequence = Number(payload.sequence);
+
+        if (
+          Number.isFinite(previousSequence) &&
+          Number.isFinite(nextSequence) &&
+          nextSequence < previousSequence
+        ) {
+          return previous;
+        }
+
+        return {
+          ...payload,
+          latestMapPosition: mapPosition,
+          latestTelemetry: {
+            ...(payload.latestTelemetry || {}),
+            ...mapPosition,
+          },
+        };
+      });
+    }
+
+    const subscription = subscribeLocalListenerLive({
+      onSample: acceptPayload,
+      onStatus: acceptPayload,
+    });
+
+    async function pollLocalListener() {
+      try {
+        const payload = await getLocalListenerLiveSample(180);
+        acceptPayload(payload);
+      } catch {
+        // Firestore remains the fallback when the local listener is unavailable.
+      } finally {
+        if (!cancelled) {
+          pollTimer = window.setTimeout(
+            pollLocalListener,
+            subscription.supported ? 750 : 250
+          );
+        }
+      }
+    }
+
+    pollLocalListener();
+
+    return () => {
+      cancelled = true;
+      subscription.close();
+      if (pollTimer) window.clearTimeout(pollTimer);
+    };
+  }, [currentUser, username]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -98,7 +215,7 @@ export default function TrackCalibration({
         const data = snapshot.data();
 
         setLiveSessionData(data);
-        setLatestMapPosition(data.latestMapPosition || null);
+        setLatestMapPosition(data.latestMapPosition || data.latestTelemetry || null);
       },
       (err) => {
         console.error("Session listener error:", err);
@@ -109,14 +226,21 @@ export default function TrackCalibration({
     return unsubscribe;
   }, [sessionId]);
 
+  const shownSessionData = useMemo(() => {
+    if (liveSessionData) return liveSessionData;
+    if (sessionId && sessionId === activeSessionId) return activeSessionData;
+    return null;
+  }, [activeSessionData, activeSessionId, liveSessionData, sessionId]);
+
+  const shownMapPosition = localMapPosition || latestMapPosition;
+
   const activeTrackKey = useMemo(() => {
     return (
       providedTrackKey ||
-      getTrackKeyFromSession(liveSessionData) ||
-      getTrackKeyFromSession(activeSessionData) ||
+      getTrackKeyFromSession(shownSessionData) ||
       "track_0"
     );
-  }, [providedTrackKey, liveSessionData, activeSessionData]);
+  }, [providedTrackKey, shownSessionData]);
 
   useEffect(() => {
     if (!activeTrackKey) {
@@ -213,14 +337,14 @@ export default function TrackCalibration({
   }
 
   function handleImageClick(event) {
-    if (!latestMapPosition) {
+    if (!shownMapPosition) {
       setMessage("No live world position yet. Start the listener first.");
       return;
     }
 
     if (
-      !hasNumber(latestMapPosition.worldX) ||
-      !hasNumber(latestMapPosition.worldZ)
+      !hasNumber(shownMapPosition.worldX) ||
+      !hasNumber(shownMapPosition.worldZ)
     ) {
       setMessage("Current session has no worldX/worldZ yet.");
       return;
@@ -242,8 +366,8 @@ export default function TrackCalibration({
 
     const point = {
       label: label || getDefaultLabel(anchorPoints.length),
-      worldX: Number(Number(latestMapPosition.worldX).toFixed(4)),
-      worldZ: Number(Number(latestMapPosition.worldZ).toFixed(4)),
+      worldX: Number(Number(shownMapPosition.worldX).toFixed(4)),
+      worldZ: Number(Number(shownMapPosition.worldZ).toFixed(4)),
       imageX: Number(imageX.toFixed(2)),
       imageY: Number(imageY.toFixed(2)),
     };
@@ -279,9 +403,8 @@ export default function TrackCalibration({
           method: "PATCH",
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            trackId: liveSessionData?.trackId ?? activeSessionData?.trackId ?? null,
-            trackName:
-              liveSessionData?.trackName ?? activeSessionData?.trackName ?? null,
+            trackId: shownSessionData?.trackId ?? null,
+            trackName: shownSessionData?.trackName ?? null,
             imageUrl,
             imageWidth,
             imageHeight,
@@ -368,7 +491,12 @@ export default function TrackCalibration({
 
           <p>
             <strong>Track:</strong>{" "}
-            {liveSessionData?.trackName || activeSessionData?.trackName || "-"}
+            {shownSessionData?.trackName || "-"}
+          </p>
+
+          <p>
+            <strong>Live Source:</strong>{" "}
+            {localMapPosition ? "Local listener" : "Firebase"}
           </p>
 
           <p>
@@ -379,20 +507,20 @@ export default function TrackCalibration({
 
           <h3>Live World Position</h3>
 
-          {latestMapPosition ? (
+          {shownMapPosition ? (
             <>
               <p>
                 <strong>World X:</strong>{" "}
-                {Number(latestMapPosition.worldX).toFixed(2)}
+                {Number(shownMapPosition.worldX).toFixed(2)}
               </p>
 
               <p>
                 <strong>World Z:</strong>{" "}
-                {Number(latestMapPosition.worldZ).toFixed(2)}
+                {Number(shownMapPosition.worldZ).toFixed(2)}
               </p>
 
               <p>
-                <strong>Speed:</strong> {latestMapPosition.speedKph ?? "-"} km/h
+                <strong>Speed:</strong> {shownMapPosition.speedKph ?? "-"} km/h
               </p>
             </>
           ) : (

@@ -134,7 +134,7 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
             path="/calibrate"
             element={
               <AdminRoute user={user}>
-                <TrackCalibration username={username} />
+                <TrackCalibration username={username} currentUser={user} />
               </AdminRoute>
             }
           />

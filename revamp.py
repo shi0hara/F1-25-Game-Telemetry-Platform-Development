@@ -273,7 +273,18 @@ def describe_header(header):
     return f"format={fmt}, gameYear={year}, version={version}, packetId={pid}"
 
 def extract_track_info_from_session_packet(pkt):
-    track_id = parse_int(get_attr(pkt, "track_id", "m_trackId", default=None), None)
+    track_id = parse_int(
+        get_attr_loose(
+            pkt,
+            "track_id",
+            "trackId",
+            "m_trackId",
+            "mTrackId",
+            "m_track_id",
+            default=None,
+        ),
+        None,
+    )
     return track_id, get_track_name(track_id)
 
 def post_corner(corner_body):
