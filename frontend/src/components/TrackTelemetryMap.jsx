@@ -256,17 +256,6 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
   if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) return null;
   if (maxX === minX || maxZ === minZ) return null;
 
-  const padding = Math.max(24, Math.min(imageWidth, imageHeight) * 0.035);
-  const availableWidth = Math.max(1, imageWidth - padding * 2);
-  const availableHeight = Math.max(1, imageHeight - padding * 2);
-  const worldWidth = maxX - minX;
-  const worldHeight = maxZ - minZ;
-  const scale = Math.min(availableWidth / worldWidth, availableHeight / worldHeight);
-  const fittedWidth = worldWidth * scale;
-  const fittedHeight = worldHeight * scale;
-  const offsetX = (imageWidth - fittedWidth) / 2;
-  const offsetY = (imageHeight - fittedHeight) / 2;
-
   return {
     anchorCount: 0,
     rmsePixels: null,
@@ -276,8 +265,8 @@ function solveBoundsTransform(worldBounds, imageWidth, imageHeight) {
       const zNorm = (num(worldZ) - minZ) / (maxZ - minZ);
 
       return {
-        x: offsetX + (1 - xNorm) * fittedWidth,
-        y: offsetY + (1 - zNorm) * fittedHeight,
+        x: (1 - xNorm) * imageWidth,
+        y: (1 - zNorm) * imageHeight,
       };
     },
   };
