@@ -10,6 +10,12 @@ import getpass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry

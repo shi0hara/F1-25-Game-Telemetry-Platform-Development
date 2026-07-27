@@ -632,8 +632,6 @@ function PostSessionPanel({ details }) {
   const navigate = useNavigate();
   const { session, stats, traces, report } = details;
   const laps = useMemo(() => normalizeSessionLaps(details.laps || []), [details.laps]);
-  const signals = report?.topCoachSignals || [];
-  const findings = report?.precisionFindings || [];
   const startedAt = formatDateTime(getSessionStartedAt(session));
   const endedAt = formatDateTime(getSessionEndedAt(session));
 
@@ -692,52 +690,6 @@ function PostSessionPanel({ details }) {
           />
         </div>
       </div>
-
-      {(signals.length > 0 || findings.length > 0) && (
-        <div className="card analysis-section-card">
-          <h2>AI Coaching Evidence</h2>
-          {signals.length > 0 && (
-            <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-              {signals.slice(0, 4).map((signal, index) => (
-                <div
-                  key={`${signal.type || "signal"}-${index}`}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <strong>{signal.title || signal.type || "Coaching signal"}</strong>
-                  <div style={{ color: "#94a3b8", marginTop: 4 }}>
-                    {signal.interpretation || signal.detail || signal.summary || "-"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {signals.length === 0 && findings.length > 0 && (
-            <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-              {findings.slice(0, 4).map((finding, index) => (
-                <div
-                  key={`${finding.type || "finding"}-${index}`}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <strong>{finding.title || finding.type || "Finding"}</strong>
-                  <div style={{ color: "#94a3b8", marginTop: 4 }}>
-                    {finding.interpretation || finding.detail || finding.summary || "-"}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="card analysis-section-card">
         <h2>Lap Breakdown</h2>

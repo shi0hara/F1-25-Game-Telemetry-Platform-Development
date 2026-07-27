@@ -8,6 +8,12 @@ from datetime import datetime
 from pathlib import Path
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+try:
     import requests
 except ImportError:
     requests = None
