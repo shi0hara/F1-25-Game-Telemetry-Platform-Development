@@ -144,8 +144,8 @@
   overflow-y: auto;
   padding: 20px 24px;
   color: var(--color-text-white, #f7f8fb);
-  font-size: 0.92rem;
-  line-height: 1.6;
+  font-size: 1.05rem;
+  line-height: 1.7;
 }
 
 .ai-drawer-report {
