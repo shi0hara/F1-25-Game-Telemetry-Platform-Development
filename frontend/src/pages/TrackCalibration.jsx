@@ -9,7 +9,10 @@ import {
   getLocalListenerLiveSample,
   subscribeLocalListenerLive,
 } from "../services/localListenerService";
-import { normalizeTrackMapImageUrl } from "../utils/mapImages";
+import {
+  getDefaultTrackMapImage,
+  resolveTrackMapImageUrl,
+} from "../utils/mapImages";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
@@ -30,15 +33,7 @@ function getTrackKeyFromSession(data) {
 }
 
 function getDefaultImage(trackKey) {
-  const mapImages = {
-    track_0: "/maps/albert-park.avif",
-    track_7: "/maps/great-britain.avif",
-    track_12: "/maps/singapore.avif",
-    track_11: "/maps/monza.png",
-    track_13: "/maps/suzuka.png",
-  };
-
-  return mapImages[trackKey] || "/maps/default-track.png";
+  return getDefaultTrackMapImage(trackKey);
 }
 
 function getDefaultLabel(index) {
@@ -129,6 +124,7 @@ export default function TrackCalibration({
   const [dirty, setDirty] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [failedImageUrl, setFailedImageUrl] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -284,11 +280,21 @@ export default function TrackCalibration({
 
   const imageCalibration = trackMap?.imageCalibration || null;
 
-  const imageUrl = normalizeTrackMapImageUrl(
+  const defaultImageUrl = getDefaultImage(activeTrackKey);
+  const primaryImageUrl = resolveTrackMapImageUrl(
     providedImageUrl ||
-      imageCalibration?.imageUrl ||
-      getDefaultImage(activeTrackKey)
+      imageCalibration?.imageUrl,
+    activeTrackKey,
+    defaultImageUrl
   );
+  const imageUrl =
+    failedImageUrl === primaryImageUrl && primaryImageUrl !== defaultImageUrl
+      ? defaultImageUrl
+      : primaryImageUrl;
+
+  useEffect(() => {
+    setFailedImageUrl("");
+  }, [primaryImageUrl]);
 
   const imageWidth = Number(
     imageCalibration?.imageWidth || providedImageWidth || 1200
@@ -660,6 +666,12 @@ export default function TrackCalibration({
             src={imageUrl}
             alt="Track map"
             onClick={handleImageClick}
+            onError={() => {
+              if (imageUrl !== defaultImageUrl) {
+                setFailedImageUrl(imageUrl);
+                setMessage("Saved map image was missing. Using the default Melbourne map.");
+              }
+            }}
             style={{
               width: "100%",
               display: "block",
