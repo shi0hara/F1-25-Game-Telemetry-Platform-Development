@@ -149,8 +149,54 @@
 }
 
 .ai-drawer-report {
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.ai-drawer-report h3,
+.ai-drawer-report h4,
+.ai-drawer-report h5,
+.ai-drawer-report h6 {
+  color: #e2e8f0;
+  margin: 1.2em 0 0.4em;
+  font-size: 1.05rem;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
+}
+
+.ai-drawer-report h3 {
+  font-size: 1.15rem;
+}
+
+.ai-drawer-report p {
+  margin: 0.4em 0;
+}
+
+.ai-drawer-report ul,
+.ai-drawer-report ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.ai-drawer-report li {
+  margin: 0.35em 0;
+}
+
+.ai-drawer-report strong {
+  color: #f1f5f9;
+  font-weight: 700;
+}
+
+.ai-drawer-report em {
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.ai-drawer-report code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
 }
 
 .ai-drawer-empty {

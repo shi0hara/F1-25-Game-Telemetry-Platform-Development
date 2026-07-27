@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import "./AiCoachDrawer.css";
 
 const API_BASE =
@@ -7,6 +7,97 @@ const API_BASE =
 function getAuthHeaders() {
   const token = window.localStorage.getItem("f1AuthToken");
   return token ? { Authorization: "Bearer " + token } : {};
+}
+
+/**
+ * Lightweight markdown-to-HTML converter for AI coach responses.
+ * Handles: headings, bold, italic, bullet lists, numbered lists, paragraphs.
+ */
+function renderMarkdown(text) {
+  if (!text) return "";
+
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const lines = escaped.split("\n");
+  const html = [];
+  let inUl = false;
+  let inOl = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+
+    // Close lists if line doesn't continue them
+    const isBullet = /^\s*[-•*]\s+/.test(line);
+    const isNumbered = /^\s*\d+[.)]\s+/.test(line);
+
+    if (inUl && !isBullet) {
+      html.push("</ul>");
+      inUl = false;
+    }
+    if (inOl && !isNumbered) {
+      html.push("</ol>");
+      inOl = false;
+    }
+
+    // Headings
+    if (/^#{1,4}\s+/.test(line)) {
+      const level = line.match(/^(#{1,4})/)[1].length;
+      const content = inlineFormat(line.replace(/^#{1,4}\s+/, ""));
+      html.push(`<h${level + 2}>${content}</h${level + 2}>`);
+      continue;
+    }
+
+    // Bullet list
+    if (isBullet) {
+      if (!inUl) {
+        html.push("<ul>");
+        inUl = true;
+      }
+      const content = inlineFormat(line.replace(/^\s*[-•*]\s+/, ""));
+      html.push(`<li>${content}</li>`);
+      continue;
+    }
+
+    // Numbered list
+    if (isNumbered) {
+      if (!inOl) {
+        html.push("<ol>");
+        inOl = true;
+      }
+      const content = inlineFormat(line.replace(/^\s*\d+[.)]\s+/, ""));
+      html.push(`<li>${content}</li>`);
+      continue;
+    }
+
+    // Empty line = paragraph break
+    if (line.trim() === "") {
+      html.push("<br/>");
+      continue;
+    }
+
+    // Regular paragraph
+    html.push(`<p>${inlineFormat(line)}</p>`);
+  }
+
+  if (inUl) html.push("</ul>");
+  if (inOl) html.push("</ol>");
+
+  return html.join("\n");
+}
+
+function inlineFormat(text) {
+  // Bold: **text** or __text__
+  text = text.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  text = text.replace(/__(.+?)__/g, "<strong>$1</strong>");
+  // Italic: *text* or _text_ (but not inside words with underscores)
+  text = text.replace(/(?<!\w)\*(.+?)\*(?!\w)/g, "<em>$1</em>");
+  text = text.replace(/(?<!\w)_(.+?)_(?!\w)/g, "<em>$1</em>");
+  // Inline code: `text`
+  text = text.replace(/`(.+?)`/g, '<code>$1</code>');
+  return text;
 }
 
 /**
@@ -162,10 +253,13 @@ export default function AiCoachDrawer({
   }
 
   // Determine what to display in the body
+  const renderedAdvanced = useMemo(() => renderMarkdown(reportContent), [reportContent]);
+  const renderedBeginner = useMemo(() => renderMarkdown(beginnerContent), [beginnerContent]);
+
   let bodyContent;
   if (mode === "advanced") {
     bodyContent = reportContent ? (
-      <div className="ai-drawer-report">{reportContent}</div>
+      <div className="ai-drawer-report" dangerouslySetInnerHTML={{ __html: renderedAdvanced }} />
     ) : (
       <p className="ai-drawer-empty">No analysis available yet.</p>
     );
@@ -192,7 +286,7 @@ export default function AiCoachDrawer({
       );
     } else if (beginnerContent) {
       bodyContent = (
-        <div className="ai-drawer-report">{beginnerContent}</div>
+        <div className="ai-drawer-report" dangerouslySetInnerHTML={{ __html: renderedBeginner }} />
       );
     } else {
       bodyContent = (
