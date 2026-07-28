@@ -723,7 +723,7 @@ export default function Leaderboard() {
     // we need to re-fetch from Firestore if the track doesn't match.
     const trackRows = allEntries.filter((r) => r.trackKey === active.trackKey);
     if (trackRows.length > 0 || active.trackKey === selectedTrackKey) {
-      setRows(rankEntries(trackRows).slice(0, 50));
+      setRows(rankEntries(trackRows).slice(0, 10));
     } else {
       setRows([]);
     }
