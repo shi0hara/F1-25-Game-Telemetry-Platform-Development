@@ -11,7 +11,7 @@ import {
 import { Line } from "react-chartjs-2";
 import TrackTelemetryMap from "./TrackTelemetryMap";
 import TelemetryChart from "./TelemetryChart";
-import SteeringWheel from "./SteeringWheel";
+import { LiveSteeringWheel } from "./SteeringWheel";
 import {
   getLocalListenerLiveSample,
   subscribeLocalListenerLive,
@@ -34,7 +34,7 @@ ChartJS.register(
 
 const LIVE_GRAPH_WINDOW_MS = 5000;
 const LIVE_GRAPH_MAX_POINTS = 600;
-const LIVE_GRAPH_RENDER_TICK_MS = 16;
+const LIVE_GRAPH_RENDER_TICK_MS = 48;
 const LOCAL_LIVE_POLL_INTERVAL_MS = 16;
 const LIVE_FEED_LABELS = {
   waiting: "Waiting",
@@ -583,38 +583,6 @@ const FastLiveTelemetryCard = memo(function FastLiveTelemetryCard({
   fallbackTelemetry,
   liveFeedStatus,
 }) {
-  const [telemetry, setTelemetry] = useState(() =>
-    telemetryRef.current || fallbackTelemetry || null
-  );
-  const lastRenderedTelemetryRef = useRef(null);
-
-  useEffect(() => {
-    let frameId = 0;
-    let cancelled = false;
-
-    function renderLatestTelemetry() {
-      if (cancelled) return;
-
-      const latest = telemetryRef.current || fallbackTelemetry || null;
-      if (latest !== lastRenderedTelemetryRef.current) {
-        lastRenderedTelemetryRef.current = latest;
-        setTelemetry(latest);
-      }
-
-      frameId = window.requestAnimationFrame(renderLatestTelemetry);
-    }
-
-    frameId = window.requestAnimationFrame(renderLatestTelemetry);
-
-    return () => {
-      cancelled = true;
-      window.cancelAnimationFrame(frameId);
-    };
-  }, [fallbackTelemetry, telemetryRef]);
-
-  const throttlePct = readPercentMetric(telemetry, "throttlePct", "throttle");
-  const brakePct = readPercentMetric(telemetry, "brakePct", "brake");
-
   return (
     <div className="card">
       <div
@@ -669,56 +637,106 @@ const FastLiveTelemetryCard = memo(function FastLiveTelemetryCard({
         </span>
       </div>
 
-      {telemetry ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 16,
-            alignItems: "center",
-          }}
-        >
-          <SteeringWheel
-            steering={telemetry.steering}
-            throttle={throttlePct}
-            brake={brakePct}
-            label="Live Steering"
-            instant
-            size={152}
-          />
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 8,
-            }}
-          >
-            <p><strong>Speed:</strong> {formatFixed(telemetry.speedKph, 0, "0")} km/h</p>
-            <p><strong>Gear:</strong> {telemetry.gear ?? "-"}</p>
-            <p><strong>RPM:</strong> {telemetry.rpm ?? telemetry.engineRPM ?? 0}</p>
-            <p><strong>Throttle:</strong> {formatFixed(throttlePct, 0, "0")}%</p>
-            <p><strong>Brake:</strong> {formatFixed(brakePct, 0, "0")}%</p>
-            <p><strong>Steering:</strong> {formatFixed(telemetry.steering, 2, "0.00")}</p>
-            <p><strong>DRS:</strong> {telemetry.drs ? "On" : "Off"}</p>
-            <p><strong>Lap:</strong> {telemetry.lapNumber ?? "-"}</p>
-            <p><strong>Delta to PB:</strong> {telemetry.deltaToPB ?? "-"} ms</p>
-            <p>
-              <strong>Cornering Speed:</strong>{" "}
-              {telemetry.corneringSpeed == null ? "-" : `${telemetry.corneringSpeed} km/h`}
-            </p>
-            <p>
-              <strong>Braking Distance:</strong>{" "}
-              {telemetry.brakingDistance == null
-                ? "-"
-                : `${formatFixed(telemetry.brakingDistance, 1)} m`}
-            </p>
-            <p><strong>World X:</strong> {formatFixed(telemetry.worldX, 2)}</p>
-            <p><strong>World Z:</strong> {formatFixed(telemetry.worldZ, 2)}</p>
-          </div>
-        </div>
-      ) : (
-        <p className="analysis-muted">Waiting for live telemetry samples.</p>
-      )}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 16,
+          alignItems: "center",
+        }}
+      >
+        <LiveSteeringWheel
+          telemetryRef={telemetryRef}
+          fallbackTelemetry={fallbackTelemetry}
+          label="Live Steering"
+          size={152}
+        />
+        <FastTelemetryStatsGrid
+          telemetryRef={telemetryRef}
+          fallbackTelemetry={fallbackTelemetry}
+        />
+      </div>
+    </div>
+  );
+});
+
+const FastTelemetryStatsGrid = memo(function FastTelemetryStatsGrid({
+  telemetryRef,
+  fallbackTelemetry,
+}) {
+  const valueRefs = useRef({});
+
+  function setValue(key, value) {
+    const node = valueRefs.current[key];
+    if (node && node.textContent !== value) {
+      node.textContent = value;
+    }
+  }
+
+  useEffect(() => {
+    let frameId = 0;
+    let lastUpdatedAt = 0;
+
+    function updateStats(now) {
+      if (now - lastUpdatedAt >= 33) {
+        lastUpdatedAt = now;
+        const telemetry = telemetryRef?.current || fallbackTelemetry || null;
+        const throttlePct = readPercentMetric(telemetry, "throttlePct", "throttle");
+        const brakePct = readPercentMetric(telemetry, "brakePct", "brake");
+        const rpm = telemetry?.rpm ?? telemetry?.engineRPM;
+        const drsOn = telemetry?.drs === true || telemetry?.drs === 1;
+
+        setValue("speed", `${formatFixed(telemetry?.speedKph, 0, "0")} km/h`);
+        setValue("gear", telemetry?.gear == null ? "-" : String(telemetry.gear));
+        setValue("rpm", rpm == null ? "0" : String(rpm));
+        setValue("throttle", `${formatFixed(throttlePct, 0, "0")}%`);
+        setValue("brake", `${formatFixed(brakePct, 0, "0")}%`);
+        setValue("steering", formatFixed(telemetry?.steering, 2, "0.00"));
+        setValue("drs", drsOn ? "On" : "Off");
+        setValue("lap", telemetry?.lapNumber == null ? "-" : String(telemetry.lapNumber));
+        setValue("delta", `${telemetry?.deltaToPB ?? "-"} ms`);
+        setValue(
+          "cornering",
+          telemetry?.corneringSpeed == null ? "-" : `${telemetry.corneringSpeed} km/h`
+        );
+        setValue(
+          "braking",
+          telemetry?.brakingDistance == null
+            ? "-"
+            : `${formatFixed(telemetry.brakingDistance, 1)} m`
+        );
+        setValue("worldX", formatFixed(telemetry?.worldX, 2));
+        setValue("worldZ", formatFixed(telemetry?.worldZ, 2));
+      }
+
+      frameId = window.requestAnimationFrame(updateStats);
+    }
+
+    frameId = window.requestAnimationFrame(updateStats);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [fallbackTelemetry, telemetryRef]);
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: 8,
+      }}
+    >
+      <p><strong>Speed:</strong> <span ref={(node) => { valueRefs.current.speed = node; }}>0 km/h</span></p>
+      <p><strong>Gear:</strong> <span ref={(node) => { valueRefs.current.gear = node; }}>-</span></p>
+      <p><strong>RPM:</strong> <span ref={(node) => { valueRefs.current.rpm = node; }}>0</span></p>
+      <p><strong>Throttle:</strong> <span ref={(node) => { valueRefs.current.throttle = node; }}>0%</span></p>
+      <p><strong>Brake:</strong> <span ref={(node) => { valueRefs.current.brake = node; }}>0%</span></p>
+      <p><strong>Steering:</strong> <span ref={(node) => { valueRefs.current.steering = node; }}>0.00</span></p>
+      <p><strong>DRS:</strong> <span ref={(node) => { valueRefs.current.drs = node; }}>Off</span></p>
+      <p><strong>Lap:</strong> <span ref={(node) => { valueRefs.current.lap = node; }}>-</span></p>
+      <p><strong>Delta to PB:</strong> <span ref={(node) => { valueRefs.current.delta = node; }}>- ms</span></p>
+      <p><strong>Cornering Speed:</strong> <span ref={(node) => { valueRefs.current.cornering = node; }}>-</span></p>
+      <p><strong>Braking Distance:</strong> <span ref={(node) => { valueRefs.current.braking = node; }}>-</span></p>
+      <p><strong>World X:</strong> <span ref={(node) => { valueRefs.current.worldX = node; }}>-</span></p>
+      <p><strong>World Z:</strong> <span ref={(node) => { valueRefs.current.worldZ = node; }}>-</span></p>
     </div>
   );
 });
