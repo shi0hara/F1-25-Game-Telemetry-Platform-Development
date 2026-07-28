@@ -96,7 +96,7 @@ export default function TrackCalibration({
   trackKey: providedTrackKey,
   imageUrl: providedImageUrl,
   imageWidth: providedImageWidth = 1200,
-  imageHeight: providedImageHeight = 800,
+  imageHeight: providedImageHeight = 675,
 }) {
   const imageRef = useRef(null);
 
@@ -301,7 +301,7 @@ export default function TrackCalibration({
   );
 
   const imageHeight = Number(
-    imageCalibration?.imageHeight || providedImageHeight || 800
+    imageCalibration?.imageHeight || providedImageHeight || 675
   );
 
   async function generateReferenceLine() {
@@ -506,7 +506,7 @@ export default function TrackCalibration({
           </p>
 
           <p>
-            <strong>Image:</strong> {imageUrl}
+            <strong>Image:</strong> {imageUrl || "No image"}
           </p>
 
           <hr style={{ borderColor: "rgba(255,255,255,0.12)" }} />
@@ -661,25 +661,39 @@ export default function TrackCalibration({
             border: "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          <img
-            ref={imageRef}
-            src={imageUrl}
-            alt="Track map"
-            onClick={handleImageClick}
-            onError={() => {
-              if (imageUrl !== defaultImageUrl) {
-                setFailedImageUrl(imageUrl);
-                setMessage("Saved map image was missing. Using the default Melbourne map.");
-              }
-            }}
-            style={{
-              width: "100%",
-              display: "block",
-              cursor: "crosshair",
-              userSelect: "none",
-            }}
-            draggable={false}
-          />
+          {imageUrl ? (
+            <img
+              ref={imageRef}
+              src={imageUrl}
+              alt="Track map"
+              onClick={handleImageClick}
+              onError={() => {
+                if (imageUrl !== defaultImageUrl) {
+                  setFailedImageUrl(imageUrl);
+                  setMessage("Saved map image was missing. Showing this track with no image.");
+                }
+              }}
+              style={{
+                width: "100%",
+                display: "block",
+                cursor: "crosshair",
+                userSelect: "none",
+              }}
+              draggable={false}
+            />
+          ) : (
+            <div
+              ref={imageRef}
+              onClick={handleImageClick}
+              style={{
+                width: "100%",
+                aspectRatio: `${imageWidth} / ${imageHeight}`,
+                cursor: "crosshair",
+                userSelect: "none",
+                background: "#07111f",
+              }}
+            />
+          )}
 
           {anchorPoints.map((point, index) => (
             <div

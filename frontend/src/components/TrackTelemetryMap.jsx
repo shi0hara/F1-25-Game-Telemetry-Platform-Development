@@ -823,7 +823,7 @@ function TrackTelemetryMap({
   apiBase,
   sessionId,
   trackKey,
-  mapImageUrl = "/maps/default-track.png",
+  mapImageUrl = null,
   selectedTrailKey = "current",
   liveMapPosition = null,
   liveMapPositionRef = null,
@@ -1259,6 +1259,12 @@ function TrackTelemetryMap({
     setMapImage(null);
     setMapImageError(null);
 
+    if (!imageUrl) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     image.onload = () => {
       if (cancelled) return;
       setMapImage(image);
@@ -1392,10 +1398,10 @@ function TrackTelemetryMap({
 
       if (mapImage) {
         ctx.drawImage(mapImage, 0, 0, width, height);
-      } else {
+      } else if (mapImageError) {
         ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
         ctx.font = "16px Arial";
-        ctx.fillText(mapImageError || "Loading map image...", 30, 50);
+        ctx.fillText(mapImageError, 30, 50);
       }
 
       if (!trackMap || !transform) {

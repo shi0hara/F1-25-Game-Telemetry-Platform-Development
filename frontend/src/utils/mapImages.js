@@ -1,10 +1,14 @@
-const DEFAULT_TRACK_MAP_IMAGE = "/maps/albert-park.avif";
-
 const TRACK_MAP_IMAGES = {
   track_0: "/maps/albert-park.avif",
   track_7: "/maps/great-britain.avif",
   track_12: "/maps/singapore.avif",
 };
+
+function isPlaceholderMapImage(imageUrl) {
+  return /\/maps\/(?:default-track\.png|placeholder)(?=$|[?#])/i.test(
+    String(imageUrl || "")
+  );
+}
 
 export function normalizeTrackMapImageUrl(imageUrl) {
   if (!imageUrl) return imageUrl;
@@ -13,8 +17,6 @@ export function normalizeTrackMapImageUrl(imageUrl) {
   const normalizedUrl = /^maps\//i.test(url) ? `/${url}` : url;
 
   return normalizedUrl
-    .replace(/\/maps\/default-track\.png(?=$|[?#])/i, DEFAULT_TRACK_MAP_IMAGE)
-    .replace(/\/maps\/placeholder(?=$|[?#])/i, DEFAULT_TRACK_MAP_IMAGE)
     .replace(/\/maps\/albert-park\.png(?=$|[?#])/i, "/maps/albert-park.avif")
     .replace(/\/maps\/singapore\.png(?=$|[?#])/i, "/maps/singapore.avif")
     .replace(
@@ -24,14 +26,21 @@ export function normalizeTrackMapImageUrl(imageUrl) {
 }
 
 export function getDefaultTrackMapImage(trackKey) {
-  return TRACK_MAP_IMAGES[String(trackKey || "")] || DEFAULT_TRACK_MAP_IMAGE;
+  return TRACK_MAP_IMAGES[String(trackKey || "")] || null;
 }
 
 export function resolveTrackMapImageUrl(imageUrl, trackKey, fallbackUrl) {
-  const fallback = normalizeTrackMapImageUrl(
-    fallbackUrl || getDefaultTrackMapImage(trackKey)
-  );
+  const trackDefault = normalizeTrackMapImageUrl(getDefaultTrackMapImage(trackKey));
+  const fallbackCandidate = normalizeTrackMapImageUrl(fallbackUrl);
+  const fallback =
+    fallbackCandidate && !isPlaceholderMapImage(fallbackCandidate)
+      ? fallbackCandidate
+      : trackDefault;
   const normalized = normalizeTrackMapImageUrl(imageUrl);
+
+  if (isPlaceholderMapImage(normalized)) {
+    return fallback || null;
+  }
 
   return normalized || fallback;
 }

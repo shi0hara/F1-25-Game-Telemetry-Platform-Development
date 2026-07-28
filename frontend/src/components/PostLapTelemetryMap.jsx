@@ -331,6 +331,11 @@ export default function PostLapTelemetryMap({
     let cancelled = false;
 
     async function loadMapImage() {
+      if (!imageUrl) {
+        setMapImage(null);
+        return;
+      }
+
       const image = new Image();
       image.onload = () => {
         if (!cancelled) setMapImage(image);
