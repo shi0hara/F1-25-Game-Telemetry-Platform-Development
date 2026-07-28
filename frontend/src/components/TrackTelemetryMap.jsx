@@ -1235,6 +1235,7 @@ function TrackTelemetryMap({
     trackKey,
     mapImageUrl
   );
+  const hasMapImage = Boolean(imageUrl);
 
   const savedImageWidth = Number(trackMap?.imageCalibration?.imageWidth || 0);
   const savedImageHeight = Number(trackMap?.imageCalibration?.imageHeight || 0);
@@ -1566,6 +1567,8 @@ function TrackTelemetryMap({
       <div
         style={{
           width: "100%",
+          maxWidth: hasMapImage ? undefined : "720px",
+          margin: hasMapImage ? undefined : "0 auto",
           aspectRatio: canvasAspectRatio,
         }}
       >

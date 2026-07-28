@@ -291,6 +291,7 @@ export default function TrackCalibration({
     failedImageUrl === primaryImageUrl && primaryImageUrl !== defaultImageUrl
       ? defaultImageUrl
       : primaryImageUrl;
+  const hasMapImage = Boolean(imageUrl);
 
   useEffect(() => {
     setFailedImageUrl("");
@@ -655,6 +656,9 @@ export default function TrackCalibration({
         <div
           style={{
             position: "relative",
+            width: "100%",
+            maxWidth: hasMapImage ? undefined : "720px",
+            margin: hasMapImage ? undefined : "0 auto",
             background: "#111",
             borderRadius: "12px",
             overflow: "hidden",

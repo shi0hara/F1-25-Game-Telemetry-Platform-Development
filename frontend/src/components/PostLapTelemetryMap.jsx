@@ -326,6 +326,7 @@ export default function PostLapTelemetryMap({
     trackMap?.imageCalibration?.imageUrl,
     trackKey
   );
+  const hasMapImage = Boolean(imageUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -631,6 +632,8 @@ export default function PostLapTelemetryMap({
         style={{
           display: "block",
           width: "100%",
+          maxWidth: hasMapImage ? undefined : 720,
+          margin: hasMapImage ? undefined : "0 auto",
           aspectRatio: imageWidth + " / " + imageHeight,
           background: "#07111f",
           border: "1px solid rgba(255,255,255,0.14)",
