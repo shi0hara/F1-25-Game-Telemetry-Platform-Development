@@ -1441,7 +1441,7 @@ def mark_session_end(reason, packet_type=None, detected_at=None):
 
 def end_session_once(session_closed):
     if session_closed or not SESSION_ID:
-        return True
+        return True, False
 
     ended_at = SESSION_END_DETECTED_AT or LAST_SAMPLE_TIMESTAMP or iso_now()
     if SESSION_END_DETECTED_AT:
@@ -1454,6 +1454,12 @@ def end_session_once(session_closed):
         "manual_or_listener_shutdown" if not SESSION_END_DETECTED_AT else None
     )
 
+    has_laps = len(SENT_LAP_HISTORY_SET) > 0
+    skip_ai_report = not has_laps
+
+    if skip_ai_report:
+        print("No laps recorded this session. Skipping AI report generation.")
+
     try:
         res = http.post(
             f"{API_BASE}/sessions/{SESSION_ID}/end",
@@ -1464,6 +1470,7 @@ def end_session_once(session_closed):
                 "endReason": end_reason,
                 "endPacketType": SESSION_END_PACKET_TYPE,
                 "listenerClosedAt": iso_now(),
+                "skipAiReport": skip_ai_report,
             },
             timeout=(5.0, 60.0),
         )
@@ -1490,8 +1497,8 @@ def end_session_once(session_closed):
         print("Ended at:", ended_at, "| Source:", end_source)
     except Exception as e:
         print("Session end API error:", e)
-        return False
-    return True
+        return False, has_laps
+    return True, has_laps
 
 
 def wait_for_queue_empty(qobj, label, timeout_sec=8.0):
@@ -1615,7 +1622,7 @@ def close_current_backend_session(reason=None, packet_type=None, detected_at=Non
     wait_for_queue_empty(LAP_QUEUE, "lap")
     wait_for_queue_empty(CORNER_QUEUE, "corner")
 
-    closed = end_session_once(False)
+    closed, has_laps = end_session_once(False)
     if closed:
         closed_session_id = SESSION_ID  # capture before reset
         SESSION_ID = None
@@ -1626,7 +1633,10 @@ def close_current_backend_session(reason=None, packet_type=None, detected_at=Non
         LAST_CLOSED_SESSION_MONO = time.time()
 
         # The backend/Render generates the AI coach response after the session end report is saved.
-        print(f"AI coach response generation queued on backend for session {closed_session_id}.")
+        if has_laps:
+            print(f"AI coach response generation queued on backend for session {closed_session_id}.")
+        else:
+            print(f"Session {closed_session_id} closed without laps. No AI report queued.")
 
         print("Listener is still active. Waiting for the next game session...")
 
