@@ -1,3 +1,11 @@
+/**
+ * TrackCalibration.jsx — Track Map Calibration Tool
+ * ============================
+ * Admin tool for calibrating track map images against live world-coordinate telemetry.
+ * The user drives on-track while clicking corresponding positions on the map image to
+ * create anchor points. These anchors are saved to Firebase and used by the affine
+ * transform system to project live car positions onto 2D track maps across the platform.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   doc,

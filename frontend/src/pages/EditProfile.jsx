@@ -1,3 +1,10 @@
+/**
+ * EditProfile.jsx — Profile Editor
+ * ============================
+ * Allows the driver to update their profile photo (via camera capture or file upload),
+ * generate an AI-styled racing suit image overlaid with their favourite F1 team colors,
+ * and select which photo to display. Persists preferences to Firestore and localStorage.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {

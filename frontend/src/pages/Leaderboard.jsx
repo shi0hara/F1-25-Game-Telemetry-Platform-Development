@@ -1,3 +1,11 @@
+/**
+ * Leaderboard.jsx — Track Leaderboards
+ * ============================
+ * Displays ranked driver lap times per track with daily, weekly, and all-time scopes.
+ * Fetches leaderboard data from the backend API (with a Firestore fallback), normalizes
+ * track keys, and ranks entries by best valid lap. Includes sector split highlighting,
+ * a searchable track dropdown, and links to individual lap analysis pages.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {

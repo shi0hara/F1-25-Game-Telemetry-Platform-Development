@@ -1,3 +1,11 @@
+/**
+ * Profile.jsx — Driver Profile
+ * ============================
+ * Displays the authenticated driver's profile including team-themed styling, career
+ * statistics (total laps, valid laps, AI coaching score, tracks driven), listener token
+ * management, and a session history list. Aggregates lap data from Firestore to compute
+ * career stats and weekly leaderboard appearances.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {

@@ -1,3 +1,10 @@
+/**
+ * AdminUsers.jsx — Admin Account Management
+ * ============================
+ * Admin-only page for managing platform user accounts. Allows administrators to view
+ * all registered users, edit usernames/emails/roles, suspend or unsuspend accounts,
+ * and delete individual or all recorded session/time data for a selected user.
+ */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import "./AdminUsers.css";

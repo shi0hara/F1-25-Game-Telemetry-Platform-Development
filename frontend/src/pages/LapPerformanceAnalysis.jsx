@@ -1,4 +1,12 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿/**
+ * LapPerformanceAnalysis.jsx — Single Lap Deep Dive
+ * ============================
+ * Provides an in-depth telemetry analysis for a single recorded lap. Includes a multi-metric
+ * overlay graph (speed, throttle, brake, RPM, gear, DRS), sector boundary markers, a lap
+ * replay system with variable playback speed, a steering wheel visualization, and a
+ * post-lap track map. Supports beginner and advanced analysis view modes.
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   Chart as ChartJS,

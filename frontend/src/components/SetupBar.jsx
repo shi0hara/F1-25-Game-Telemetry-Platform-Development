@@ -1,3 +1,20 @@
+/**
+ * SetupBar.jsx — Animated Setup Value Bar
+ * ==========================================
+ * A single horizontal bar that visually represents one car setup parameter
+ * (e.g., front wing angle, brake pressure). Animates from 0% to the actual
+ * percentage when the element scrolls into view.
+ * 
+ * Props:
+ * - label: parameter name (e.g., "Front Wing")
+ * - value: current setting value
+ * - min/max: range bounds for calculating the fill percentage
+ * - isInView: whether the parent section has scrolled into the viewport
+ * - delay: stagger delay in ms for cascading animation effect
+ * 
+ * Respects prefers-reduced-motion for accessibility.
+ */
+
 import { useEffect, useRef, useState } from "react";
 
 export default function SetupBar({ label, value, min, max, isInView, delay = 0 }) {

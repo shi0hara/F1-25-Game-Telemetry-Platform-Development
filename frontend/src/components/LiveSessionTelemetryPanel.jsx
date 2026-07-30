@@ -1,3 +1,25 @@
+/**
+ * LiveSessionTelemetryPanel.jsx — Real-time Telemetry Dashboard
+ * ===============================================================
+ * The main live telemetry display component. Shows real-time data from
+ * the local Python listener (via SSE stream) or falls back to Firestore
+ * cloud data. Includes:
+ * 
+ * - Live telemetry stats grid (speed, gear, RPM, throttle, brake, etc.)
+ * - Live steering wheel visualisation with pedal bars
+ * - Rolling live graph (5-second window of speed/throttle/brake/RPM/gear/DRS)
+ * - Track map with live car position dot
+ * - Lap trail selector for reviewing completed laps
+ * 
+ * Data flow priority:
+ * 1. Local SSE stream (fastest, ~60Hz from listener)
+ * 2. Local HTTP polling (fallback if SSE not available)
+ * 3. Firestore cloud data (slowest, ~1Hz backup)
+ * 
+ * Uses requestAnimationFrame for smooth 60fps stat updates without
+ * causing React re-renders on every telemetry sample.
+ */
+
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   Chart as ChartJS,

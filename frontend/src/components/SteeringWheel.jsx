@@ -1,3 +1,24 @@
+/**
+ * SteeringWheel.jsx — Steering Wheel & Pedal Visualisations
+ * ============================================================
+ * Provides two steering wheel components:
+ * 
+ * 1. SteeringWheel (default export) — Static/snapshot version
+ *    Takes steering/throttle/brake values as props and renders them.
+ *    Used for reviewing saved telemetry data (post-lap analysis).
+ * 
+ * 2. LiveSteeringWheel (named export) — Real-time animated version
+ *    Reads from a telemetryRef (mutated by requestAnimationFrame) and
+ *    smoothly interpolates visual rotation using exponential easing.
+ *    Used on the live telemetry page for instant feedback.
+ * 
+ * Both include:
+ * - SVG F1-style steering wheel that rotates based on steering input
+ * - Colour-coded top marker (green=straight, blue=left, yellow=right)
+ * - Vertical throttle (green) and brake (red) pedal bars
+ * - Direction label and percentage readout
+ */
+
 import { useEffect, useRef } from "react";
 
 function clamp(value, min, max) {

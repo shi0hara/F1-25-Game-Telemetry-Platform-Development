@@ -1,3 +1,10 @@
+/**
+ * Navbar.jsx — Primary Navigation Bar
+ * ============================
+ * Renders the top navigation bar with the F1 Telemetry brand mark and route links
+ * (Dashboard, Live, Leaderboards, Setups, Profile). Handles protected route gating
+ * for unauthenticated users and provides admin-specific links and logout functionality.
+ */
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import "./Navbar.css";
 

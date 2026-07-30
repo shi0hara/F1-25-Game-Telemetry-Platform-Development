@@ -1,4 +1,22 @@
-﻿// Mock setup data for F1 25 tracks
+﻿/**
+ * setupsData.js — Recommended Car Setup Database
+ * =================================================
+ * Contains pre-configured car setup data for all F1 25 tracks supported
+ * by the platform. Each setup includes real community-sourced Time Trial
+ * settings from simracingsetup.com, covering:
+ * 
+ * - Aerodynamics (front/rear wing angles)
+ * - Transmission (on/off throttle differential)
+ * - Suspension Geometry (camber, toe angles)
+ * - Suspension (spring rates, anti-roll bars, ride height)
+ * - Brakes (pressure, bias)
+ * - Tyres (front/rear pressures)
+ * 
+ * Each value includes min/max bounds for the setup slider UI (SetupBar component).
+ * Used by the RecommendedSetups page to display track-specific setup guides.
+ */
+
+// Mock setup data for F1 25 tracks
 // This data structure represents real F1 25 setup values and field names
 // Setup data covers all tracks available in the project's TRACK_ID_TO_NAME mapping
 

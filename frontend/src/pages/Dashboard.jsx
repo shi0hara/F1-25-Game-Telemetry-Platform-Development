@@ -1,3 +1,11 @@
+/**
+ * Dashboard.jsx — Race Dashboard
+ * ============================
+ * Main landing page for the F1 25 Telemetry Platform. Displays a platform overview,
+ * the user's latest session summary (with live/ended status), and the daily race leader
+ * for a selected track from the leaderboard. Fetches personal sessions and leaderboard
+ * data from the backend API.
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {

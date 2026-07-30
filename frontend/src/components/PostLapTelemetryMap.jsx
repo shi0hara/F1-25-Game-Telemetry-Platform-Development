@@ -1,3 +1,21 @@
+/**
+ * PostLapTelemetryMap.jsx — Lap Replay Track Map
+ * ================================================
+ * Renders a canvas-based track map showing a completed lap's telemetry trail.
+ * The trail is colour-coded by input state:
+ * - Red: braking
+ * - Green: throttle applied
+ * - Grey: coasting (neither brake nor throttle)
+ * 
+ * Features:
+ * - Loads track calibration data from the backend (anchor points for world→image transform)
+ * - Falls back to bounds-based mapping if no calibration exists
+ * - Draws centerline reference, sector boundaries, and car position marker
+ * - Supports track image overlay, rotation, and flip options
+ * - Interactive: moving across the telemetry chart updates the car position
+ * - Uses affine transformation (least-squares) to map 3D world coordinates to 2D image pixels
+ */
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trimFutureLapPointsOnReset } from "../utils/lapResetTrim";
 import { resolveTrackMapImageUrl } from "../utils/mapImages";

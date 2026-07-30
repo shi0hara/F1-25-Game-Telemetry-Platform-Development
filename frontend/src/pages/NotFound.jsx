@@ -1,3 +1,9 @@
+/**
+ * NotFound.jsx — 404 Page
+ * ============================
+ * Displays a themed 404 error page when a user navigates to a non-existent route.
+ * Uses F1 terminology ("black flagged") to communicate the error in a racing context.
+ */
 export default function NotFound() {
   return (
     <div className="page-container">

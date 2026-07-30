@@ -1,3 +1,10 @@
+/**
+ * Footer.jsx — Site Footer
+ * ============================
+ * Renders the global footer with the F1 Telemetry brand tagline, quick links to
+ * key pages (Contact, Setups, API docs, Privacy Policy), and a copyright notice
+ * for Republic Poly Sim Racing.
+ */
 import { Link } from "react-router-dom";
 import "./Footer.css";
 

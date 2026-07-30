@@ -1,3 +1,10 @@
+/**
+ * Contact.jsx — Support & Contact Information
+ * ============================
+ * A static contact page providing phone, email, and social media links for the
+ * telemetry platform's support team. Designed as a poster-style layout with
+ * accessible link elements for reaching Republic Poly Sim Racing support.
+ */
 import "../App.css";
 
 export default function Contact() {

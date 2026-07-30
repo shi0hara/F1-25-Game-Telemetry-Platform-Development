@@ -1,3 +1,10 @@
+/**
+ * RecommendedSetups.jsx — Car Setup Database
+ * ============================
+ * Presents optimized car setup recommendations for each F1 25 track. Users select a
+ * track from a searchable dropdown and view categorized setup parameters including
+ * aerodynamics, transmission, suspension geometry, suspension, brakes, and tyres.
+ */
 import { useState, useEffect, useRef, useMemo } from "react";
 import SetupSection from "../components/SetupSection";
 import { SETUP_DATA, getAvailableTrackKeys } from "../data/setupsData";

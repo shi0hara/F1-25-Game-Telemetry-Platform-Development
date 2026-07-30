@@ -1,3 +1,17 @@
+/**
+ * ListenerTokenPanel.jsx — Listener Token Management UI
+ * =======================================================
+ * Admin panel component that allows users to create, view, and revoke
+ * listener tokens. These tokens are used by the Python telemetry listener
+ * to authenticate with the backend API.
+ * 
+ * Token lifecycle:
+ * 1. User clicks "Generate Token" → backend creates a new token
+ * 2. Token is displayed once (user must copy it immediately)
+ * 3. User pastes the token into the Python listener's config
+ * 4. Token can be revoked from this panel at any time
+ */
+
 import { useEffect, useState } from "react";
 
 const API_BASE =

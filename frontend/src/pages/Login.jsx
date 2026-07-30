@@ -1,3 +1,10 @@
+/**
+ * Login.jsx — Authentication Gateway
+ * ============================
+ * Handles user login and registration for the F1 25 Telemetry Platform. Provides a
+ * dual-mode form (login/signup) that authenticates against the backend API, signs into
+ * Firebase with a custom token, and pairs the local telemetry listener after login.
+ */
 import { useState } from "react";
 import { signInWithCustomToken } from "firebase/auth";
 import { useNavigate } from "react-router-dom";

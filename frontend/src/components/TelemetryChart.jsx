@@ -1,3 +1,20 @@
+/**
+ * TelemetryChart.jsx — Lap Times Table & Sector Comparison
+ * ==========================================================
+ * Displays a table of all recorded lap times for the current session,
+ * with per-sector breakdowns and colour-coded performance indicators:
+ * - Purple: personal best (fastest in session)
+ * - Green: within 2% of best
+ * - Amber: more than 5% slower than best
+ * 
+ * Features:
+ * - Auto-refreshes every 2 seconds while the session is active
+ * - Deduplicates laps (keeps the most complete record per lap number)
+ * - Highlights the currently selected lap (synced with the map)
+ * - Shows assist icons per lap
+ * - Displays session best times at the bottom
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import AssistIcons from "./AssistIcons";
 

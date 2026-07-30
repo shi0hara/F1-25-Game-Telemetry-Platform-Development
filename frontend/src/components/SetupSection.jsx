@@ -1,3 +1,14 @@
+/**
+ * SetupSection.jsx — Car Setup Category Section
+ * ================================================
+ * Groups related setup parameters (e.g., "Aerodynamics", "Suspension")
+ * into a card that fades/slides in when scrolled into view using
+ * IntersectionObserver. Each parameter is rendered as a SetupBar.
+ * 
+ * The section animates once and stays visible (doesn't re-animate on scroll back).
+ * Respects prefers-reduced-motion for accessibility.
+ */
+
 import { useEffect, useRef, useState } from "react";
 import SetupBar from "./SetupBar";
 

@@ -1,3 +1,16 @@
+/**
+ * AssistIcons.jsx — Driving Assists Display Component
+ * =====================================================
+ * Renders a row of coloured "pills" showing which driving assists are active
+ * for a given lap or session. Each pill displays the assist name and its
+ * current state (active/off/unknown) with colour coding:
+ * - Green: assist is active
+ * - Grey: assist is off
+ * - Muted: state is unknown
+ * 
+ * Assists shown: Traction Control, ABS, Gearbox mode, DRS Assist
+ */
+
 function numberOrNull(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;

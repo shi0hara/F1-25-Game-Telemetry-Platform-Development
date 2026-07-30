@@ -1,3 +1,11 @@
+/**
+ * SessionDetails.jsx — Session Analysis & Live Telemetry View
+ * ============================
+ * Renders a full session detail page including live telemetry panels (for active sessions)
+ * and post-session reviews (for ended sessions). Shows lap breakdowns, sector splits,
+ * telemetry overlay graphs (speed, throttle, brake, RPM, gear, DRS), and integrates with
+ * the AI Coach drawer for post-session driving analysis.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { collection, doc, getDoc, getDocs, onSnapshot } from "firebase/firestore";

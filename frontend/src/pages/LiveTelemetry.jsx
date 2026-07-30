@@ -1,3 +1,10 @@
+/**
+ * LiveTelemetry.jsx — Telemetry Sessions List
+ * ============================
+ * Displays a browsable list of the user's telemetry sessions (or all sessions for admins).
+ * Each session card shows track, status, timing, best lap, and top speed. Clicking a
+ * session navigates to its detailed live or post-session review page.
+ */
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import useActiveSession from "../hooks/useActiveSession";

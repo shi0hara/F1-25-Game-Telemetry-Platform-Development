@@ -1,3 +1,12 @@
+/**
+ * TrackTelemetryMap.jsx — Live & Historical Track Map Renderer
+ * ============================
+ * A canvas-based component that renders the driver's car position and telemetry trail
+ * on a 2D track map image. Uses a least-squares affine transform (from calibration
+ * anchor points) to project world coordinates onto the map. Supports real-time live
+ * position updates, per-lap colored trails (brake=red, throttle=green, coast=gray),
+ * and historical lap trail loading from Firestore or the backend API.
+ */
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,

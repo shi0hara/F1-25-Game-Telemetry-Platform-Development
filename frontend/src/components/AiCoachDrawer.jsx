@@ -1,3 +1,18 @@
+/**
+ * AiCoachDrawer.jsx — AI Driving Coach Side Panel
+ * ==================================================
+ * A slide-out drawer component that displays the AI coach's post-session
+ * analysis. Supports two modes:
+ * - Advanced: Shows the full technical telemetry analysis (pre-generated)
+ * - Beginner: Generates a simplified version via the backend API on-demand
+ * 
+ * Features:
+ * - Markdown rendering (headings, bold, italic, lists, inline code)
+ * - Accessibility: focus trapping, Escape to close, ARIA modal attributes
+ * - Body scroll lock when open
+ * - Backdrop click to dismiss
+ */
+
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import "./AiCoachDrawer.css";
 
