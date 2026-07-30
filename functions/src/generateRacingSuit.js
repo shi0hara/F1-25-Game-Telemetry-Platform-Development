@@ -1,3 +1,20 @@
+/**
+ * generateRacingSuit.js — AI Racing Suit Generation Handler
+ * ===========================================================
+ * Main request handler for the generateRacingSuit Cloud Function.
+ * 
+ * Pipeline:
+ * 1. Verify Firebase Auth token (user must be logged in)
+ * 2. Check rate limit (max 10 generations per user per 24 hours)
+ * 3. Validate payload (photo, team key, team colours required)
+ * 4. Preprocess image (validate format, convert to JPEG, check size)
+ * 5. Build AI prompt (team-specific instructions for the AI model)
+ * 6. Load team reference images (existing suit photos for style matching)
+ * 7. Call OpenRouter Image API (AI generates the racing suit image)
+ * 8. Post-process result (re-encode as optimised JPEG)
+ * 9. Log the generation and return the result
+ */
+
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { verifyAuth } from "./middleware/auth.js";
 import { checkRateLimit } from "./middleware/rateLimiter.js";

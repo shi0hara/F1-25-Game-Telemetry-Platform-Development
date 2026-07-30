@@ -1,4 +1,18 @@
 /**
+ * validatePayload.js — Request Payload Validation
+ * ==================================================
+ * Validates that the generation request body contains all required fields
+ * before proceeding with expensive AI generation.
+ * 
+ * Required fields:
+ * - base64Photo: the user's selfie as a base64 data URL
+ * - teamKey: F1 team identifier (e.g., "ferrari", "mclaren")
+ * - teamColours.primary: primary team colour (hex)
+ * - teamColours.secondary: secondary team colour (hex)
+ * - teamColours.accent: accent team colour (hex)
+ */
+
+/**
  * Validates the generation request payload for required fields.
  *
  * A field is considered missing/invalid if:

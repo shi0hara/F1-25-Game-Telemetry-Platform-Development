@@ -1,3 +1,18 @@
+/**
+ * imageProcessor.js — Image Pre/Post-Processing Service
+ * =======================================================
+ * Uses the Sharp library to validate, convert, and optimise images.
+ * 
+ * Preprocessing (user upload → OpenRouter):
+ * - Validates the image is decodable and in a supported format (JPEG/PNG/WebP)
+ * - Converts to JPEG at 85% quality to standardise input for the AI model
+ * - Enforces a 5MB size limit to prevent excessive API payload sizes
+ * 
+ * Postprocessing (OpenRouter response → frontend):
+ * - Takes the raw base64 output from the AI model
+ * - Re-encodes as JPEG at 85% quality for consistent format and smaller size
+ */
+
 import sharp from "sharp";
 
 const MAX_OUTPUT_SIZE = 5 * 1024 * 1024; // 5MB

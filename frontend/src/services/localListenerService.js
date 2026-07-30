@@ -1,3 +1,25 @@
+/**
+ * localListenerService.js — Local Listener Communication Service
+ * ================================================================
+ * Provides functions for the web frontend to communicate with the local
+ * Python telemetry listener running on the user's machine.
+ * 
+ * The listener runs a small HTTP server (default: http://127.0.0.1:51377)
+ * that provides:
+ *   GET  /health      → Listener status and pairing info
+ *   GET  /live        → Latest telemetry sample (polling)
+ *   GET  /live-stream → Server-Sent Events stream of real-time telemetry
+ *   POST /pair        → Pair the listener with the user's web account
+ *   POST /unpair      → Disconnect the listener from the account
+ * 
+ * The pairing flow:
+ * 1. User logs in on the website
+ * 2. Website creates a listener token via the backend API
+ * 3. Website sends that token to the local listener's /pair endpoint
+ * 4. Listener uses the token to authenticate with the backend
+ * 5. Telemetry data flows: Game → Listener → Backend → Firestore → Website
+ */
+
 const API_BASE =
   import.meta.env.VITE_API_BASE || "https://f1-telementry-1.onrender.com";
 
@@ -5,6 +27,11 @@ const LOCAL_LISTENER_URL =
   import.meta.env.VITE_LOCAL_LISTENER_URL || "http://127.0.0.1:51377";
 const LOCAL_LISTENER_STREAM_URL = `${LOCAL_LISTENER_URL}/live-stream`;
 
+/**
+ * Wrapper around fetch() with a short timeout. The local listener should respond
+ * almost instantly since it's on localhost. A 900ms default timeout prevents
+ * the UI from hanging if the listener is not running.
+ */
 async function fetchWithTimeout(url, options = {}, timeoutMs = 900) {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -36,6 +63,10 @@ function authHeaders(authToken) {
   };
 }
 
+/**
+ * Checks if the local listener is already paired with the same user account.
+ * Compares by user ID first, then falls back to username matching.
+ */
 function sameUser(localStatus, user) {
   if (!localStatus?.paired || !user) return false;
 
@@ -48,6 +79,7 @@ function sameUser(localStatus, user) {
   return Boolean(localUsername && nextUsername && localUsername === nextUsername);
 }
 
+/** Checks if the local Python listener is running and returns its status. */
 export async function getLocalListenerStatus() {
   const res = await fetchWithTimeout(`${LOCAL_LISTENER_URL}/health`, {
     method: "GET",
@@ -61,6 +93,7 @@ export async function getLocalListenerStatus() {
   return readJson(res);
 }
 
+/** Fetches the latest single telemetry sample from the listener (polling mode). */
 export async function getLocalListenerLiveSample(timeoutMs = 180) {
   const res = await fetchWithTimeout(
     `${LOCAL_LISTENER_URL}/live`,
@@ -78,6 +111,16 @@ export async function getLocalListenerLiveSample(timeoutMs = 180) {
   return readJson(res);
 }
 
+/**
+ * Opens a Server-Sent Events (SSE) connection to the local listener for
+ * real-time streaming of telemetry data. Much more efficient than polling.
+ * 
+ * Events received:
+ * - "live": new telemetry sample
+ * - "status": pairing/connection status update
+ * - "heartbeat": keep-alive (every ~2 seconds)
+ * - "error": something went wrong
+ */
 export function subscribeLocalListenerLive({ onSample, onStatus, onError } = {}) {
   if (typeof window === "undefined" || typeof window.EventSource !== "function") {
     return {
@@ -129,6 +172,10 @@ export function subscribeLocalListenerLive({ onSample, onStatus, onError } = {})
   };
 }
 
+/**
+ * Creates a new listener token on the backend, then sends it to the local
+ * listener to complete the pairing handshake.
+ */
 async function createWebsiteListenerToken(authToken) {
   const res = await fetch(`${API_BASE}/listener-tokens`, {
     method: "POST",
@@ -167,6 +214,10 @@ async function pairLocalListener(listenerToken) {
   return data;
 }
 
+/**
+ * Full pairing flow: checks listener status, creates a token if needed, and pairs.
+ * Called automatically after login, retries periodically until successful.
+ */
 export async function pairLocalListenerAfterLogin({ user, authToken }) {
   let status;
 
@@ -186,6 +237,7 @@ export async function pairLocalListenerAfterLogin({ user, authToken }) {
   return { paired: true, reason: "paired", status: paired };
 }
 
+/** Notifies the local listener that the user has logged out on the website. */
 export async function notifyLocalListenerLogout() {
   try {
     const res = await fetchWithTimeout(

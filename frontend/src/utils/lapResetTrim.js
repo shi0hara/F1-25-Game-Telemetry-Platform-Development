@@ -1,5 +1,20 @@
-const DEFAULT_RESET_DROP_METERS = 25;
-const DEFAULT_TRIM_MARGIN_METERS = 2;
+/**
+ * lapResetTrim.js — Lap Reset Detection & Trail Trimming
+ * ========================================================
+ * When a lap resets (e.g., the driver crosses the start/finish line or
+ * flashbacks/rewinds), the lapDistance value suddenly drops back to near zero.
+ * 
+ * This utility:
+ * 1. Detects these "lap resets" by looking for large backward jumps in distance
+ * 2. Trims any duplicate/future-lap points that would cause the telemetry trail
+ *    to visually loop back on itself on the track map
+ * 
+ * Without this, the map trail would show ghost traces from the next lap
+ * overlapping the current lap's data.
+ */
+
+const DEFAULT_RESET_DROP_METERS = 25;  // Distance drop threshold to detect a lap reset
+const DEFAULT_TRIM_MARGIN_METERS = 2;  // Extra margin when trimming duplicate points
 
 function hasNumber(value) {
   return Number.isFinite(Number(value));

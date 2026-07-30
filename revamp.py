@@ -1,3 +1,37 @@
+"""
+revamp.py — F1 25 UDP Telemetry Listener
+==========================================
+This is the core real-time telemetry listener for the F1 25 Game Telemetry Platform.
+It captures UDP telemetry packets broadcast by the F1 25 game, decodes them,
+and streams the data to both:
+  1. A backend REST API (hosted on Render) for persistent storage
+  2. A local HTTP/SSE server for real-time website pairing
+
+Architecture Overview:
+    F1 25 Game → UDP packets → This listener → Backend API (Render/Express)
+                                             → Local pairing server (HTTP/SSE)
+                                             → CSV file (local backup)
+
+Key Responsibilities:
+    - Decode F1 25 binary UDP packets (motion, telemetry, lap data, etc.)
+    - Track session state (start/end detection, lap transitions, track info)
+    - Batch and send telemetry samples to the backend API
+    - Provide real-time telemetry via local SSE stream for the website
+    - Pair with the web frontend via a local HTTP server
+    - Detect and report driving assists, DRS usage, and corner events
+    - Generate post-session AI reports when a session ends
+
+Usage:
+    python revamp.py
+
+Environment Variables:
+    API_BASE                  - Backend API URL (default: https://f1-telementry-1.onrender.com)
+    F1_LISTENER_TOKEN         - Authentication token for the backend API
+    DRIVER_USERNAME           - Pre-configured username (optional)
+    LOCAL_PAIR_HOST           - Local pairing server host (default: 127.0.0.1)
+    LOCAL_PAIR_PORT           - Local pairing server port (default: 51377)
+"""
+
 import csv
 import socket
 import time
@@ -10,57 +44,83 @@ import getpass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# Load environment variables from .env file if python-dotenv is installed
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
+# HTTP client with automatic retry logic for resilient API communication
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# F1 packet parser library — provides binary struct definitions for F1 UDP packets
 from f1.packets import PacketHeader, HEADER_FIELD_TO_PACKET_TYPE
 
-API_BASE = os.getenv("API_BASE", "https://f1-telementry-1.onrender.com")
-UDP_IP = "0.0.0.0"
-UDP_PORT = 20777
-CSV_PATH = "telemetry_live.csv"
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration Constants
+# ──────────────────────────────────────────────────────────────────────────────
+
+API_BASE = os.getenv("API_BASE", "https://f1-telementry-1.onrender.com")  # Backend server URL
+UDP_IP = "0.0.0.0"           # Listen on all network interfaces for UDP packets
+UDP_PORT = 20777             # F1 25 default UDP telemetry port
+CSV_PATH = "telemetry_live.csv"  # Local CSV file path for raw telemetry backup
+
+# Path to store listener pairing configuration (token, username, email)
 LISTENER_CONFIG_PATH = os.getenv(
     "LISTENER_CONFIG_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), ".listener-config.json"),
 )
+
+# Local HTTP server settings for website ↔ listener pairing
 LOCAL_PAIR_HOST = os.getenv("LOCAL_PAIR_HOST", "127.0.0.1")
 LOCAL_PAIR_PORT = int(os.getenv("LOCAL_PAIR_PORT", "51377"))
 
+# Debug/logging settings
 PRINT_HEADERS = False
 HEADER_PRINT_EVERY_SEC = 0.5
 
-MOTION_PACKET_ID = 0
-SESSION_PACKET_ID = 1
-LAP_DATA_PACKET_ID = 2
-EVENT_PACKET_ID = 3
-TELEMETRY_PACKET_ID = 6
-CAR_STATUS_PACKET_ID = 7
-FINAL_CLASS_PACKET_ID = 8
-SESSION_HISTORY_PACKET_ID = 11
+# ──────────────────────────────────────────────────────────────────────────────
+# F1 UDP Packet Type IDs
+# These correspond to the packet_id field in the F1 25 UDP packet header.
+# Each packet type carries different telemetry data.
+# ──────────────────────────────────────────────────────────────────────────────
 
+MOTION_PACKET_ID = 0            # Car positions, velocities, orientations (world space)
+SESSION_PACKET_ID = 1           # Session info: track, weather, session type, assists
+LAP_DATA_PACKET_ID = 2          # Per-car lap data: distances, times, sectors
+EVENT_PACKET_ID = 3             # Game events: session start/end, penalties, etc.
+TELEMETRY_PACKET_ID = 6         # Car telemetry: speed, throttle, brake, gear, RPM
+CAR_STATUS_PACKET_ID = 7        # Car status: DRS, traction control, fuel
+FINAL_CLASS_PACKET_ID = 8       # Final race classification (end of race)
+SESSION_HISTORY_PACKET_ID = 11  # Historical lap/sector times for all completed laps
+
+# Session types that represent actual race sessions (used for detection logic)
 RACE_SESSION_TYPES = {15, 16, 17}
-MIN_EVENT_END_AFTER_START_SEC = 10.0
+
+# Timing thresholds for session end detection
+MIN_EVENT_END_AFTER_START_SEC = 10.0  # Ignore SEND events within 10s of session start
 SESSION_END_GRACE_PERIOD_SEC = float(os.getenv("SESSION_END_GRACE_PERIOD_SEC", "3.0"))
 
+# HTTP request timeouts: (connect_timeout, read_timeout) in seconds
 REQUEST_TIMEOUT = (5.0, 10.0)
-LATEST_REQUEST_TIMEOUT = (1.0, 2.0)
-SOCKET_TIMEOUT_SEC = 1.0
-SAMPLE_MIN_INTERVAL_SEC = 0.1
-CSV_FLUSH_EVERY_ROWS = 25
+LATEST_REQUEST_TIMEOUT = (1.0, 2.0)  # Shorter timeout for live telemetry updates
+
+# UDP & sampling configuration
+SOCKET_TIMEOUT_SEC = 1.0          # UDP socket recv timeout (for periodic status checks)
+SAMPLE_MIN_INTERVAL_SEC = 0.1    # Minimum time between samples sent to backend (100ms)
+CSV_FLUSH_EVERY_ROWS = 25        # Flush CSV to disk every N rows
 PACKET_STATUS_EVERY_SEC = float(os.getenv("LISTENER_PACKET_STATUS_EVERY_SEC", "5.0"))
 
+# Telemetry batch settings — samples are collected and sent in batches for efficiency
 BATCH_SIZE = 20
 TELEMETRY_BATCH = []
 
-PARTICIPANTS_PACKET_ID = 4
+PARTICIPANTS_PACKET_ID = 4  # Contains driver names for all cars in session
 
+# Human-readable labels for packet types (used in status logging)
 PACKET_ID_LABELS = {
     MOTION_PACKET_ID: "motion",
     SESSION_PACKET_ID: "session",
@@ -73,10 +133,15 @@ PACKET_ID_LABELS = {
     SESSION_HISTORY_PACKET_ID: "session-history",
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Driver Identity & Authentication
+# ──────────────────────────────────────────────────────────────────────────────
+
 DRIVER_USERNAME = os.getenv("DRIVER_USERNAME")
 DRIVER_EMAIL = os.getenv("DRIVER_EMAIL")
 LISTENER_TOKEN = os.getenv("LISTENER_TOKEN") or os.getenv("F1_LISTENER_TOKEN")
 LISTENER_CONFIG_LOADED = False
+# Whether to trust a saved listener token without waiting for website confirmation
 TRUST_SAVED_LISTENER_TOKEN = os.getenv("LISTENER_TRUST_SAVED_TOKEN", "false").lower() in (
     "1",
     "true",
@@ -84,7 +149,12 @@ TRUST_SAVED_LISTENER_TOKEN = os.getenv("LISTENER_TRUST_SAVED_TOKEN", "false").lo
     "on",
 )
 
-PLAYER_NAME_DETECTED = False
+PLAYER_NAME_DETECTED = False  # Set True once we detect the player's in-game name
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Track ID → Name Mapping
+# Maps the F1 25 game's internal track IDs to human-readable circuit names.
+# ──────────────────────────────────────────────────────────────────────────────
 
 TRACK_ID_TO_NAME = {
     0: "Melbourne",
@@ -116,49 +186,66 @@ TRACK_ID_TO_NAME = {
     41: "Zandvoort (Reverse)",
 }
 
-TRACK_NAME = None
-TRACK_ID = None
-SESSION_TYPE = None
-CUSTOM_SETUP = None
-EQUAL_PERFORMANCE = None
+# ──────────────────────────────────────────────────────────────────────────────
+# Runtime State Variables
+# These globals track the current game session state and are reset between sessions.
+# ──────────────────────────────────────────────────────────────────────────────
 
-CURRENT_LAP_DISTANCE_M = None
-CURRENT_TOTAL_DISTANCE_M = None
-CURRENT_SECTOR = None
-CURRENT_PIT_STATUS = None
+TRACK_NAME = None          # Current circuit name (e.g., "Suzuka")
+TRACK_ID = None            # Current circuit ID from the game
+SESSION_TYPE = None        # Game session type (practice, qualifying, race)
+CUSTOM_SETUP = None        # Whether the player is using a custom car setup
+EQUAL_PERFORMANCE = None   # Whether equal car performance is enabled
 
-# Latest world-space car position from Motion packet 0.
-# The website uses worldX/worldZ to draw the live telemetry map trail.
+# Current car position from Lap Data packets
+CURRENT_LAP_DISTANCE_M = None    # Distance into the current lap (metres)
+CURRENT_TOTAL_DISTANCE_M = None  # Total distance driven in session
+CURRENT_SECTOR = None            # Current track sector (0, 1, or 2)
+CURRENT_PIT_STATUS = None        # Pit lane status (0=track, 1=pitting, 2=in pit)
+
+# World-space car position from Motion packets (used for the live telemetry map)
 CURRENT_WORLD_X = None
 CURRENT_WORLD_Y = None
 CURRENT_WORLD_Z = None
 CURRENT_YAW = None
 CURRENT_PITCH = None
 CURRENT_ROLL = None
-LAST_MOTION_PACKET_AT = None
-LAST_VALID_MOTION_AT = None
-LAST_MOTION_DEBUG_AT = 0.0
-LAST_TELEMETRY_NO_MOTION_WARN_AT = 0.0
+LAST_MOTION_PACKET_AT = None       # Timestamp of last motion packet received
+LAST_VALID_MOTION_AT = None        # Timestamp of last successfully decoded motion data
+LAST_MOTION_DEBUG_AT = 0.0         # Rate-limit for motion warning messages
+LAST_TELEMETRY_NO_MOTION_WARN_AT = 0.0  # Rate-limit for missing motion warnings
 
+# Corner detection state (tracks when the car is mid-corner based on steering input)
 CORNER_ACTIVE = False
 CORNER_START = None
 CORNER_COUNTER = 0
 
-CORNER_START_THRESHOLD = 0.25
-CORNER_END_THRESHOLD = 0.15
+# Steering thresholds for corner detection (normalised 0-1 scale)
+CORNER_START_THRESHOLD = 0.25   # Steering above this = corner started
+CORNER_END_THRESHOLD = 0.15     # Steering below this = corner ended
 
+# Tracks the last session metadata sent to avoid redundant PATCH requests
 LAST_SESSION_META_SYNCED = {
     "trackId": None,
     "trackName": None,
     "sessionType": None,
 }
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper Functions: Track & Packet Utilities
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def get_track_name(track_id):
+    """Convert a numeric track ID to its human-readable name."""
     if track_id is None:
         return None
     return TRACK_ID_TO_NAME.get(int(track_id))
 
 def decode_text(value):
+    """Decode a bytes/bytearray/ctypes array value to a clean UTF-8 string.
+    Strips null bytes and whitespace. Returns None if empty."""
     if value is None:
         return None
     if isinstance(value, (bytes, bytearray)):
@@ -173,6 +260,8 @@ def decode_text(value):
         return s or None
 
 def get_attr(obj, *names, default=None):
+    """Get an attribute from an object by trying multiple possible names.
+    The F1 packet library uses different naming conventions across versions."""
     for n in names:
         if hasattr(obj, n):
             return getattr(obj, n)
@@ -196,9 +285,13 @@ def parse_int(value, fallback=None):
         return fallback
 
 def normalize_field_name(name):
+    """Normalise a field name by lowercasing and stripping non-alphanumeric chars.
+    Used for fuzzy matching between different packet library naming conventions."""
     return "".join(ch.lower() for ch in str(name) if ch.isalnum())
 
 def iter_field_names(obj):
+    """Iterate over all accessible field names of a ctypes struct or Python object.
+    Checks _fields_ (ctypes), __dict__, and dir() in that order."""
     seen = set()
 
     for field in getattr(obj, "_fields_", []) or []:
@@ -219,6 +312,8 @@ def iter_field_names(obj):
         yield name
 
 def get_attr_loose(obj, *names, default=None):
+    """Fuzzy attribute lookup: first tries exact match, then normalised name matching.
+    Essential for cross-version packet compatibility where field naming varies."""
     exact = get_attr(obj, *names, default=None)
     if exact is not None:
         return exact
@@ -243,6 +338,7 @@ def summarize_field_names(obj, limit=24):
     return ", ".join(names)
 
 def safe_enqueue(qobj, item):
+    """Non-blocking queue put. Returns True if successful, False if queue is full."""
     try:
         qobj.put_nowait(item)
         return True
@@ -250,6 +346,7 @@ def safe_enqueue(qobj, item):
         return False
 
 def iso_now():
+    """Return the current UTC time as an ISO 8601 string with Z suffix."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 def packet_label(pid):
@@ -532,6 +629,12 @@ def is_fake_name(name):
     return name.startswith("Room-") or name.startswith("User-")
 
 def pick_packet_class(header):
+    """Determine the correct packet class to decode a raw UDP packet.
+    
+    The F1 packet library maps (format, version, packet_id) tuples to packet classes.
+    This function handles various key shapes (int, 2-tuple, 3-tuple, 4-tuple)
+    depending on the library version installed.
+    """
     fmt = int(get_attr_loose(header, "packet_format", "packetFormat", "m_packetFormat", "mPacketFormat", default=0) or 0)
     ver = int(get_attr_loose(header, "packet_version", "packetVersion", "m_packetVersion", "mPacketVersion", default=0) or 0)
     pid = int(get_attr_loose(header, "packet_id", "packetId", "m_packetId", "mPacketId", default=0) or 0)
@@ -583,7 +686,17 @@ def pick_packet_class(header):
 
     return None
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Corner Detection & Tracking
+# Corners are detected by monitoring steering input. When steering exceeds
+# the threshold, a corner is started. When it drops below, it's ended.
+# Corner data is sent to the backend for per-corner performance analysis.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def extract_event_code(event_pkt):
+    """Extract the 4-character event code from an Event packet (e.g., 'SEND' for session end)."""
     raw = get_attr(
         event_pkt,
         "event_string_code",
@@ -616,6 +729,17 @@ def get_frame_identifier(header, pkt=None):
                     pass
     return None
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTP Session & Worker Threads
+# The listener uses background threads for non-blocking API communication:
+#   - LATEST_QUEUE: single latest telemetry sample (always newest only)
+#   - BATCH_QUEUE: batched telemetry samples for bulk storage
+#   - LAP_QUEUE: completed lap records
+#   - CORNER_QUEUE: completed corner events
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Configure requests session with automatic retry and connection pooling
 http = requests.Session()
 retries = Retry(
     total=3,
@@ -630,60 +754,71 @@ http.mount("http://", adapter)
 http.mount("https://", adapter)
 http.headers.update({"Content-Type": "application/json"})
 
-SESSION_ID = None
-USER_ID = None
-SESSION_END_DETECTED_AT = None
-SESSION_END_DETECTED_MONO = None
-SESSION_END_REASON = None
-SESSION_END_PACKET_TYPE = None
-LAST_SAMPLE_TIMESTAMP = None
-CURRENT_GAME_SESSION_UID = None
-LAST_CLOSED_GAME_SESSION_UID = None
-LAST_CLOSED_SESSION_SIGNATURE = None
-LAST_CLOSED_SESSION_MONO = None
-LAST_SESSION_PACKET_SIGNATURE = None
+# ──────────────────────────────────────────────────────────────────────────────
+# Session & Telemetry State
+# ──────────────────────────────────────────────────────────────────────────────
+
+SESSION_ID = None                      # Current backend session document ID
+USER_ID = None                         # Authenticated user ID on the backend
+SESSION_END_DETECTED_AT = None         # ISO timestamp when session end was detected
+SESSION_END_DETECTED_MONO = None       # Monotonic time of session end (for grace period)
+SESSION_END_REASON = None              # Why the session ended (e.g., "session_end_event")
+SESSION_END_PACKET_TYPE = None         # Which packet triggered the end
+LAST_SAMPLE_TIMESTAMP = None           # ISO timestamp of the last telemetry sample
+CURRENT_GAME_SESSION_UID = None        # F1 game's unique session identifier
+LAST_CLOSED_GAME_SESSION_UID = None    # Previous session UID (prevents re-opening)
+LAST_CLOSED_SESSION_SIGNATURE = None   # (track_id, session_type) of last closed session
+LAST_CLOSED_SESSION_MONO = None        # Monotonic time when last session was closed
+LAST_SESSION_PACKET_SIGNATURE = None   # For deduplicating session packet log messages
 LAST_SESSION_PACKET_NOTICE_AT = 0.0
 
-STOP_EVENT = threading.Event()
-IDENTITY_LOCK = threading.Lock()
-LOCAL_LIVE_LOCK = threading.Lock()
-LOCAL_LIVE_CONDITION = threading.Condition(LOCAL_LIVE_LOCK)
-LOCAL_LIVE_SAMPLE = None
-LOCAL_LIVE_UPDATED_AT = None
-LOCAL_LIVE_SEQUENCE = 0
-LOCAL_LIVE_STREAM_HEARTBEAT_SEC = 2.0
+# Threading primitives for concurrent access to shared state
+STOP_EVENT = threading.Event()             # Signals all threads to stop gracefully
+IDENTITY_LOCK = threading.Lock()           # Protects driver identity fields
+LOCAL_LIVE_LOCK = threading.Lock()         # Protects local live telemetry state
+LOCAL_LIVE_CONDITION = threading.Condition(LOCAL_LIVE_LOCK)  # Notifies SSE clients of new data
+LOCAL_LIVE_SAMPLE = None                   # Latest telemetry sample for local HTTP/SSE
+LOCAL_LIVE_UPDATED_AT = None               # When the local live sample was last updated
+LOCAL_LIVE_SEQUENCE = 0                    # Monotonically increasing sequence number
+LOCAL_LIVE_STREAM_HEARTBEAT_SEC = 2.0      # SSE heartbeat interval
 
-LATEST_QUEUE = queue.Queue(maxsize=1)
-BATCH_QUEUE = queue.Queue(maxsize=2000)
-LAP_QUEUE = queue.Queue(maxsize=200)
-CORNER_QUEUE = queue.Queue(maxsize=500)
+# Background work queues — processed by dedicated worker threads
+LATEST_QUEUE = queue.Queue(maxsize=1)      # Only keeps the newest live sample
+BATCH_QUEUE = queue.Queue(maxsize=2000)    # Batched telemetry for persistent storage
+LAP_QUEUE = queue.Queue(maxsize=200)       # Completed lap records
+CORNER_QUEUE = queue.Queue(maxsize=500)    # Completed corner events
 
-LAST_SAMPLE_SENT_AT = 0.0
-CURRENT_LAP_NUM = None
-BEST_LAP_TIME_MS = None
-LAST_DELTA_TO_PB_MS = None
+# Telemetry sampling state
+LAST_SAMPLE_SENT_AT = 0.0         # Monotonic time of last backend sample send
+CURRENT_LAP_NUM = None            # Current lap number from Lap Data packets
+BEST_LAP_TIME_MS = None           # Best lap time seen in this session (for delta calc)
+LAST_DELTA_TO_PB_MS = None        # Current delta to personal best (milliseconds)
 
+# Braking distance tracking — accumulates distance while brake is applied
 BRAKE_ACTIVE = False
 BRAKE_START_DISTANCE_M = 0.0
 LAST_BRAKE_SAMPLE_TIME = None
 
-CURRENT_DRS_AVAILABLE = False
-CURRENT_DRS_ACTIVATION_DISTANCE_M = None
-DRS_AVAILABLE_SINCE_MONO = None
-DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None
-DRS_ACTIVATION_PENDING = False
-LAST_DRS_ACTIVE = False
+# DRS (Drag Reduction System) state tracking
+CURRENT_DRS_AVAILABLE = False                # Whether DRS is allowed in current zone
+CURRENT_DRS_ACTIVATION_DISTANCE_M = None     # Distance to DRS activation point
+DRS_AVAILABLE_SINCE_MONO = None              # When DRS became available (for reaction time)
+DRS_AVAILABLE_SINCE_LAP_DISTANCE_M = None    # Where DRS became available
+DRS_ACTIVATION_PENDING = False               # True when DRS is available but not yet opened
+LAST_DRS_ACTIVE = False                      # Whether DRS was open in the previous sample
 
-CURRENT_TRACTION_CONTROL = None
-CURRENT_ANTI_LOCK_BRAKES = None
-CURRENT_GEARBOX_ASSIST = None
-CURRENT_DRS_ASSIST = None
-CURRENT_STEERING_ASSIST = None
-CURRENT_BRAKING_ASSIST = None
-CURRENT_PIT_ASSIST = None
-CURRENT_PIT_RELEASE_ASSIST = None
-CURRENT_ERS_ASSIST = None
-CURRENT_DYNAMIC_RACING_LINE = None
+# Driving assist state — read from Session and Car Status packets.
+# These are reported alongside telemetry so the AI coach knows the driver's assist level.
+CURRENT_TRACTION_CONTROL = None      # 0=Off, 1=Medium, 2=Full
+CURRENT_ANTI_LOCK_BRAKES = None      # True/False
+CURRENT_GEARBOX_ASSIST = None        # 0/1=Manual, 2=Suggested, 3=Automatic
+CURRENT_DRS_ASSIST = None            # True if DRS opens automatically
+CURRENT_STEERING_ASSIST = None       # True if steering assist is active
+CURRENT_BRAKING_ASSIST = None        # True if braking assist is active
+CURRENT_PIT_ASSIST = None            # True if pit assist is active
+CURRENT_PIT_RELEASE_ASSIST = None    # True if pit release assist is active
+CURRENT_ERS_ASSIST = None            # True if ERS deployment is automatic
+CURRENT_DYNAMIC_RACING_LINE = None   # 0=Off, 1=Corners only, 2=Full
 
 def clean_config_text(value):
     if value is None:
@@ -877,6 +1012,19 @@ def resolve_listener_token(token):
     }
 
 class ListenerPairingHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the local pairing server.
+    
+    Endpoints:
+      GET  /health       → Returns listener status (paired/unpaired, username, session info)
+      GET  /live         → Returns the latest telemetry sample as JSON
+      GET  /live-stream  → Opens an SSE stream for real-time telemetry updates
+      POST /pair         → Accepts a listener token from the website to pair accounts
+      POST /unpair       → Clears the pairing (called when user logs out on website)
+    
+    All endpoints include CORS headers to allow requests from the web frontend.
+    The /live-stream endpoint uses Server-Sent Events (SSE) for efficient real-time
+    telemetry streaming without polling overhead.
+    """
     server_version = "F1TelemetryListener/1.0"
     protocol_version = "HTTP/1.1"
 
@@ -1141,6 +1289,14 @@ def post_json(endpoint, body, timeout=REQUEST_TIMEOUT):
     return res
 
 def queue_worker(qobj, label):
+    """Background thread worker that processes items from a queue.
+    
+    For the "latest" queue, it discards all but the newest item (since only
+    the most recent telemetry matters for the live display).
+    
+    For other queues (batch, lap, corner), it processes items in order with
+    exponential backoff retry on failure.
+    """
     while not STOP_EVENT.is_set() or not qobj.empty():
         try:
             endpoint, body, retries_left = qobj.get(timeout=0.1)
@@ -1174,6 +1330,15 @@ def queue_worker(qobj, label):
             qobj.task_done()
 
 def ensure_user():
+    """Ensure the driver has an account on the backend.
+    
+    Loops until either:
+    - A listener token is available (from website pairing) and resolves to a user
+    - Manual login is enabled and the username resolves to a user
+    
+    The backend's /users/ensure endpoint creates the user if they don't exist,
+    or returns the existing user if they do.
+    """
     global USER_ID, DRIVER_USERNAME, DRIVER_EMAIL
 
     if USER_ID:
@@ -1369,6 +1534,12 @@ def is_recently_closed_session_packet(game_session_uid, session_type, track_id):
 
 
 def start_backend_session(game_session_uid=None):
+    """Create a new session document on the backend.
+    
+    Called when the listener detects an active game session (valid session type
+    and track ID). The backend returns a session ID which is used to tag all
+    subsequent telemetry samples, lap records, and corner events.
+    """
     global SESSION_ID, CURRENT_GAME_SESSION_UID, LAST_SESSION_META_SYNCED
     global LAST_CLOSED_GAME_SESSION_UID, LAST_CLOSED_SESSION_SIGNATURE, LAST_CLOSED_SESSION_MONO
 
@@ -1602,6 +1773,17 @@ def run_local_post_session_report(session_id=None):
 
 
 def close_current_backend_session(reason=None, packet_type=None, detected_at=None):
+    """End the current session on the backend and reset local state.
+    
+    This is the main session teardown function. It:
+    1. Flushes any pending telemetry batches
+    2. Closes any active corner being tracked
+    3. Waits for all queued API requests to complete
+    4. Calls POST /sessions/{id}/end on the backend (which triggers AI report generation)
+    5. Resets all runtime state for the next session
+    
+    The backend generates the post-session AI report asynchronously after this call.
+    """
     global SESSION_ID, LAST_CLOSED_GAME_SESSION_UID, LAST_CLOSED_SESSION_SIGNATURE, LAST_CLOSED_SESSION_MONO
 
     if not SESSION_ID:
@@ -1963,6 +2145,12 @@ def gearbox_assist_label(value):
     }.get(value, f"Mode {value}")
 
 def build_assist_profile():
+    """Build a dictionary of the current driving assist settings.
+    
+    This profile is attached to every telemetry sample and lap record sent
+    to the backend, allowing the AI coach to understand which assists the
+    driver is using and tailor advice accordingly (e.g., "try disabling ABS").
+    """
     automatic_gearbox = None
     suggested_gear = None
     if CURRENT_GEARBOX_ASSIST is not None:
@@ -2218,6 +2406,19 @@ def update_drs_status_from_packet(header, pkt):
     CURRENT_DRS_AVAILABLE = available
     CURRENT_DRS_ACTIVATION_DISTANCE_M = activation_distance
 def post_telemetry_sample(header, pkt):
+    """Process a telemetry packet and send the sample to the backend.
+    
+    This is the core telemetry processing function, called for every
+    Telemetry packet (packet ID 6) received from the game. It:
+    
+    1. Extracts speed, throttle, brake, steering, RPM, gear, DRS from the packet
+    2. Calculates derived metrics (cornering speed, braking distance, DRS reaction delay)
+    3. Attaches world position (from Motion packets) and lap data (from Lap packets)
+    4. Updates the local live sample (for the SSE stream to the website)
+    5. Updates corner detection state
+    6. Rate-limits backend sends to one sample per SAMPLE_MIN_INTERVAL_SEC
+    7. Batches samples and flushes when BATCH_SIZE is reached
+    """
     global LAST_SAMPLE_SENT_AT, LAST_SAMPLE_TIMESTAMP
     global BRAKE_ACTIVE, BRAKE_START_DISTANCE_M, LAST_BRAKE_SAMPLE_TIME, TELEMETRY_BATCH
     global CURRENT_WORLD_X, CURRENT_WORLD_Y, CURRENT_WORLD_Z, CURRENT_YAW, CURRENT_PITCH, CURRENT_ROLL
@@ -2365,6 +2566,27 @@ def post_telemetry_sample(header, pkt):
         TELEMETRY_BATCH.clear()
 
 def main():
+    """Main entry point for the telemetry listener.
+    
+    Startup sequence:
+    1. Start the local HTTP pairing server (for website ↔ listener communication)
+    2. Prompt/load driver identity (username, email, listener token)
+    3. Open UDP socket on port 20777 (F1 25 telemetry port)
+    4. Sniff the player's in-game name from Participants packets
+    5. Start background worker threads for API communication
+    6. Ensure the user account exists on the backend
+    7. Enter the main packet processing loop
+    
+    Main loop:
+    - Receives UDP packets from F1 25
+    - Decodes the packet header to determine type
+    - Routes to appropriate handler (session, telemetry, lap, motion, etc.)
+    - Detects session start/end and manages the backend session lifecycle
+    - Writes raw telemetry to CSV as a local backup
+    
+    Shutdown:
+    - On CTRL+C: flushes remaining data, closes the session, stops threads
+    """
     global DRIVER_USERNAME
 
     start_local_pairing_server()

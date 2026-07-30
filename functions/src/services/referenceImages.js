@@ -1,3 +1,18 @@
+/**
+ * referenceImages.js — Team Reference Image Loader
+ * ===================================================
+ * Loads reference suit images from the local filesystem (bundled with the
+ * Cloud Function deployment in the assets/reference-images/ directory).
+ * 
+ * These reference images show what each team's racing suit looks like,
+ * and are sent alongside the user's photo to the AI model so it can
+ * accurately reproduce the sponsor placements, colour distribution,
+ * and design patterns of the specific team's suit.
+ * 
+ * Up to 2 random reference images are selected per request to provide
+ * variety while keeping API payload sizes manageable.
+ */
+
 import { readdir, readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";

@@ -1,3 +1,10 @@
+/**
+ * userIdentity.js — User Identity Utilities
+ * ============================================
+ * Simple helpers for normalising usernames and extracting user info
+ * from different data shapes (string username vs user object).
+ */
+
 export function normalizeUsernameKey(value) {
   return String(value ?? "")
     .trim()

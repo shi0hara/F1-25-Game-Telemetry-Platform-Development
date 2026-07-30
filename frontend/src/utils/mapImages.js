@@ -1,3 +1,11 @@
+/**
+ * mapImages.js — Track Map Image Resolution
+ * ============================================
+ * Handles mapping between track IDs and their corresponding circuit map images.
+ * Normalises image URLs (handles format upgrades from PNG → AVIF) and resolves
+ * the best available map image for a given track.
+ */
+
 const TRACK_MAP_IMAGES = {
   track_0: "/maps/albert-park.avif",
   track_7: "/maps/great-britain.avif",

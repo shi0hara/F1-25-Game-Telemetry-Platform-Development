@@ -1,3 +1,17 @@
+/**
+ * rateLimiter.js — Rate Limiting Middleware
+ * ==========================================
+ * Prevents abuse by limiting each user to 10 AI generation requests per
+ * 24-hour rolling window. Uses Firestore's generationLogs collection to
+ * count recent successful ("forwarded") requests.
+ * 
+ * If the limit is exceeded, returns a cooldown time (in minutes) indicating
+ * when the oldest request will expire from the 24h window.
+ * 
+ * Gracefully degrades: if Firestore is unavailable, the request is allowed
+ * through (fail-open) to avoid blocking users due to infrastructure issues.
+ */
+
 import { getFirestore } from "firebase-admin/firestore";
 
 /**

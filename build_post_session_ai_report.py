@@ -1,3 +1,31 @@
+"""
+build_post_session_ai_report.py
+================================
+Post-Session AI Telemetry Report Generator for F1 25.
+
+This script processes raw telemetry data (from CSV or the backend API) collected
+during an F1 25 game session and produces a structured, AI-friendly report.
+The report summarises per-lap performance metrics (speed, braking, throttle,
+cornering, DRS usage) and generates "coach signals" that highlight areas for
+improvement. It can optionally send the report to an AI coach (via OpenRouter)
+for personalised driving advice.
+
+Usage:
+    # From a local CSV file:
+    python build_post_session_ai_report.py --csv telemetry_live.csv
+
+    # From the backend API using a session ID:
+    python build_post_session_ai_report.py --session <SESSION_ID> --token <AUTH_TOKEN>
+
+    # Generate report AND send to AI coach for feedback:
+    python build_post_session_ai_report.py --session <SESSION_ID> --ai
+
+Outputs:
+    - Markdown report (post_session_ai_report.md) — human & AI readable summary
+    - JSON report (post_session_ai_report.json) — machine-parseable version
+    - AI coach response (ai_coach_response.md) — if --ai flag is used
+"""
+
 import argparse
 import csv
 import json
@@ -7,28 +35,38 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+# Load environment variables from .env file if python-dotenv is installed
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
 
+# requests is optional — only needed when fetching data from the backend API
 try:
     import requests
 except ImportError:
     requests = None
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration Constants
+# ──────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_INPUT = "telemetry_live.csv"
-DEFAULT_MARKDOWN_OUTPUT = "post_session_ai_report.md"
-DEFAULT_JSON_OUTPUT = "post_session_ai_report.json"
-DEFAULT_AI_OUTPUT = "ai_coach_response.md"
+DEFAULT_INPUT = "telemetry_live.csv"              # Default input CSV from the UDP listener
+DEFAULT_MARKDOWN_OUTPUT = "post_session_ai_report.md"  # Default markdown output path
+DEFAULT_JSON_OUTPUT = "post_session_ai_report.json"    # Default JSON output path
+DEFAULT_AI_OUTPUT = "ai_coach_response.md"             # Default AI coach response output
 
+# Backend API configuration (the Render-hosted Express server)
 API_BASE = os.getenv("F1_API_BASE", "https://f1-telementry-1.onrender.com")
 F1_AUTH_TOKEN = os.getenv("F1_AUTH_TOKEN")
+
+# OpenRouter AI configuration for the coaching feature
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.5-flash")
 
+# System prompt sent to the AI coach model. Instructs the AI to respond with
+# structured, actionable coaching advice based on the telemetry report.
 AI_COACH_SYSTEM_PROMPT = (
     "You are an expert F1 driving coach analyzing post-session telemetry data. "
     "The driver is playing F1 25 (the video game) and wants to improve their lap times.\n\n"
@@ -44,8 +82,12 @@ AI_COACH_SYSTEM_PROMPT = (
     "and whether you had enough information to give reliable advice."
 )
 
-# Track corner/zone names mapped by approximate lap distance ranges (metres).
-# Each entry: (start_m, end_m, name)
+# ──────────────────────────────────────────────────────────────────────────────
+# Track Corner / Zone Definitions
+# ──────────────────────────────────────────────────────────────────────────────
+# Maps track names to a list of (start_metres, end_metres, corner_name) tuples.
+# Used to label braking and cornering zones in the report with human-readable
+# corner names (e.g., "Turn 1 (La Source)" instead of just "distance 0-350m").
 TRACK_CORNERS = {
     "Melbourne": [
         (0, 150, "Turn 1"),
@@ -159,8 +201,17 @@ TRACK_CORNERS = {
 }
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper Functions: Parsing & Formatting
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def lookup_corner_name(track_name, start_distance_m, end_distance_m):
-    """Look up the corner name for a given track and distance range."""
+    """Look up the corner name for a given track and distance range.
+    
+    Uses the midpoint of the given range and checks against the TRACK_CORNERS
+    mapping. Falls back to finding the closest corner within 200m tolerance.
+    """
     if not track_name:
         return None
     corners = TRACK_CORNERS.get(track_name)
@@ -189,6 +240,7 @@ def lookup_corner_name(track_name, start_distance_m, end_distance_m):
 
 
 def parse_float(value, default=None):
+    """Safely parse a value to float. Returns default for None, empty, or non-numeric values."""
     if value is None:
         return default
     text = str(value).strip()
@@ -202,6 +254,7 @@ def parse_float(value, default=None):
 
 
 def parse_int(value, default=None):
+    """Safely parse a value to integer via float conversion."""
     number = parse_float(value, None)
     if number is None:
         return default
@@ -209,6 +262,7 @@ def parse_int(value, default=None):
 
 
 def parse_bool(value):
+    """Parse a value to boolean. Recognises '1', 'true', 'yes', 'on' as True."""
     if isinstance(value, bool):
         return value
     text = str(value or "").strip().lower()
@@ -216,6 +270,7 @@ def parse_bool(value):
 
 
 def parse_timestamp(value):
+    """Parse an ISO format timestamp string to a datetime object."""
     text = str(value or "").strip()
     if not text:
         return None
@@ -226,6 +281,7 @@ def parse_timestamp(value):
 
 
 def format_time(seconds):
+    """Format seconds as M:SS.mm lap time string (e.g. '1:32.45')."""
     if seconds is None:
         return "-"
     minutes = int(seconds // 60)
@@ -234,17 +290,20 @@ def format_time(seconds):
 
 
 def pct(value):
+    """Format a percentage value with 1 decimal place."""
     if value is None:
         return "-"
     return f"{value:.1f}%"
 
 
 def avg(values):
+    """Calculate the arithmetic mean, ignoring None values."""
     clean = [v for v in values if v is not None]
     return sum(clean) / len(clean) if clean else None
 
 
 def median(values):
+    """Calculate the median, ignoring None values."""
     clean = sorted(v for v in values if v is not None)
     if not clean:
         return None
@@ -255,6 +314,7 @@ def median(values):
 
 
 def percentile(values, p):
+    """Calculate the p-th percentile, ignoring None values."""
     clean = sorted(v for v in values if v is not None)
     if not clean:
         return None
@@ -263,13 +323,24 @@ def percentile(values, p):
 
 
 def field(row, *names):
+    """Try multiple possible field names and return the first match found in the row."""
     for name in names:
         if name in row:
             return row.get(name)
     return None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Data Normalisation & Loading
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def normalize_row(row, index):
+    """Convert a raw CSV row dict into a normalised telemetry sample dict.
+    
+    Handles multiple possible column name formats (camelCase, snake_case)
+    that different data sources may use.
+    """
     timestamp = parse_timestamp(field(row, "timestamp", "time"))
     lap_number = parse_int(field(row, "lap_number", "lapNumber", "lap"))
 
@@ -296,6 +367,11 @@ def normalize_row(row, index):
 
 
 def load_samples(csv_path):
+    """Load telemetry samples from a local CSV file.
+    
+    Reads the CSV, normalises each row, and filters out rows that are missing
+    essential data (lap number or speed).
+    """
     with open(csv_path, newline="", encoding="utf-8") as file:
         reader = csv.DictReader(file)
         samples = [normalize_row(row, index) for index, row in enumerate(reader, start=1)]
@@ -308,7 +384,18 @@ def load_samples(csv_path):
 
 
 def load_samples_from_api(session_id, max_samples=2000, auth_token=None):
-    """Fetch telemetry samples from the backend API using a session ID."""
+    """Fetch telemetry samples from the backend API using a session ID.
+    
+    Calls GET /sessions/{id}/performance?maxSamples=N to retrieve processed
+    telemetry traces, lap data, and session metadata from the Render backend.
+    
+    Returns:
+        tuple: (samples, session_assists, lap_times, session_meta)
+            - samples: list of normalised telemetry sample dicts
+            - session_assists: dict of active driving assists (or None)
+            - lap_times: dict mapping lap_number → lap_time_ms
+            - session_meta: dict with trackName, trackId
+    """
     if requests is None:
         raise SystemExit("Cannot fetch from API: 'requests' library not installed. Run: pip install requests")
 
@@ -404,7 +491,13 @@ def load_samples_from_api(session_id, max_samples=2000, auth_token=None):
     return samples, session_assists, lap_times, session_meta
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Analysis Functions
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def duration_seconds(samples):
+    """Calculate the time span between the first and last timestamped samples."""
     times = [sample["timestamp"] for sample in samples if sample["timestamp"]]
     if len(times) < 2:
         return None
@@ -412,6 +505,7 @@ def duration_seconds(samples):
 
 
 def distance_span(samples, key="lapDistanceM"):
+    """Calculate the distance covered (max - min) for a given distance key."""
     distances = [sample[key] for sample in samples if sample[key] is not None]
     if not distances:
         return None
@@ -419,12 +513,14 @@ def distance_span(samples, key="lapDistanceM"):
 
 
 def ratio(samples, predicate):
+    """Calculate the percentage of samples satisfying a predicate."""
     if not samples:
         return None
     return 100 * sum(1 for sample in samples if predicate(sample)) / len(samples)
 
 
 def longest_run(samples, predicate):
+    """Find the longest consecutive sequence of samples matching a predicate."""
     best = []
     current = []
     for sample in samples:
@@ -438,6 +534,11 @@ def longest_run(samples, predicate):
 
 
 def segment_runs(samples, predicate, min_points=3):
+    """Split samples into contiguous runs where the predicate is True.
+    
+    Each run must have at least min_points samples to be included.
+    Used to identify distinct braking zones and cornering zones.
+    """
     runs = []
     current = []
 
@@ -456,6 +557,11 @@ def segment_runs(samples, predicate, min_points=3):
 
 
 def summarize_segment(run):
+    """Summarize a contiguous segment (braking zone or cornering zone).
+    
+    Extracts key metrics: entry/min/exit speeds, peak brake, average throttle,
+    peak steering, distance covered, and duration.
+    """
     speeds = [sample["speedKph"] for sample in run if sample["speedKph"] is not None]
     brakes = [sample["brake"] for sample in run if sample["brake"] is not None]
     throttles = [sample["throttle"] for sample in run if sample["throttle"] is not None]
@@ -481,6 +587,9 @@ def compute_drs_reaction_times(samples):
     """
     Calculate the time from when drsActivationDistance reaches 0
     (driver crosses the DRS activation point) to when DRS actually opens.
+
+    This measures how quickly the driver presses the DRS button after being
+    eligible. Faster reactions = more time at higher top speed on straights.
 
     Returns a list of reaction time dicts, one per DRS activation event.
     """
@@ -537,7 +646,17 @@ def compute_drs_reaction_times(samples):
     return reactions
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-Lap & Session Summarisation
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def summarize_lap(lap_number, samples):
+    """Build a comprehensive summary for a single lap.
+    
+    Computes: speed stats, throttle/brake percentages, coasting, pedal overlap,
+    braking zones, cornering zones, DRS usage and reaction times, and steering metrics.
+    """
     speeds = [sample["speedKph"] for sample in samples if sample["speedKph"] is not None]
     throttles = [sample["throttle"] for sample in samples if sample["throttle"] is not None]
     brakes = [sample["brake"] for sample in samples if sample["brake"] is not None]
@@ -592,6 +711,11 @@ def summarize_lap(lap_number, samples):
 
 
 def summarize_session(samples, assists=None, lap_times=None, track_name=None):
+    """Build the full session report from all telemetry samples.
+    
+    Groups samples by lap, summarises each lap, attaches real lap times and
+    corner names, then generates coach signals. Returns the complete report dict.
+    """
     by_lap = defaultdict(list)
     for sample in samples:
         by_lap[sample["lapNumber"]].append(sample)
@@ -653,6 +777,18 @@ def summarize_session(samples, assists=None, lap_times=None, track_name=None):
 
 
 def build_coach_signals(laps, assists=None):
+    """Generate automatic coaching signals based on lap telemetry patterns.
+    
+    Detects common issues:
+    - Driving assists still active (info-level nudge to reduce them)
+    - Throttle/brake pedal overlap (dragging brake on exit)
+    - Excessive coasting (neither braking nor accelerating)
+    - Low full-throttle percentage (hesitant acceleration)
+    - Excessive heavy braking (over-slowing into corners)
+    - Slow DRS reaction times (losing free straight-line speed)
+    
+    Returns up to 18 signals, sorted by severity.
+    """
     signals = []
 
     # Assist-related signals (session-level, not per-lap)
@@ -752,7 +888,13 @@ def build_coach_signals(laps, assists=None):
     return signals[:18]
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Output Rendering (Markdown & JSON)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def round_value(value, digits=2):
+    """Round a value for JSON output. Handles None and non-float types."""
     if value is None:
         return None
     if isinstance(value, float):
@@ -761,12 +903,14 @@ def round_value(value, digits=2):
 
 
 def format_number(value, digits=1, suffix=""):
+    """Format a number with specified decimal places and optional suffix."""
     if value is None:
         return "-"
     return f"{value:.{digits}f}{suffix}"
 
 
 def markdown_table(headers, rows):
+    """Generate a Markdown-formatted table from headers and row data."""
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join("---" for _ in headers) + " |",
@@ -777,6 +921,12 @@ def markdown_table(headers, rows):
 
 
 def render_markdown(report):
+    """Render the full report dict into a human-readable Markdown document.
+    
+    The markdown is structured for both human review and AI consumption,
+    with sections for session overview, assists, lap summaries, coach signals,
+    and detailed per-lap braking/cornering/DRS tables.
+    """
     session = report["session"]
     laps = report["laps"]
     signals = report["coachSignals"]
@@ -1024,6 +1174,7 @@ def render_markdown(report):
 
 
 def make_json_safe(value):
+    """Recursively convert a report dict to JSON-safe types (round floats, serialise datetimes)."""
     if isinstance(value, dict):
         return {key: make_json_safe(item) for key, item in value.items()}
     if isinstance(value, list):
@@ -1035,8 +1186,18 @@ def make_json_safe(value):
     return value
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# AI Coach Integration (OpenRouter)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def send_to_ai_coach(report_markdown):
-    """Send the generated report to an AI coach via OpenRouter and return the response text."""
+    """Send the generated report to an AI coach via OpenRouter and return the response text.
+    
+    Uses the OpenRouter chat completions API with the configured model.
+    The AI coach analyses the telemetry report and provides actionable driving advice.
+    Returns None if the request fails or if API key is not configured.
+    """
     if requests is None:
         print("Skipping AI coach: 'requests' library not installed. Run: pip install requests")
         return None
@@ -1083,7 +1244,13 @@ def send_to_ai_coach(report_markdown):
         return None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# CLI Entry Point
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def main():
+    """Main CLI entry point. Parses arguments, loads data, generates report, and optionally invokes AI coach."""
     parser = argparse.ArgumentParser(description="Build an AI-friendly F1 post-session telemetry report.")
     parser.add_argument("--csv", default=None, help="Input telemetry CSV path (default: telemetry_live.csv).")
     parser.add_argument("--session", default=None, help="Session ID to fetch telemetry from the backend API instead of CSV.")

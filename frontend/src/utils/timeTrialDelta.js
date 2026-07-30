@@ -1,5 +1,22 @@
-const INVALID_GHOST_INDEX = 255;
-const LAP_RESET_THRESHOLD_METERS = 25;
+/**
+ * timeTrialDelta.js — Time Trial Delta-to-PB Calculator
+ * =======================================================
+ * Calculates the real-time delta (time difference) between the player's
+ * current lap and their personal best (PB) ghost car in Time Trial mode.
+ * 
+ * How it works:
+ * - F1 25 provides a "PB ghost" car that replays the player's best lap
+ * - Both the player and ghost have lapDistance and currentLapTimeInMS fields
+ * - We build a distance→time trace from the ghost's data points
+ * - To get the delta at the player's current position, we interpolate the
+ *   ghost's time at the player's current distance and subtract
+ * 
+ * Interpolation is necessary because telemetry samples arrive at irregular
+ * intervals, so direct time comparison between packets would be jittery.
+ */
+
+const INVALID_GHOST_INDEX = 255;            // Game uses 255 to mean "no ghost car"
+const LAP_RESET_THRESHOLD_METERS = 25;      // Distance drop that indicates a new lap
 
 function toFiniteNumber(value) {
   const parsed = Number(value);

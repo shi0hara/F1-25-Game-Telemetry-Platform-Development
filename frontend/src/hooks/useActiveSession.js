@@ -1,3 +1,19 @@
+/**
+ * useActiveSession.js — Active Session Hook
+ * ============================================
+ * Custom React hook that resolves the user's active telemetry session from Firestore.
+ * 
+ * Workflow:
+ * 1. Resolves the user ID (from prop or by querying Firestore by username)
+ * 2. Subscribes to real-time session updates via Firestore onSnapshot
+ * 3. Picks the "best" session (active with live telemetry > active > most recent)
+ * 4. Returns session data, user data, and all sessions for display
+ * 
+ * The hook supports two modes:
+ * - Per-user: queries sessions belonging to a specific user
+ * - All sessions: queries all sessions globally (for admin/leaderboard views)
+ */
+
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
@@ -15,6 +31,11 @@ import {
   normalizeUsernameKey,
 } from "../utils/userIdentity";
 
+/**
+ * Converts various Firestore timestamp formats to milliseconds since epoch.
+ * Handles: Firestore Timestamp objects, {seconds, nanoseconds} objects,
+ * plain numbers (assumed ms), and ISO date strings.
+ */
 function toMillis(value) {
   if (!value) return 0;
 
@@ -73,6 +94,13 @@ function isActiveSession(session) {
   return Boolean(session) && !hasEndedAt(session.endedAt) && !hasEndedAt(session.endedAtIso);
 }
 
+/**
+ * Selects the best session from a list based on priority:
+ * 1. Active sessions with live telemetry data (most recent first)
+ * 2. Active sessions without telemetry
+ * 3. Any session with telemetry
+ * 4. Most recent session overall
+ */
 function pickBestSession(sessions) {
   if (!Array.isArray(sessions) || sessions.length === 0) return null;
 

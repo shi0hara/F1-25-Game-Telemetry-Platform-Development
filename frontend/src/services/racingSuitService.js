@@ -1,13 +1,34 @@
+/**
+ * racingSuitService.js — AI Racing Suit Generation Service
+ * ==========================================================
+ * Handles communication with the Firebase Cloud Function that generates
+ * AI racing suit images. Manages Firebase Auth token retrieval and
+ * request timeout handling.
+ * 
+ * Flow:
+ * 1. Wait for Firebase Auth to be ready (user must be signed in)
+ * 2. Get a fresh Firebase ID token for authentication
+ * 3. POST the photo + team info to the Cloud Function
+ * 4. Return the generated image data URL or throw a structured error
+ */
+
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 
+// Cloud Function URL — the Firebase function that proxies to OpenRouter
 const FUNCTIONS_URL =
   import.meta.env.VITE_FUNCTIONS_URL ||
   "https://asia-southeast1-f1telementrydatabase.cloudfunctions.net/generateRacingSuit";
 
-const REQUEST_TIMEOUT_MS = 120000;
-const AUTH_WAIT_MS = 5000;
+const REQUEST_TIMEOUT_MS = 120000; // 2 minutes — image generation can be slow
+const AUTH_WAIT_MS = 5000;         // Max time to wait for Firebase Auth to initialise
 
+/**
+ * Waits for Firebase Auth to resolve the current user.
+ * On app load, Firebase Auth takes a moment to restore the session.
+ * This function either returns immediately if already resolved,
+ * or waits up to AUTH_WAIT_MS for the auth state to settle.
+ */
 function waitForFirebaseUser() {
   if (auth.currentUser) {
     return Promise.resolve(auth.currentUser);

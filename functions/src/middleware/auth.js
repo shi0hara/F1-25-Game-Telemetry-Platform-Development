@@ -1,3 +1,13 @@
+/**
+ * auth.js — Firebase Authentication Middleware
+ * ==============================================
+ * Extracts and verifies the Firebase ID token from the Authorization header.
+ * The frontend sends "Bearer <id_token>" with each request to the Cloud Function.
+ * 
+ * If verification fails (expired token, invalid token, missing header),
+ * throws a structured error that the main handler catches and returns as 401.
+ */
+
 import { getAuth } from "firebase-admin/auth";
 
 /**

@@ -1,3 +1,12 @@
+/**
+ * sessionUtils.js — Session Data Utilities
+ * ==========================================
+ * Shared utility functions for working with telemetry session documents
+ * from Firestore. Handles the various timestamp formats that Firestore
+ * may return (Timestamp objects, plain objects, ISO strings, etc.) and
+ * provides session state helpers (active/ended, freshness, sorting).
+ */
+
 export function toMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === "function") return value.toMillis();

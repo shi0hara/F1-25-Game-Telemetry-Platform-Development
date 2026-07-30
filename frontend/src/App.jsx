@@ -1,3 +1,17 @@
+/**
+ * App.jsx — Root Application Component
+ * ======================================
+ * This is the top-level React component for the F1 25 Telemetry Platform frontend.
+ * 
+ * Responsibilities:
+ * - Manages user authentication state (login/logout via Firebase Auth)
+ * - Persists user session to localStorage for page refresh resilience
+ * - Pairs with the local Python telemetry listener via HTTP after login
+ * - Provides route protection (ProtectedRoute for logged-in, AdminRoute for admins)
+ * - Renders the app shell: Navbar, main content area, Footer
+ * - Uses React.lazy() for code-splitting of less-frequently visited pages
+ */
+
 import { Suspense, lazy, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { signOut } from "firebase/auth";
@@ -14,6 +28,8 @@ import {
   pairLocalListenerAfterLogin,
 } from "./services/localListenerService";
 
+// Lazy-loaded page components — only downloaded when the user navigates to them.
+// This reduces the initial bundle size for faster first page load.
 const AdminUsers = lazy(() => import("./pages/AdminUsers"));
 const EditProfile = lazy(() => import("./pages/EditProfile"));
 const LapPerformanceAnalysis = lazy(() => import("./pages/LapPerformanceAnalysis"));
@@ -24,6 +40,10 @@ const RecommendedSetups = lazy(() => import("./pages/RecommendedSetups"));
 const SessionDetails = lazy(() => import("./pages/SessionDetails"));
 const TrackCalibration = lazy(() => import("./pages/TrackCalibration"));
 
+/**
+ * Retrieves the stored user object from localStorage.
+ * Supports both the current format (JSON object) and a legacy format (just username string).
+ */
 function getStoredUser() {
   try {
     const storedUser = localStorage.getItem("f1User");
@@ -38,10 +58,14 @@ function getStoredUser() {
   }
 }
 
+/**
+ * Checks if a user object has admin privileges.
+ */
 function isAdminUser(user) {
   return user?.isAdmin === true || user?.role === "admin";
 }
 
+/** Route guard: redirects to /login if the user is not authenticated. */
 const ProtectedRoute = ({ user, children }) => {
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -50,6 +74,7 @@ const ProtectedRoute = ({ user, children }) => {
   return children;
 };
 
+/** Route guard: requires both authentication AND admin role. */
 const AdminRoute = ({ user, children }) => {
   if (!user) {
     return <Navigate to="/login" replace />;
@@ -62,6 +87,7 @@ const AdminRoute = ({ user, children }) => {
   return children;
 };
 
+/** Fallback UI shown while a lazy-loaded page component is downloading. */
 function RouteLoading() {
   return (
     <div className="card route-loading-card">
@@ -70,6 +96,10 @@ function RouteLoading() {
   );
 }
 
+/**
+ * Renders all application routes with page transition animation.
+ * Uses React Router's useLocation for route-based key changes.
+ */
 const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
   const location = useLocation();
   const routeKey = `${location.pathname}${location.search}`;
@@ -145,6 +175,15 @@ const AnimatedAppRoutes = ({ user, sessionId, handleLogin, username }) => {
   );
 };
 
+/**
+ * Root App component. Manages global auth state and listener pairing.
+ * 
+ * On login: saves user to localStorage and continuously attempts to pair
+ * with the local Python listener (retries every 3-10s).
+ * 
+ * On logout: notifies the local listener to unpair, signs out of Firebase,
+ * and clears all stored credentials.
+ */
 export default function App() {
   const [user, setUser] = useState(getStoredUser);
   const username = user?.username || null;
